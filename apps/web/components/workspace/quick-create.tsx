@@ -16,7 +16,9 @@ export function QuickCreate() {
   const router = useRouter();
   return (
     <Dropdown menu={{ items, onClick: ({ key }) => router.push(key) }} placement="bottomRight" trigger={['click']}>
-      <Button type="primary" icon={<PlusOutlined />} className="!rounded-full">Create</Button>
+      <Button type="primary" icon={<PlusOutlined />} className="!rounded-full">
+        <span className="hidden sm:inline">Create</span>
+      </Button>
     </Dropdown>
   );
 }

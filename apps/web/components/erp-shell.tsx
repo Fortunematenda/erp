@@ -1,12 +1,12 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Avatar, Button, ColorPicker, Dropdown, Layout, Menu, Popover, Select, Space, Typography } from 'antd';
+import { Avatar, Button, ColorPicker, Drawer, Dropdown, Grid, Layout, Menu, Popover, Select, Space, Typography } from 'antd';
 import {
   AccountBookOutlined, ApartmentOutlined, AppstoreOutlined, AuditOutlined, BankOutlined, BarChartOutlined, BulbOutlined,
   BarsOutlined, BgColorsOutlined, BookOutlined, CalculatorOutlined, CalendarOutlined, CloudServerOutlined,
   ContactsOutlined, ControlOutlined, DashboardOutlined, DollarOutlined, FileDoneOutlined, FileTextOutlined, LogoutOutlined, CreditCardOutlined,
   CarOutlined,
-  MenuFoldOutlined, MenuUnfoldOutlined, PercentageOutlined, PrinterOutlined, ProfileOutlined, RightOutlined, SafetyCertificateOutlined,
+  MenuFoldOutlined, MenuOutlined, MenuUnfoldOutlined, PercentageOutlined, PrinterOutlined, ProfileOutlined, RightOutlined, SafetyCertificateOutlined,
   SettingOutlined, ShopOutlined, ShoppingCartOutlined, SolutionOutlined, SwapOutlined, TeamOutlined, ToolOutlined,
   UndoOutlined, UserOutlined, WalletOutlined, ApiOutlined, CheckOutlined, MailOutlined, AimOutlined,
 } from '@ant-design/icons';
@@ -238,22 +238,33 @@ function loadTheme(userId?: string): SidebarTheme {
   return DEFAULT_THEME;
 }
 
-function buildMenuItems(nav: any[], onOpen: (item: any) => void, onClose: () => void) {
+function buildMenuItems(nav: any[], onOpen: (item: any) => void, onClose: () => void, mobile = false) {
   return nav.map((group: any) => ({
     type: 'group' as const,
     label: <span className="nex-section-label !p-0">{group.label}</span>,
     children: group.children.map((item: any) =>
       item.children
-        ? {
-            key: 'flyout-' + item.key,
-            label: (
-              <span onMouseEnter={() => onOpen(item)} onMouseLeave={onClose} className="flex items-center justify-between gap-2">
-                <span>{item.label}</span>
-                <RightOutlined className="text-[10px] opacity-50" />
-              </span>
-            ),
-            icon: <span onMouseEnter={() => onOpen(item)} onMouseLeave={onClose}>{item.icon}</span>,
-          }
+        ? mobile
+          ? {
+              key: 'sub-' + item.key,
+              label: item.label,
+              icon: item.icon,
+              children: item.children.map((child: any) => ({
+                key: child.key,
+                label: child.label,
+                icon: PAGE_ICONS[child.key] || <RightOutlined />,
+              })),
+            }
+          : {
+              key: 'flyout-' + item.key,
+              label: (
+                <span onMouseEnter={() => onOpen(item)} onMouseLeave={onClose} className="flex items-center justify-between gap-2">
+                  <span>{item.label}</span>
+                  <RightOutlined className="text-[10px] opacity-50" />
+                </span>
+              ),
+              icon: <span onMouseEnter={() => onOpen(item)} onMouseLeave={onClose}>{item.icon}</span>,
+            }
         : { key: item.key, label: <span>{item.label}</span>, icon: item.icon },
     ),
   }));
@@ -262,8 +273,11 @@ function buildMenuItems(nav: any[], onOpen: (item: any) => void, onClose: () => 
 export function ErpShell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
+  const screens = Grid.useBreakpoint();
+  const isMobile = !screens.md;
   const { token, user, companies, activeCompanyId, setSession, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [activeQuery, setActiveQuery] = useState('');
   const [quickOpen, setQuickOpen] = useState(false);
   const [flyout, setFlyout] = useState<any | null>(null);
@@ -271,6 +285,12 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
   const [flyoutPointerTop, setFlyoutPointerTop] = useState(28);
   const flyoutTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sidebarTheme, setSidebarTheme] = useState<SidebarTheme>(() => loadTheme(user?.id));
+
+  useEffect(() => {
+    if (!isMobile) setMobileNavOpen(false);
+    else closeFlyout();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMobile]);
 
   const FLYOUT_TOP = 64;
   const FLYOUT_BOTTOM = 16;
@@ -340,6 +360,7 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
 
   function go(key: string) {
     closeFlyout();
+    setMobileNavOpen(false);
     setActiveQuery(key.includes('?') ? key.slice(key.indexOf('?')) : '');
     router.push(key);
   }
@@ -364,7 +385,10 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
   const activeFlyoutItem = nav
     .flatMap((g: any) => g.children)
     .find((item: any) => item.children && fullPath.startsWith(item.key));
-  const selectedKeys = [...selected, ...(activeFlyoutItem ? [`flyout-${activeFlyoutItem.key}`] : [])];
+  const selectedKeys = [
+    ...selected,
+    ...(activeFlyoutItem ? [isMobile ? `sub-${activeFlyoutItem.key}` : `flyout-${activeFlyoutItem.key}`] : []),
+  ];
 
   const userMenu = {
     items: [
@@ -417,15 +441,15 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
   );
 
   const quickAccessPanel = (
-    <div className="w-[540px]">
+    <div className="w-[min(540px,92vw)]">
       <div className="font-bold text-[15px]">Workspace modules</div>
       <div className="text-[12px] text-[#8a90ad] mb-4">Jump straight into any part of your ERP</div>
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
         {QUICK_MODULES.map((m) => (
           <button
             key={m.key}
             onClick={() => { setQuickOpen(false); router.push(m.key); }}
-            className="group flex flex-col items-start gap-4 rounded-2xl border border-[#edf0f6] bg-[#fbfcff] px-7 py-9 shadow-[0_2px_8px_rgba(23,26,46,0.04)] hover:bg-white hover:border-[#dde5f2] hover:shadow-[0_10px_24px_rgba(23,26,46,0.08)] hover:-translate-y-0.5 transition-all duration-200 cursor-pointer text-left"
+            className="group flex flex-col items-start gap-3 sm:gap-4 rounded-2xl border border-[#edf0f6] bg-[#fbfcff] px-4 py-5 sm:px-7 sm:py-9 shadow-[0_2px_8px_rgba(23,26,46,0.04)] hover:bg-white hover:border-[#dde5f2] hover:shadow-[0_10px_24px_rgba(23,26,46,0.08)] hover:-translate-y-0.5 transition-all duration-200 cursor-pointer text-left"
           >
             <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-base transition-transform duration-200 group-hover:scale-110" style={{ background: m.color, boxShadow: `0 6px 14px ${m.color}66` }}>{m.icon}</div>
             <span className="font-semibold text-[13px] text-[#171a2e] leading-snug">{m.label}</span>
@@ -435,128 +459,168 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
     </div>
   );
 
+  const sidebarBrand = (
+    <div className={`h-[72px] flex items-center gap-3 px-5 shrink-0 ${!isMobile && collapsed ? 'justify-center px-0' : ''}`}>
+      <div className="w-10 h-10 rounded-2xl brand-gradient flex items-center justify-center text-white text-lg shrink-0" style={{ boxShadow: '0 6px 16px rgba(0,51,102,0.26)' }}>
+        <ApartmentOutlined />
+      </div>
+      {(isMobile || !collapsed) && (
+        <div className="leading-tight">
+          <div className="nex-sidebar-logo-title font-bold text-[15.5px] tracking-tight">NexusERP</div>
+          <div className="nex-sidebar-logo-sub text-[11px] font-medium mt-0.5">Cloud Suite</div>
+        </div>
+      )}
+    </div>
+  );
+
+  const sidebarMenu = (
+    <Menu
+      mode="inline"
+      inlineCollapsed={!isMobile && collapsed}
+      selectedKeys={selectedKeys}
+      defaultOpenKeys={isMobile ? selected.map((k: string) => {
+        const parent = nav.flatMap((g: any) => g.children).find((item: any) => item.children?.some((c: any) => k.startsWith(c.key) || k === c.key));
+        return parent ? `sub-${parent.key}` : null;
+      }).filter(Boolean) as string[] : undefined}
+      items={buildMenuItems(nav, openFlyout, scheduleClose, isMobile)}
+      onClick={({ key }) => {
+        if (key.startsWith('sub-') || key.startsWith('flyout-')) {
+          if (key.startsWith('flyout-')) go(key.slice('flyout-'.length));
+          return;
+        }
+        go(key);
+      }}
+      style={{ background: 'transparent', borderInlineEnd: 'none', paddingTop: 4 }}
+      className="!border-e-0 nex-sidebar-menu"
+    />
+  );
+
+  const sidebarCustomize = (isMobile || !collapsed) && (
+    <div className="p-4 shrink-0 border-t" style={{ borderColor: isLight ? 'rgba(15,23,42,0.08)' : 'rgba(255,255,255,0.14)' }}>
+      <Popover content={customizePanel} trigger="click" placement={isMobile ? 'top' : 'rightTop'}>
+        <Button
+          block
+          icon={<BgColorsOutlined />}
+          className="!rounded-xl"
+          style={{ background: 'transparent', color: 'var(--sidebar-text)', borderColor: isLight ? 'rgba(15,23,42,0.2)' : 'rgba(255,255,255,0.25)' }}
+        >
+          Customize sidebar
+        </Button>
+      </Popover>
+    </div>
+  );
+
   return (
     <Layout className="min-h-screen">
-      <Sider
-        width={252}
-        collapsible
-        collapsed={collapsed}
-        onCollapse={setCollapsed}
-        trigger={null}
-        theme={isLight ? 'light' : 'dark'}
-        className="nex-sidebar !fixed left-0 top-0 bottom-0 z-20 overflow-hidden !border-r !border-[#eef0f6]"
-        style={{ background: sidebarTheme.bg, ...sidebarVars }}
-      >
-        <div className={`h-[72px] flex items-center gap-3 px-5 shrink-0 ${collapsed ? 'justify-center px-0' : ''}`}>
-          <div className="w-10 h-10 rounded-2xl brand-gradient flex items-center justify-center text-white text-lg shrink-0" style={{ boxShadow: '0 6px 16px rgba(0,51,102,0.26)' }}>
-            <ApartmentOutlined />
-          </div>
-          {!collapsed && (
-            <div className="leading-tight">
-              <div className="nex-sidebar-logo-title font-bold text-[15.5px] tracking-tight">NexusERP</div>
-              <div className="nex-sidebar-logo-sub text-[11px] font-medium mt-0.5">Cloud Suite</div>
-            </div>
-          )}
-        </div>
+      {!isMobile && (
+        <Sider
+          width={252}
+          collapsible
+          collapsed={collapsed}
+          onCollapse={setCollapsed}
+          trigger={null}
+          theme={isLight ? 'light' : 'dark'}
+          className="nex-sidebar !fixed left-0 top-0 bottom-0 z-20 overflow-hidden !border-r !border-[#eef0f6]"
+          style={{ background: sidebarTheme.bg, ...sidebarVars }}
+        >
+          {sidebarBrand}
+          {sidebarMenu}
+          {sidebarCustomize}
 
-        <Menu
-          mode="inline"
-          inlineCollapsed={collapsed}
-          selectedKeys={selectedKeys}
-          items={buildMenuItems(nav, openFlyout, scheduleClose)}
-          onClick={({ key }) => go(key.startsWith('flyout-') ? key.slice('flyout-'.length) : key)}
-          style={{ background: 'transparent', borderInlineEnd: 'none', paddingTop: 4 }}
-          className="!border-e-0"
-        />
-
-        {!collapsed && (
-          <div className="p-4 shrink-0 border-t" style={{ borderColor: isLight ? 'rgba(15,23,42,0.08)' : 'rgba(255,255,255,0.14)' }}>
-            <Popover content={customizePanel} trigger="click" placement="rightTop">
-              <Button
-                block
-                icon={<BgColorsOutlined />}
-                className="!rounded-xl"
-                style={{ background: 'transparent', color: 'var(--sidebar-text)', borderColor: isLight ? 'rgba(15,23,42,0.2)' : 'rgba(255,255,255,0.25)' }}
-              >
-                Customize sidebar
-              </Button>
-            </Popover>
-          </div>
-        )}
-
-        {flyout && (
-          <>
-            <div
-              className="fixed inset-y-0 right-0 z-30"
-              style={{ left: collapsed ? 92 : 264, background: 'rgba(11,20,55,0.04)' }}
-              onClick={closeFlyout}
-            />
-            <div
-              className="fixed top-[64px] bottom-[16px] z-40 w-[240px]"
-              style={{ left: collapsed ? 92 : 264 }}
-              onMouseEnter={cancelClose}
-              onMouseLeave={scheduleClose}
-            >
-              <div className="absolute -left-[30px] top-0 bottom-0 w-[30px]" />
-              <span className="nex-flyout-pointer" style={{ top: flyoutPointerTop, borderRightColor: sidebarTheme.bg }} aria-hidden="true" />
+          {flyout && (
+            <>
               <div
-                className={`absolute inset-0 bg-white rounded-[18px] shadow-[0_20px_50px_rgba(15,23,42,0.16)] border border-[rgba(15,23,42,0.07)] flex flex-col overflow-hidden transition-[opacity,transform] duration-200 ease-out ${
-                  flyoutClosing ? 'opacity-0 translate-y-2 scale-[0.99]' : 'opacity-100 translate-y-0 scale-100'
-                }`}
+                className="fixed inset-y-0 right-0 z-30"
+                style={{ left: collapsed ? 92 : 264, background: 'rgba(11,20,55,0.04)' }}
+                onClick={closeFlyout}
+              />
+              <div
+                className="fixed top-[64px] bottom-[16px] z-40 w-[240px]"
+                style={{ left: collapsed ? 92 : 264 }}
+                onMouseEnter={cancelClose}
+                onMouseLeave={scheduleClose}
               >
-                <div className="h-[52px] shrink-0 flex items-center gap-2.5 px-4 border-b border-[rgba(15,23,42,0.06)]" style={{ background: sidebarTheme.bg }}>
-                <span className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-sm shrink-0" style={{ background: flyout.color }}>{flyout.icon}</span>
-                <span className="font-semibold text-[13px] truncate" style={{ color: sidebarTheme.text }}>{flyout.label}</span>
+                <div className="absolute -left-[30px] top-0 bottom-0 w-[30px]" />
+                <span className="nex-flyout-pointer" style={{ top: flyoutPointerTop, borderRightColor: sidebarTheme.bg }} aria-hidden="true" />
+                <div
+                  className={`absolute inset-0 bg-white rounded-[18px] shadow-[0_20px_50px_rgba(15,23,42,0.16)] border border-[rgba(15,23,42,0.07)] flex flex-col overflow-hidden transition-[opacity,transform] duration-200 ease-out ${
+                    flyoutClosing ? 'opacity-0 translate-y-2 scale-[0.99]' : 'opacity-100 translate-y-0 scale-100'
+                  }`}
+                >
+                  <div className="h-[52px] shrink-0 flex items-center gap-2.5 px-4 border-b border-[rgba(15,23,42,0.06)]" style={{ background: sidebarTheme.bg }}>
+                  <span className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-sm shrink-0" style={{ background: flyout.color }}>{flyout.icon}</span>
+                  <span className="font-semibold text-[13px] truncate" style={{ color: sidebarTheme.text }}>{flyout.label}</span>
+                </div>
+                <div className="flex-1 overflow-y-auto py-2 px-2">
+                  {flyout.children.map((child: any) => {
+                    const active = fullPath.startsWith(child.key);
+                    return (
+                      <button
+                        key={child.key}
+                        onClick={() => { closeFlyout(); go(child.key); }}
+                        className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 mb-0.5 text-left transition-all duration-200 cursor-pointer ${
+                          active ? 'bg-[#eef4fb]' : 'hover:bg-[#f5f7fb]'
+                        }`}
+                      >
+                        <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm shrink-0 ${active ? 'text-white brand-gradient' : 'text-[#003366] bg-[#eef4fb]'}`} style={active ? { boxShadow: '0 4px 10px rgba(0,51,102,0.3)' } : {}}>
+                          {PAGE_ICONS[child.key] || <RightOutlined />}
+                        </span>
+                        <span className={`flex-1 text-[13px] truncate ${active ? 'font-semibold text-[#003366]' : 'font-medium text-[#3c4263]'}`}>{child.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="shrink-0 border-t border-[rgba(15,23,42,0.06)] px-4 py-3 flex items-start gap-2 bg-[#fbfcff]">
+                  <BulbOutlined className="text-[12px] text-[#0ea5e9] mt-0.5" />
+                  <span className="text-[11.5px] text-[#64748b]" style={{ lineHeight: 1.5 }}>Tip: hover to preview, click a page to open it.</span>
+                </div>
+                </div>
               </div>
-              <div className="flex-1 overflow-y-auto py-2 px-2">
-                {flyout.children.map((child: any) => {
-                  const active = fullPath.startsWith(child.key);
-                  return (
-                    <button
-                      key={child.key}
-                      onClick={() => { closeFlyout(); go(child.key); }}
-                      className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 mb-0.5 text-left transition-all duration-200 cursor-pointer ${
-                        active ? 'bg-[#eef4fb]' : 'hover:bg-[#f5f7fb]'
-                      }`}
-                    >
-                      <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm shrink-0 ${active ? 'text-white brand-gradient' : 'text-[#003366] bg-[#eef4fb]'}`} style={active ? { boxShadow: '0 4px 10px rgba(0,51,102,0.3)' } : {}}>
-                        {PAGE_ICONS[child.key] || <RightOutlined />}
-                      </span>
-                      <span className={`flex-1 text-[13px] truncate ${active ? 'font-semibold text-[#003366]' : 'font-medium text-[#3c4263]'}`}>{child.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="shrink-0 border-t border-[rgba(15,23,42,0.06)] px-4 py-3 flex items-start gap-2 bg-[#fbfcff]">
-                <BulbOutlined className="text-[12px] text-[#0ea5e9] mt-0.5" />
-                <span className="text-[11.5px] text-[#64748b]" style={{ lineHeight: 1.5 }}>Tip: hover to preview, click a page to open it.</span>
-              </div>
-              </div>
-            </div>
-          </>
-        )}
-      </Sider>
+            </>
+          )}
+        </Sider>
+      )}
 
-      <Layout className={`transition-all duration-200 ${collapsed ? 'ml-[80px]' : 'ml-[252px]'}`}>
+      {isMobile && (
+        <Drawer
+          placement="left"
+          width={292}
+          open={mobileNavOpen}
+          onClose={() => setMobileNavOpen(false)}
+          styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', background: sidebarTheme.bg, ...sidebarVars as any }, header: { display: 'none' } }}
+          className="nex-mobile-nav-drawer"
+          destroyOnClose={false}
+        >
+          <div className="nex-sidebar flex flex-col h-full overflow-hidden" style={{ background: sidebarTheme.bg, ...sidebarVars }}>
+            {sidebarBrand}
+            <div className="flex-1 overflow-y-auto">{sidebarMenu}</div>
+            {sidebarCustomize}
+          </div>
+        </Drawer>
+      )}
+
+      <Layout className={`transition-all duration-200 ${isMobile ? 'ml-0' : collapsed ? 'ml-[80px]' : 'ml-[252px]'}`}>
         <Header
-          className="!bg-white/85 backdrop-blur !px-6 flex items-center justify-between sticky top-0 z-10"
+          className="nex-app-header !bg-white/85 backdrop-blur !px-3 sm:!px-6 flex items-center justify-between gap-2 sticky top-0 z-10"
           style={{ height: 68, borderBottom: '1px solid rgba(15,23,42,0.06)', boxShadow: '0 1px 2px rgba(15,23,42,0.03)' }}
         >
-          <Space size="middle">
+          <Space size={isMobile ? 'small' : 'middle'} className="min-w-0">
             <Button
               type="text"
-              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-              onClick={() => setCollapsed(!collapsed)}
-              className="!rounded-lg hover:!bg-[#eef2f9]"
+              icon={isMobile ? <MenuOutlined /> : collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              onClick={() => (isMobile ? setMobileNavOpen(true) : setCollapsed(!collapsed))}
+              className="!rounded-lg hover:!bg-[#eef2f9] shrink-0"
+              aria-label={isMobile ? 'Open navigation' : 'Toggle sidebar'}
             />
-            <div className="leading-tight pl-1">
-              <Typography.Text strong className="!text-[16px] !text-[#171a2e]">{title}</Typography.Text>
-              <div className="mt-0.5"><Typography.Text type="secondary" style={{ fontSize: 12, color: '#64748b' }}>{subtitle}</Typography.Text></div>
+            <div className="leading-tight pl-0.5 min-w-0">
+              <Typography.Text strong className="!text-[15px] sm:!text-[16px] !text-[#171a2e] !block truncate max-w-[42vw] sm:max-w-none">{title}</Typography.Text>
+              <div className="mt-0.5 hidden sm:block"><Typography.Text type="secondary" style={{ fontSize: 12, color: '#64748b' }}>{subtitle}</Typography.Text></div>
             </div>
           </Space>
 
-          <Space size="middle">
-            <GlobalSearch navigation={flatNav} />
+          <Space size={isMobile ? 4 : 'middle'} className="shrink-0" wrap={false}>
+            <span className="hidden md:inline-flex"><GlobalSearch navigation={flatNav} /></span>
+            <span className="inline-flex md:hidden"><GlobalSearch navigation={flatNav} compact /></span>
             <QuickCreate />
             <ActionCenter />
 
@@ -568,6 +632,7 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
 
             <Select
               className="nex-header-company"
+              popupMatchSelectWidth={false}
               defaultValue={activeCompanyId || companies[0]?.id}
               options={companies.map((c) => ({ label: c.name, value: c.id }))}
               onChange={switchCompany}
@@ -575,7 +640,7 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
 
             <Dropdown menu={userMenu} placement="bottomRight">
               <Space className="cursor-pointer hover:opacity-85 transition-opacity gap-2.5">
-                <Avatar size={40} className="nex-header-avatar">{user?.name?.[0] || 'U'}</Avatar>
+                <Avatar size={isMobile ? 36 : 40} className="nex-header-avatar">{user?.name?.[0] || 'U'}</Avatar>
                 <span className="hidden lg:inline font-medium text-[13px] text-[#3c4263]">{user?.name}</span>
               </Space>
             </Dropdown>
@@ -583,7 +648,7 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
         </Header>
 
         <Content className="min-h-[calc(100vh-68px)]">
-          <div className="p-6 px-8 max-w-[1440px] mx-auto">{children}</div>
+          <div className="p-3 sm:p-6 sm:px-8 max-w-[1440px] mx-auto overflow-x-auto">{children}</div>
         </Content>
       </Layout>
     </Layout>

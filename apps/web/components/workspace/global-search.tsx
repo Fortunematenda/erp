@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AutoComplete, Tag } from 'antd';
+import { AutoComplete, Button, Drawer, Tag } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
@@ -9,13 +9,27 @@ export type NavigationSearchItem = { label: string; value: string };
 
 type Result = { id: string; type: string; title: string; subtitle?: string; href: string };
 
-export function GlobalSearch({ navigation }: { navigation: NavigationSearchItem[] }) {
+function SearchField({
+  navigation,
+  className,
+  popupWidth,
+  autoFocus,
+}: {
+  navigation: NavigationSearchItem[];
+  className?: string;
+  popupWidth?: number;
+  autoFocus?: boolean;
+}) {
   const router = useRouter();
   const [value, setValue] = useState('');
   const [remote, setRemote] = useState<Result[]>([]);
   const [loading, setLoading] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<React.ComponentRef<typeof AutoComplete>>(null);
+
+  useEffect(() => {
+    if (autoFocus) setTimeout(() => inputRef.current?.focus?.(), 80);
+  }, [autoFocus]);
 
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -64,12 +78,12 @@ export function GlobalSearch({ navigation }: { navigation: NavigationSearchItem[
   return (
     <AutoComplete
       ref={inputRef}
-      className="nex-global-search"
+      className={className || 'nex-global-search'}
       options={options}
       value={value}
       onChange={setValue}
       onSelect={(href) => { setValue(''); router.push(href); }}
-      popupMatchSelectWidth={390}
+      popupMatchSelectWidth={popupWidth ?? true}
       notFoundContent={value.trim().length >= 2 && !loading ? 'No matching records or pages' : null}
       filterOption={false}
       allowClear
@@ -78,4 +92,34 @@ export function GlobalSearch({ navigation }: { navigation: NavigationSearchItem[
       placeholder={loading ? 'Searching…' : 'Search customers, invoices, items…'}
     />
   );
+}
+
+export function GlobalSearch({ navigation, compact }: { navigation: NavigationSearchItem[]; compact?: boolean }) {
+  const [open, setOpen] = useState(false);
+
+  if (compact) {
+    return (
+      <>
+        <Button
+          type="text"
+          className="nex-notif-btn"
+          icon={<SearchOutlined />}
+          aria-label="Search"
+          onClick={() => setOpen(true)}
+        />
+        <Drawer
+          title="Search"
+          placement="top"
+          height="auto"
+          open={open}
+          onClose={() => setOpen(false)}
+          styles={{ body: { paddingTop: 8, paddingBottom: 20 } }}
+        >
+          <SearchField navigation={navigation} className="nex-global-search nex-global-search-mobile" autoFocus />
+        </Drawer>
+      </>
+    );
+  }
+
+  return <SearchField navigation={navigation} popupWidth={390} />;
 }
