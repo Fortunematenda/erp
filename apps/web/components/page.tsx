@@ -1,0 +1,2 @@
+import { Typography } from 'antd'; export function PageHeader({ title, subtitle, extra }: { title: string; subtitle?: string; extra?: React.ReactNode }) { return <div className="mb-7 flex flex-wrap gap-4 justify-between items-start"><div className="min-w-0"><Typography.Title level={2} className="!mb-1 !text-[26px] !font-semibold !text-[#171a2e]">{title}</Typography.Title>{subtitle && <Typography.Text className="!block !mt-1 !text-[13px]" style={{ color: '#64748b' }}>{subtitle}</Typography.Text>}</div>{extra}</div> }
+

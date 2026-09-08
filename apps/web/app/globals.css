@@ -1,0 +1,493 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------ */
+/* Login — keep browser-autofilled fields light (never a blue box)     */
+/* ------------------------------------------------------------------ */
+.nex-login input:-webkit-autofill,
+.nex-login .ant-input-affix-wrapper input:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;
+  -webkit-text-fill-color: #101828 !important;
+  transition: background-color 5000s ease-in-out 0s;
+  caret-color: #101828;
+}
+/* Login — subtle brand-blue focus ring (thinner than the global token) */
+.nex-login .ant-input,
+.nex-login .ant-input-affix-wrapper {
+  border-color: #d0d5dd;
+  background: #ffffff;
+}
+.nex-login .ant-input:focus,
+.nex-login .ant-input-focused,
+.nex-login .ant-input-affix-wrapper-focused,
+.nex-login .ant-input-affix-wrapper:focus-within {
+  border-color: #175cd3;
+  box-shadow: 0 0 0 3px rgba(23, 92, 211, 0.10) !important;
+}
+.nex-login .ant-input:hover,
+.nex-login .ant-input-affix-wrapper:hover {
+  border-color: #b3bac3;
+}
+
+/* Chart of Accounts filter toolbar — uniform 44px controls */
+.nex-coa-toolbar .ant-input-affix-wrapper,
+.nex-coa-toolbar .ant-select,
+.nex-coa-toolbar .ant-select-selector {
+  height: 44px !important;
+}
+.nex-coa-toolbar .ant-select .ant-select-selection-item,
+.nex-coa-toolbar .ant-select .ant-select-selection-placeholder {
+  line-height: 42px !important;
+}
+
+:root {
+  --background: #f6f7fb;
+  --foreground: #171a2e;
+  --primary: #003366;
+  --primary-dark: #00264d;
+  --brand-gradient: linear-gradient(135deg, #003366 0%, #0b4a8f 55%, #1d5fb5 100%);
+  --brand-soft: linear-gradient(135deg, #eef2ff 0%, #e8f0fa 100%);
+  --radius: 16px;
+  --border: rgba(15, 23, 42, 0.07);
+  --border-strong: rgba(15, 23, 42, 0.12);
+  --surface-subtle: #f7f8fc;
+  --text-muted: #64748b;
+  --text-faint: #94a3b8;
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.03), 0 8px 24px rgba(15, 23, 42, 0.05);
+  --shadow-card-hover: 0 14px 34px rgba(15, 23, 42, 0.10), 0 4px 12px rgba(15, 23, 42, 0.06);
+  --shadow-pop: 0 20px 56px rgba(15, 23, 42, 0.16);
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 520px at 100% 0%, rgba(0, 51, 102, 0.06), transparent 60%),
+    radial-gradient(1000px 420px at 0% 0%, rgba(29, 95, 181, 0.05), transparent 55%),
+    var(--background);
+  background-attachment: fixed;
+  color: var(--foreground);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+.glass { background: rgba(255, 255, 255, 0.88); backdrop-filter: blur(12px); }
+
+.brand-gradient { background-image: var(--brand-gradient); }
+.brand-text { background-image: var(--brand-gradient); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+.nex-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.nex-badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+.nex-badge-dotless::before { display: none; }
+.nex-badge-green   { color: #16a34a; background: #e9f8ef; border-color: #d3f0dd; }
+.nex-badge-blue    { color: #2563eb; background: #eaf1fe; border-color: #d9e6fd; }
+.nex-badge-cyan    { color: #0891b2; background: #e3f7fb; border-color: #cfeff6; }
+.nex-badge-indigo  { color: #4338ca; background: #eaeefe; border-color: #dce2fc; }
+.nex-badge-purple  { color: #7c3aed; background: #f2ecfe; border-color: #e6dbfc; }
+.nex-badge-teal    { color: #0d9488; background: #e3f7f4; border-color: #d2f0ec; }
+.nex-badge-amber   { color: #b45309; background: #fdf3e0; border-color: #fae8c8; }
+.nex-badge-red     { color: #dc2626; background: #fdeceb; border-color: #f9d9d7; }
+.nex-badge-pink    { color: #db2777; background: #fdecf5; border-color: #f8d8e9; }
+.nex-badge-grey    { color: #5f6473; background: #f2f3f6; border-color: #e6e8ee; }
+
+.nex-card {
+  background: #fff;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+  transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+}
+.nex-card-hover:hover {
+  box-shadow: var(--shadow-card-hover);
+  transform: translateY(-3px);
+  border-color: var(--border-strong);
+}
+
+.nex-stat {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: #fff;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+  padding: 22px 24px;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.nex-stat::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background-image: var(--brand-gradient);
+  opacity: 0.9;
+}
+.nex-stat-icon {
+  width: 46px; height: 46px;
+  border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; color: #fff;
+  background-image: var(--brand-gradient);
+  box-shadow: 0 6px 16px rgba(0, 51, 102, 0.28);
+}
+
+/* antd table polish */
+.ant-table { border-radius: var(--radius) !important; }
+.ant-table-thead > tr > th {
+  background: var(--surface-subtle) !important;
+  color: #475060 !important;
+  font-size: 12px !important;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid var(--border) !important;
+}
+.ant-table-tbody > tr > td {
+  border-bottom: 1px solid rgba(15, 23, 42, 0.05) !important;
+  padding: 13px 16px !important;
+  transition: background 0.15s ease;
+}
+.ant-table-tbody > tr:hover > td { background: #f8faff !important; }
+
+/* custom scrollbar */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d4d8e6; border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: #b7bdd6; }
+
+/* subtle page fade-in */
+@keyframes nexFadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.nex-fade { animation: nexFadeUp 0.28s ease both; }
+
+/* ---------- Sidebar (user-customisable) ---------- */
+.nex-sidebar {
+  --sidebar-bg: #003366;
+  --sidebar-text: #ffffff;
+  --sidebar-text-muted: rgba(255, 255, 255, 0.62);
+  --sidebar-hover: rgba(255, 255, 255, 0.12);
+  overflow-x: hidden;
+}
+.nex-sidebar .ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.nex-sidebar .ant-menu {
+  background: transparent !important;
+  border-inline-end: none !important;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.nex-sidebar .ant-menu:hover {
+  scrollbar-color: rgba(255, 255, 255, 0.35) transparent;
+}
+.nex-sidebar .ant-menu::-webkit-scrollbar { width: 6px; height: 6px; }
+.nex-sidebar .ant-menu::-webkit-scrollbar-track { background: transparent; }
+.nex-sidebar .ant-menu::-webkit-scrollbar-thumb { background: transparent; border-radius: 8px; }
+.nex-sidebar .ant-menu:hover::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.35); }
+.nex-sidebar .ant-menu-item {
+  color: var(--sidebar-text) !important;
+  border-radius: 12px !important;
+  margin: 3px 12px !important;
+  padding-inline: 12px !important;
+  height: 44px !important;
+  line-height: 44px !important;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+.nex-sidebar .ant-menu-item:hover {
+  background: var(--sidebar-hover) !important;
+  color: var(--sidebar-text) !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+.nex-sidebar .ant-menu-item-selected,
+.nex-sidebar .ant-menu-item-selected:hover {
+  background-image: var(--brand-gradient) !important;
+  color: #fff !important;
+  box-shadow: 0 8px 18px rgba(0, 51, 102, 0.30);
+}
+.nex-sidebar .ant-menu-item-selected .anticon { color: #fff !important; }
+.nex-sidebar .ant-menu-submenu-title {
+  color: var(--sidebar-text) !important;
+  border-radius: 12px !important;
+  margin: 3px 12px !important;
+  padding-inline: 12px !important;
+  height: 44px !important;
+  line-height: 44px !important;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+.nex-sidebar .ant-menu-submenu-title:hover {
+  background: var(--sidebar-hover) !important;
+  color: var(--sidebar-text) !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+.nex-sidebar .ant-menu-submenu-arrow { color: var(--sidebar-text) !important; }
+.nex-sidebar .ant-menu-submenu-open > .ant-menu-submenu-title {
+  background: var(--sidebar-hover) !important;
+}
+.nex-sidebar .ant-menu-sub { background: transparent !important; }
+.nex-sidebar .ant-menu-inline-collapsed .ant-menu-item,
+.nex-sidebar .ant-menu-inline-collapsed .ant-menu-submenu-title { margin-inline: 12px !important; padding-inline: 0 !important; }
+
+.nex-section-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--sidebar-text-muted);
+  padding: 18px 22px 8px;
+}
+
+.nex-sidebar-logo-title { color: var(--sidebar-text); }
+.nex-sidebar-logo-sub { color: var(--sidebar-text-muted); }
+
+/* Flyout submenu pointer (parent-meun notch on the left edge of the submenu). */
+.nex-flyout-pointer {
+  position: absolute;
+  left: -9px;
+  width: 0;
+  height: 0;
+  border-top: 8px solid transparent;
+  border-bottom: 8px solid transparent;
+  border-right: 9px solid #003366;
+  pointer-events: none;
+  z-index: 41;
+}
+
+/* submenu popups (collapsed mode) */
+.ant-menu-submenu-popup .ant-menu {
+  border-radius: 14px !important;
+  padding: 8px !important;
+  box-shadow: var(--shadow-pop) !important;
+}
+.ant-menu-submenu-popup .ant-menu-item {
+  border-radius: 10px !important;
+  margin: 2px 4px !important;
+}
+
+/* antd focus glow */
+.ant-input:focus, .ant-input-focused,
+.ant-input-affix-wrapper:focus,
+.ant-input-affix-wrapper-focused,
+.ant-select:focus .ant-select-selector,
+.ant-select-focused .ant-select-selector,
+.ant-input-number-focused,
+.ant-picker-focused { box-shadow: 0 0 0 4px rgba(0, 51, 102, 0.10) !important; }
+
+/* soft antd controls */
+.ant-btn {
+  border-radius: 10px !important;
+  font-weight: 500;
+  transition: all 0.2s ease !important;
+}
+.ant-btn-primary {
+  box-shadow: 0 4px 12px rgba(0, 51, 102, 0.16);
+}
+.ant-btn-primary:hover {
+  box-shadow: 0 6px 18px rgba(0, 51, 102, 0.28);
+  transform: translateY(-1px);
+}
+.ant-input, .ant-input-affix-wrapper, .ant-input-number, .ant-picker {
+  border-radius: 10px !important;
+  border-color: var(--border) !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+.ant-input:hover, .ant-input-affix-wrapper:hover, .ant-input-number:hover, .ant-picker:hover {
+  border-color: var(--border-strong) !important;
+}
+.ant-select .ant-select-selector {
+  border-radius: 10px !important;
+  border-color: var(--border) !important;
+  transition: border-color 0.2s ease !important;
+}
+.ant-select:not(.ant-select-disabled):hover .ant-select-selector { border-color: var(--border-strong) !important; }
+
+/* soft antd surfaces */
+.ant-popover-inner {
+  border-radius: 18px !important;
+  padding: 18px !important;
+  box-shadow: var(--shadow-pop) !important;
+  border: 1px solid var(--border);
+}
+.ant-modal-content { border-radius: 20px !important; }
+.ant-modal-header { border-radius: 20px 20px 0 0 !important; }
+.ant-dropdown-menu { border-radius: 14px !important; padding: 6px !important; box-shadow: var(--shadow-pop) !important; border: 1px solid var(--border); }
+.ant-dropdown-menu-item { border-radius: 10px !important; }
+.ant-select-dropdown { border-radius: 14px !important; box-shadow: var(--shadow-pop) !important; border: 1px solid var(--border); }
+.ant-picker-dropdown .ant-picker-panel { border-radius: 14px !important; }
+.ant-table-wrapper .ant-table { border-radius: 14px; }
+.ant-table-wrapper .ant-table-thead > tr > th { background: var(--surface-subtle) !important; }
+
+/* Customer Details page: left spacing for the tabs row only (not the content).
+   Keeps the active underline, spacing and typography; content stays aligned. */
+.customer-detail-tabs .ant-tabs-nav { padding-left: 12px; }
+@media (min-width: 640px) {
+  .customer-detail-tabs .ant-tabs-nav { padding-left: 20px; }
+}
+@media (min-width: 1024px) {
+  .customer-detail-tabs .ant-tabs-nav { padding-left: 28px; }
+}
+
+/* ---------- Top header controls (scoped — Quick Access, Company, Avatar, Notification) ---------- */
+.nex-quick-access-btn.ant-btn {
+  background: #ffffff;
+  color: #003366;
+  border: 1.5px solid #003366;
+  border-radius: 12px;
+  height: 48px;
+  padding: 0 22px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  transition: all 0.16s ease;
+}
+.nex-quick-access-btn.ant-btn .anticon { color: #003366; font-size: 17px; transition: color 0.16s ease; }
+.nex-quick-access-btn.ant-btn:hover { background: #f4f8fc; color: #003366; border-color: #003366; box-shadow: 0 3px 10px rgba(0, 51, 102, 0.08); }
+.nex-quick-access-btn.ant-btn:active { background: #003366; color: #ffffff; }
+.nex-quick-access-btn.ant-btn:active .anticon { color: #ffffff; }
+.nex-quick-access-btn.ant-btn:focus-visible { outline: 2px solid #003366; outline-offset: 2px; }
+
+.nex-notif-btn.ant-btn {
+  width: 40px; height: 40px; padding: 0; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #1f2937; transition: all 0.16s ease;
+}
+.nex-notif-btn.ant-btn:hover { background: #f5f7fa; color: #003366; }
+.nex-notif-btn.ant-btn:focus-visible { outline: 2px solid #003366; outline-offset: 2px; }
+.nex-notif-btn .ant-badge .anticon { font-size: 19px; }
+
+.nex-header-avatar.ant-avatar { background: #ffffff; color: #003366; border: 2px solid #003366; font-weight: 600; transition: background 0.16s ease; }
+.nex-header-avatar.ant-avatar:hover { background: #f4f8fc; }
+
+.nex-global-search.ant-select { width: 310px; }
+.nex-global-search.ant-select .ant-select-selector {
+  height: 40px !important; background: #f4f6fb !important; border: 1px solid #e9edf5 !important;
+  border-radius: 999px !important; padding-inline-start: 14px !important;
+  box-shadow: none !important;
+}
+.nex-global-search.ant-select .ant-select-selection-search { inset-inline-start: 14px !important; }
+.nex-global-search.ant-select .ant-select-selection-placeholder,
+.nex-global-search.ant-select .ant-select-selection-item { line-height: 38px; }
+.nex-global-search.ant-select:hover .ant-select-selector { border-color: #dbe1ec !important; }
+.nex-global-search.ant-select-focused .ant-select-selector,
+.nex-global-search.ant-select-open .ant-select-selector {
+  border-color: #003366 !important; box-shadow: 0 0 0 3px rgba(0, 51, 102, 0.18) !important;
+}
+
+.nex-header-company.ant-select { min-width: 190px; }
+.nex-header-company.ant-select .ant-select-selector {
+  height: 48px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px;
+  box-shadow: none; transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.nex-header-company.ant-select .ant-select-selection-item { line-height: 46px; font-size: 15px; font-weight: 500; color: #1f2937; }
+.nex-header-company.ant-select .ant-select-arrow { color: #94a3b8; transition: color 0.16s ease, transform 0.16s ease; }
+.nex-header-company.ant-select:hover .ant-select-selector { border-color: rgba(0, 51, 102, 0.35); }
+.nex-header-company.ant-select:hover .ant-select-arrow { color: #003366; }
+.nex-header-company.ant-select-open .ant-select-selector { border-color: #003366; box-shadow: 0 0 0 2px rgba(0, 51, 102, 0.12); }
+.nex-header-company.ant-select-open .ant-select-arrow { color: #003366; transform: rotate(180deg); }
+.nex-header-company .ant-select-dropdown .ant-select-item-option-selected { background: #eef4fb; color: #003366; font-weight: 600; }
+
+/* ---------- Dashboard feature slider ---------- */
+.nex-slide-in { animation: nexusSlideIn 0.45s ease; }
+@keyframes nexusSlideIn { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
+.nex-slider-arrow {
+  position: absolute; top: 120px; width: 30px; height: 30px; border-radius: 50%;
+  background: rgba(255,255,255,0.92); border: 1px solid #eef0f6; color: #003366;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 5;
+  box-shadow: 0 2px 8px rgba(15,23,42,0.06); transition: all 0.16s ease; font-size: 12px; padding: 0;
+}
+.nex-slider-arrow:hover { background: #f4f8fc; border-color: rgba(0,51,102,0.35); color: #003366; }
+.nex-slider-arrow:focus-visible { outline: 2px solid #003366; outline-offset: 2px; }
+.nex-slider-arrow-left { left: -8px; }
+.nex-slider-arrow-right { right: -8px; }
+.nex-slider-dots { position: absolute; left: 0; right: 0; bottom: -16px; display: flex; justify-content: center; gap: 8px; }
+.nex-slider-dot { width: 8px; height: 8px; border-radius: 50%; background: #d4d8e6; border: none; cursor: pointer; padding: 0; transition: all 0.16s ease; }
+.nex-slider-dot:hover { background: #94a3b8; }
+.nex-slider-dot.active { background: #003366; }
+
+/* ---------- Dashboard ERP process map ---------- */
+.nex-process-section { border: 1px solid #eef0f6; border-radius: 14px; background: #fff; padding: 12px 14px; }
+.nex-process-flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.nex-process-flow.nex-process-flow-v { flex-direction: column; align-items: stretch; }
+/* Keep each section's flow on one line on desktop/laptop; allow wrap on smaller screens. */
+@media (min-width: 1200px) {
+  .nex-process-flow:not(.nex-process-flow-v) { flex-wrap: nowrap; }
+}
+.nex-process-node {
+  display: inline-flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 8px 10px;
+  border: 1px solid #eef0f6; border-radius: 10px; background: #fff; min-width: 96px; max-width: 132px;
+  white-space: nowrap; transition: all 0.16s ease;
+}
+.nex-process-node:hover { border-color: rgba(0,51,102,0.25); box-shadow: 0 4px 12px rgba(15,23,42,0.07); transform: translateY(-1px); }
+.nex-process-node-label { overflow: hidden; text-overflow: ellipsis; }
+.nex-accounting-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+
+/* Sales process flow: nodes stacked vertically (compact 10px breathing space), animated
+   connectors in a single column on the LEFT side of the nodes. */
+.nex-sales-flow { display: flex; flex-direction: column; gap: 10px; }
+.nex-sales-row { display: grid; grid-template-columns: 26px 1fr; column-gap: 10px; align-items: center; }
+.nex-sales-row .nex-process-node { grid-column: 2; justify-self: start; }
+.nex-sales-row .flow-arrow-v { grid-column: 1; align-self: center; height: 28px; justify-content: flex-end; }
+.nex-sales-row .flow-arrow-v .flow-dash-v { flex: 1; height: auto; min-height: 12px; }
+
+.flow-arrow-h { display: inline-flex; align-items: center; gap: 6px; flex: 0 1 26px; min-width: 22px; max-width: 52px; }
+.flow-arrow-v { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.flow-dash-h { flex: 1; min-width: 14px; height: 2px; background: repeating-linear-gradient(to right, currentColor 0 5px, transparent 5px 10px); animation: nexFlowH 1s linear infinite; }
+.flow-dash-v { width: 2px; height: 28px; background: repeating-linear-gradient(to bottom, currentColor 0 6px, transparent 6px 12px); animation: nexFlowV 1s linear infinite; }
+@keyframes nexFlowH { to { background-position: 20px 0; } }
+@keyframes nexFlowV { to { background-position: 0 24px; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .nex-slide-in, .flow-dash-h, .flow-dash-v { animation: none !important; }
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Print — hide app chrome, keep only the payslip document             */
+/* ------------------------------------------------------------------ */
+@media print {
+  body * { visibility: hidden; }
+  #payslip-print, #payslip-print * { visibility: visible; }
+  #payslip-print { position: absolute; left: 0; top: 0; width: 100%; border: none !important; }
+  #payslip-print .print-note { display: none !important; }
+  #payslip-print .ant-drawer-close, .ant-drawer-header, .ant-drawer-extra, .ant-drawer-footer { display: none !important; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Print — Reports & BI printable report sheet                         */
+/* ------------------------------------------------------------------ */
+@media print {
+  body.report-print * { visibility: hidden; }
+  body.report-print #report-print, body.report-print #report-print * { visibility: visible; }
+  body.report-print #report-print { position: absolute; left: 0; top: 0; width: 100%; padding: 0; }
+  body.report-print .nex-sidebar, body.report-print .ant-layout-header, body.report-print .ant-tabs-nav,
+  body.report-print .no-print { display: none !important; }
+  #report-print .ant-table { font-size: 11px; }
+  #report-print .report-total-row { font-weight: 700; }
+}
+
+/* Report drill-down drawer table tuning */
+.report-drill .ant-table-thead > tr > th { background: #f8fafc; font-size: 12px; }

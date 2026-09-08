@@ -1,0 +1,97 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.sample
+!**/.env.template
+
+# Build output
+.next/
+**/.next/
+out/
+dist/
+**/dist/
+build/
+**/build/
+*.tsbuildinfo
+
+# Tests / coverage / caches
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+.turbo/
+.nx/
+.cache/
+**/.cache/
+.swc/
+**/.swc/
+
+# Runtime / generated
+logs/
+**/logs/
+*.log
+tmp/
+temp/
+**/tmp/
+**/temp/
+*.tmp
+uploads/
+storage/uploads/
+**/storage/uploads/
+generated/
+exports/
+pdf-output/
+**/pdf-output/
+
+# Backups / dumps
+backups/
+**/backups/
+*.sql
+*.dump
+*.backup
+*.pgdump
+
+# Certificates / private keys
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.csr
+certificates/
+secrets/
+**/certificates/
+**/secrets/
+
+# Package manager cache (keep lock files)
+.npm/
+.pnpm-store/
+.yarn/cache/
+
+# IDE / OS
+.vscode/
+.idea/
+.cursor/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+
+# Local platform files
+.vercel/
+.sentryclirc
+docker-compose.override.yml
+
+env

@@ -1,0 +1,1 @@
+export interface FiscalProvider {verifyTaxpayer(input:any):Promise<any>; registerDevice(input:any):Promise<any>; getConfig(input:any):Promise<any>; openDay(input:any):Promise<any>; submitReceipt(input:any):Promise<any>; closeDay(input:any):Promise<any>}
