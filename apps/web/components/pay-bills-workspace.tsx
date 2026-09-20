@@ -113,7 +113,7 @@ function PaySupplierDrawer({ open, onClose, onSaved, bills, initialIds }: { open
   }
   return (
     <Drawer open={open} onClose={onClose} width={680} title="Pay Supplier" destroyOnHidden extra={<Button onClick={onClose}>Cancel</Button>}
-      footer={<Space className="w-full justify-end"><Button onClick={onClose}>Cancel</Button><Button type="primary" onClick={post} loading={saving} disabled={!Object.keys(applyMap).filter((k) => applyMap[k] > 0).length}>Post Payment</Button></Space>}>
+      footer={<Space className="w-full justify-end"><Button onClick={onClose}>Cancel</Button><Button type="primary" onClick={post} loading={saving} disabled={!Object.keys(applyMap).filter((k) => applyMap[k] > 0).length}>Make Payment</Button></Space>}>
       {supplierName && <div className="nex-card mb-4 px-4 py-3 !rounded-xl"><span className="text-[12px] text-[#64748b]">Supplier</span><span className="font-semibold text-[14px] text-[#171a2e] ml-2">{supplierName}</span></div>}
       <Form layout="vertical">
         <div className="grid grid-cols-2 gap-4">

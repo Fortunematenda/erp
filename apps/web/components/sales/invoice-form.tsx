@@ -104,7 +104,7 @@ export function InvoiceFormDrawer({ open, onClose, presetCustomerId }: { open: b
     if (warning) message.warning(warning);
   }
 
-  async function submit(mode: 'draft' | 'save') {
+  async function submit(mode: 'draft' | 'post' | 'send') {
     try {
       const v = await form.validateFields();
       if (!v.customerId) { message.error('Select a customer'); return; }
@@ -119,10 +119,13 @@ export function InvoiceFormDrawer({ open, onClose, presetCustomerId }: { open: b
         lines: lines.map((l) => ({ description: l.description, itemId: l.itemId, quantity: Number(l.quantity || 0), unitPrice: Number(l.unitPrice || 0), taxRate: Number(l.taxRate || 0) })),
       };
       const created = await api('/sales/invoices', { method: 'POST', body: JSON.stringify(payload) });
-      if (mode === 'save' && created?.id) {
-        await api(`/sales/invoices/${created.id}/post`, { method: 'POST' });
+      if (mode !== 'draft' && created?.id) {
+        const fin = await api(`/sales/invoices/${created.id}/finalize`, { method: 'POST', body: JSON.stringify({ action: mode === 'send' ? 'SEND' : 'POST' }) });
+        if (mode === 'send' && fin.emailError) message.warning(`Invoice posted, but email failed: ${fin.emailError}`);
+        else message.success(mode === 'send' ? 'Invoice posted and sent' : 'Invoice posted — awaiting payment');
+      } else {
+        message.success('Draft saved');
       }
-      message.success(mode === 'save' ? 'Invoice saved' : 'Draft saved');
       qc.invalidateQueries({ queryKey: ['/sales/invoices'] });
       qc.invalidateQueries({ queryKey: ['sales-register'] });
       onClose();
@@ -138,8 +141,9 @@ export function InvoiceFormDrawer({ open, onClose, presetCustomerId }: { open: b
       footer={
         <div className="flex items-center gap-2 justify-end">
           <Button onClick={onClose}>Cancel</Button>
-          <Button onClick={() => submit('draft')} loading={saving === 'draft'}>Save as Draft</Button>
-          <Button type="primary" onClick={() => submit('save')} loading={saving === 'save'} icon={<PlusOutlined />}>Save Invoice</Button>
+          <Button onClick={() => submit('draft')} loading={saving === 'draft'}>Save Draft</Button>
+          <Button onClick={() => submit('post')} loading={saving === 'post'}>Save & Post</Button>
+          <Button type="primary" onClick={() => submit('send')} loading={saving === 'send'} icon={<PlusOutlined />}>Save & Send</Button>
         </div>
       }
     >

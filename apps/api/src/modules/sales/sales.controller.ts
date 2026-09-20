@@ -11,11 +11,13 @@ import { InvoiceStatusService } from '../finance/invoice-status.service';
 import { NumberingService } from '../../core/common/numbering.service';
 import { AuditService } from '../../core/common/audit.service';
 import { DocumentTrailService } from '../document-trail/document-trail.service';
+import { DocumentEmailService } from '../document-trail/document-email.service';
 import { CustomerPaymentsService } from './customer-payments.service';
 import { PricingService } from './pricing.service';
 import { QuotationStatusService } from './quotation-status.service';
 import { POSTED_INVOICE_EDIT_MESSAGE, SalesIntegrityService } from './sales-integrity.service';
 import { InventoryMovementService } from '../inventory/inventory-movement.service';
+import { getTransactionPostingMode } from '../finance/transaction-mode';
 
 @ApiTags('Sales') @ApiBearerAuth() @UseGuards(JwtAuthGuard, PermissionsGuard) @Controller('sales')
 export class SalesController {
@@ -25,6 +27,7 @@ export class SalesController {
     private numbering: NumberingService,
     private audit: AuditService,
     private trail: DocumentTrailService,
+    private email: DocumentEmailService,
     private payments: CustomerPaymentsService,
     private invoiceStatus: InvoiceStatusService,
     private pricing: PricingService,
@@ -541,12 +544,73 @@ export class SalesController {
     return res;
   }
   @Post('invoices/:id/post') @RequirePermissions('sales.invoices.post') async post(@Req() req: any, @Param('id') id: string) {
-    const companyId = companyIdOf(req.user);
-    const res = await this.posting.postSalesInvoice(companyId, id, req.user.sub);
-    await this.issueDirectInvoiceStock(companyId, id, req.user.sub);
-    await this.trail.create(companyId, { documentType: 'INVOICE', documentId: id, eventType: 'POSTED', title: 'Invoice Posted', description: 'Invoice posted to Accounts Receivable.', userId: req.user.sub }).catch(() => {});
-    return res;
+    return this.finalizeInvoice(req, id, 'POST');
   }
+
+  /**
+   * Business finalize: POST (accounting only) or SEND (post then email).
+   * Idempotent posting — already-posted invoices do not create a second journal.
+   * Email failure after a successful post does NOT roll back accounting.
+   */
+  @Post('invoices/:id/finalize') @RequirePermissions('sales.invoices.post')
+  async finalize(@Req() req: any, @Param('id') id: string, @Body() body: { action?: 'POST' | 'SEND'; to?: string[]; subject?: string; message?: string }) {
+    const action = (body?.action || 'POST').toUpperCase() as 'POST' | 'SEND';
+    return this.finalizeInvoice(req, id, action, body);
+  }
+
+  private async finalizeInvoice(req: any, id: string, action: 'POST' | 'SEND', body?: { to?: string[]; subject?: string; message?: string }) {
+    const companyId = companyIdOf(req.user);
+    const mode = await getTransactionPostingMode(this.prisma, companyId);
+    if (mode === 'APPROVAL_BASED') {
+      // Still allow privileged post/send when approval mode is on — approvals gate is enforced by UI/permissions for submitters.
+    }
+    const before = await this.prisma.salesInvoice.findFirst({ where: { id, companyId }, include: { customer: true } });
+    if (!before) throw new BadRequestException('Invoice not found');
+    const wasDraft = String(before.invoiceStatus || before.status || '').toUpperCase() === 'DRAFT';
+
+    const res = await this.posting.postSalesInvoice(companyId, id, req.user.sub);
+    if (wasDraft) {
+      await this.issueDirectInvoiceStock(companyId, id, req.user.sub);
+      await this.trail.create(companyId, { documentType: 'INVOICE', documentId: id, eventType: 'POSTED', title: 'Invoice Posted', description: 'Invoice posted to Accounts Receivable (automatic business action).', userId: req.user.sub }).catch(() => {});
+      await this.audit.log(companyId, req.user.sub, 'POSTED_AUTOMATICALLY', 'SalesInvoice', id, { module: 'sales', result: 'SUCCESS', metadata: { action } });
+    }
+
+    let emailed = false;
+    let emailError: string | null = null;
+    if (action === 'SEND') {
+      try {
+        const to = (body?.to?.length ? body.to : [before.email || before.customer?.email].filter(Boolean)) as string[];
+        if (!to.length) throw new BadRequestException('No recipient email on the invoice or customer. Add an email and use Resend.');
+        await this.email.send(companyId, req.user.sub, {
+          documentType: 'INVOICE',
+          documentId: id,
+          to,
+          subject: body?.subject || `Invoice ${before.invoiceNo}`,
+          message: body?.message,
+        });
+        emailed = true;
+        await this.audit.log(companyId, req.user.sub, 'SENT', 'SalesInvoice', id, { module: 'sales', result: 'SUCCESS' });
+      } catch (e: any) {
+        emailError = e?.message || 'Email could not be sent';
+        await this.audit.log(companyId, req.user.sub, 'SEND_FAILED', 'SalesInvoice', id, { module: 'sales', result: 'FAILURE', metadata: { error: emailError } });
+      }
+    }
+
+    const invoice = await this.prisma.salesInvoice.findUnique({ where: { id }, include: { lines: true, customer: true } });
+    return { invoice: invoice || res, posted: true, emailed, emailError, displayStatus: this.userFacingInvoiceStatus(invoice || res) };
+  }
+
+  private userFacingInvoiceStatus(inv: any) {
+    const life = String(inv?.invoiceStatus || inv?.status || '').toUpperCase();
+    if (life === 'DRAFT') return 'DRAFT';
+    if (life === 'VOID') return 'VOID';
+    const pay = String(inv?.paymentStatus || 'UNPAID').toUpperCase();
+    if (pay === 'PAID') return 'PAID';
+    if (pay === 'PARTIALLY_PAID') return 'PARTIALLY_PAID';
+    if (pay === 'OVERDUE') return 'OVERDUE';
+    return 'AWAITING_PAYMENT';
+  }
+
   @Post('invoices/:id/void') @RequirePermissions('sales.invoices.void', 'sales.invoices.credit') async voidInvoice(@Req() req: any, @Param('id') id: string, @Body() body: any) {
     const companyId = companyIdOf(req.user);
     const inv = await this.prisma.salesInvoice.findFirst({ where: { id, companyId }, include: { receipts: true } });
@@ -725,7 +789,7 @@ export class SalesController {
     await this.ensureCustomerActive(companyId, dto.customerId);
     const { mapped, subtotal, taxTotal, total } = this.computeLines(dto.lines);
     const creditNoteNo = await this.numbering.next(companyId, 'CN');
-    const cn = await this.prisma.creditNote.create({ data: { companyId, customerId: dto.customerId, invoiceId: dto.invoiceId, creditNoteNo, creditNoteDate: dto.creditNoteDate ? new Date(dto.creditNoteDate) : new Date(), reason: dto.reason, subtotal, taxTotal, total, lines: { create: mapped.map((l) => ({ description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, taxRate: l.taxRate, taxAmount: l.taxAmount, lineTotal: l.lineTotal })) } }, include: { lines: true } });
+    const cn = await this.prisma.creditNote.create({ data: { companyId, customerId: dto.customerId, invoiceId: dto.invoiceId, creditNoteNo, creditNoteDate: dto.creditNoteDate ? new Date(dto.creditNoteDate) : new Date(), reason: dto.reason, subtotal, taxTotal, total, lines: { create: mapped.map((l) => ({ description: l.description, itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice, taxRate: l.taxRate, taxAmount: l.taxAmount, lineTotal: l.lineTotal })) } }, include: { lines: true } });
     await this.audit.log(companyId, req.user.sub, 'CREATE', 'CreditNote', cn.id, { creditNoteNo });
     return cn;
   }
@@ -815,6 +879,158 @@ export class SalesController {
     await this.audit.log(companyId, req.user.sub, 'VOID', 'CreditNote', id, { reason: body?.reason });
     return { ok: true };
   }
+
+  // ----- Customer goods returns (physical RETURN_IN → optional Credit Note) -----
+  @Get('customer-returns') customerReturns(@Req() req: any) {
+    return this.prisma.customerReturn.findMany({
+      where: { companyId: companyIdOf(req.user) },
+      include: { customer: true, invoice: true, warehouse: true, creditNote: true, lines: true },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  @Post('customer-returns') @RequirePermissions('sales.invoices.credit', 'sales.credit_notes.create')
+  async createCustomerReturn(@Req() req: any, @Body() body: any) {
+    const companyId = companyIdOf(req.user);
+    if (!body?.customerId) throw new BadRequestException('Customer is required');
+    if (!body?.warehouseId) throw new BadRequestException('Warehouse is required for goods returns');
+    const lines = Array.isArray(body.lines) ? body.lines.filter((l: any) => Number(l.quantity) > 0) : [];
+    if (!lines.length) throw new BadRequestException('Add at least one return line with quantity');
+    if (lines.some((l: any) => !l.itemId)) throw new BadRequestException('Every goods-return line needs an inventory item');
+    if (body.invoiceId) {
+      const inv = await this.prisma.salesInvoice.findFirst({ where: { id: body.invoiceId, companyId } });
+      if (!inv) throw new BadRequestException('Invoice not found');
+      if (inv.customerId && inv.customerId !== body.customerId) throw new BadRequestException('Invoice belongs to a different customer');
+    }
+    const warehouse = await this.prisma.warehouse.findFirst({ where: { id: body.warehouseId, companyId } });
+    if (!warehouse) throw new BadRequestException('Warehouse not found');
+    const returnNo = await this.numbering.next(companyId, 'CRTN');
+    const row = await this.prisma.customerReturn.create({
+      data: {
+        companyId,
+        returnNo,
+        customerId: body.customerId,
+        invoiceId: body.invoiceId || null,
+        warehouseId: body.warehouseId,
+        reason: body.reason || 'Returned Goods',
+        notes: body.notes,
+        returnedAt: body.returnedAt ? new Date(body.returnedAt) : new Date(),
+        status: 'DRAFT',
+        lines: {
+          create: lines.map((l: any) => ({
+            description: l.description || 'Return line',
+            itemId: l.itemId,
+            quantity: Number(l.quantity),
+            unitPrice: Number(l.unitPrice || 0),
+            taxRate: Number(l.taxRate || 0),
+            unitCost: Number(l.unitCost || 0),
+          })),
+        },
+      },
+      include: { lines: true, customer: true, invoice: true },
+    });
+    await this.audit.log(companyId, req.user.sub, 'CREATE', 'CustomerReturn', row.id, { returnNo });
+    if (body.confirm) return this.confirmCustomerReturn(req, row.id, { issueCredit: body.issueCredit !== false, postCredit: !!body.postCredit });
+    return row;
+  }
+
+  @Post('customer-returns/:id/confirm') @RequirePermissions('sales.invoices.credit', 'sales.credit_notes.create')
+  async confirmCustomerReturn(@Req() req: any, @Param('id') id: string, @Body() body: any = {}) {
+    const companyId = companyIdOf(req.user);
+    const ret = await this.prisma.customerReturn.findFirst({ where: { id, companyId }, include: { lines: true, creditNote: true } });
+    if (!ret) throw new BadRequestException('Customer return not found');
+    if (ret.status === 'CONFIRMED') {
+      return this.prisma.customerReturn.findFirst({ where: { id }, include: { lines: true, creditNote: true, customer: true, invoice: true, warehouse: true } });
+    }
+    if (ret.status === 'CANCELLED') throw new BadRequestException('Return is cancelled');
+    if (!ret.warehouseId) throw new BadRequestException('Warehouse is required');
+    const cogs = await this.ensureCogsAccount(companyId);
+    const itemIds = ret.lines.map((l) => l.itemId).filter(Boolean) as string[];
+    const items = await this.prisma.inventoryItem.findMany({ where: { companyId, id: { in: itemIds } }, include: { movements: true } });
+    const avgCost = (itemId?: string | null) => {
+      const item = items.find((i) => i.id === itemId);
+      if (!item) return 0;
+      const receipts = item.movements.filter((m) => ['RECEIPT', 'TRANSFER_IN', 'ADJUSTMENT_IN', 'RETURN_IN'].includes(m.type));
+      const qty = receipts.reduce((s, m) => s + Number(m.quantity), 0);
+      if (qty > 0) return receipts.reduce((s, m) => s + Number(m.unitCost) * Number(m.quantity), 0) / qty;
+      return Number(item.purchaseCost || 0);
+    };
+
+    let creditNoteId = ret.creditNoteId;
+    await this.prisma.$transaction(async (tx) => {
+      let cogsTotal = 0;
+      for (const line of ret.lines) {
+        if (!line.itemId) continue;
+        const cost = Number(line.unitCost) > 0 ? Number(line.unitCost) : avgCost(line.itemId);
+        cogsTotal += cost * Number(line.quantity);
+        await this.stock.create(companyId, {
+          warehouseId: ret.warehouseId!,
+          itemId: line.itemId,
+          type: 'RETURN_IN',
+          quantity: Number(line.quantity),
+          unitCost: cost,
+          reference: ret.returnNo,
+          occurredAt: ret.returnedAt,
+        }, req.user.sub, tx);
+      }
+      if (cogsTotal > 0.005) {
+        await this.posting.postJournal(companyId, {
+          date: ret.returnedAt,
+          description: `Return COGS reversal ${ret.returnNo}`,
+          reference: ret.returnNo,
+          sourceType: 'CUSTOMER_RETURN_COGS',
+          sourceId: ret.id,
+          lines: [
+            { code: '1200', debit: Number(cogsTotal.toFixed(2)), credit: 0, description: 'Inventory returned' },
+            { code: cogs.code, debit: 0, credit: Number(cogsTotal.toFixed(2)), description: 'COGS reversal' },
+          ],
+          userId: req.user.sub,
+        }, tx);
+      }
+      await tx.customerReturn.update({ where: { id: ret.id }, data: { status: 'CONFIRMED' } });
+    });
+
+    if (body?.issueCredit !== false && !creditNoteId) {
+      let subtotal = 0; let taxTotal = 0;
+      const mapped = ret.lines.map((l) => {
+        const net = Number(l.quantity) * Number(l.unitPrice);
+        const tax = net * (Number(l.taxRate) / 100);
+        subtotal += net; taxTotal += tax;
+        return {
+          description: l.description,
+          itemId: l.itemId,
+          quantity: Number(l.quantity),
+          unitPrice: Number(l.unitPrice),
+          taxRate: Number(l.taxRate),
+          taxAmount: Number(tax.toFixed(2)),
+          lineTotal: Number((net + tax).toFixed(2)),
+        };
+      });
+      const creditNoteNo = await this.numbering.next(companyId, 'CN');
+      const cn = await this.prisma.creditNote.create({
+        data: {
+          companyId,
+          customerId: ret.customerId,
+          invoiceId: ret.invoiceId,
+          creditNoteNo,
+          creditNoteDate: ret.returnedAt,
+          reason: ret.reason || 'Returned Goods',
+          subtotal: Number(subtotal.toFixed(2)),
+          taxTotal: Number(taxTotal.toFixed(2)),
+          total: Number((subtotal + taxTotal).toFixed(2)),
+          lines: { create: mapped },
+        },
+      });
+      creditNoteId = cn.id;
+      await this.prisma.customerReturn.update({ where: { id: ret.id }, data: { creditNoteId: cn.id } });
+      await this.audit.log(companyId, req.user.sub, 'CREATE', 'CreditNote', cn.id, { creditNoteNo, via: 'customerReturn', returnNo: ret.returnNo });
+      if (body?.postCredit) await this.posting.postCreditNote(companyId, cn.id, req.user.sub);
+    }
+
+    await this.audit.log(companyId, req.user.sub, 'CONFIRM', 'CustomerReturn', ret.id, { returnNo: ret.returnNo, creditNoteId });
+    return this.prisma.customerReturn.findFirst({ where: { id: ret.id }, include: { lines: true, creditNote: true, customer: true, invoice: true, warehouse: true } });
+  }
+
   @Get('debit-notes/:id') async getDebitNote(@Req() req: any, @Param('id') id: string) {
     const companyId = companyIdOf(req.user);
     const dn = await this.prisma.debitNote.findFirst({ where: { id, companyId }, include: { customer: true, invoice: true, lines: true } });

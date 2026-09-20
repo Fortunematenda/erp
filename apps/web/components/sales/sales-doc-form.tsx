@@ -1,12 +1,13 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Button, DatePicker, Divider, Form, Input, InputNumber, Modal, Select, Switch, Tag, Tooltip, message } from 'antd';
-import { ArrowLeftOutlined, CheckOutlined, DeleteOutlined, EyeOutlined, MailOutlined, PlusOutlined, PrinterOutlined, DownloadOutlined, SettingOutlined } from '@ant-design/icons';
+import { Button, DatePicker, Divider, Dropdown, Form, Input, InputNumber, Modal, Select, Switch, Tag, Tooltip, message } from 'antd';
+import { ArrowLeftOutlined, CheckOutlined, DeleteOutlined, DownOutlined, EyeOutlined, MailOutlined, PlusOutlined, PrinterOutlined, DownloadOutlined, SettingOutlined } from '@ant-design/icons';
 import Link from 'next/link';
 import dayjs from 'dayjs';
 import { api } from '@/lib/api';
 import { useMeta } from '@/lib/meta';
+import { useAuth } from '@/lib/auth-store';
 import { fmtMoney } from '@/lib/format';
 import { FormSection, customerOptions } from '@/components/sales-ui';
 import { DocViewer } from '@/components/documents/doc-viewer';
@@ -16,13 +17,22 @@ import type { DocOpts } from '@/components/sales/document-preview';
 const TERMS = ['Net 15', 'Net 30', 'Net 60', 'Due on Receipt'];
 
 const STATUS_TONES: Record<string, string> = {
-  DRAFT: '#94a3b8', POSTED: '#0284c7', VOID: '#dc2626',
+  DRAFT: '#94a3b8', POSTED: '#0284c7', VOID: '#dc2626', AWAITING_PAYMENT: '#f59e0b',
   UNPAID: '#f59e0b', PARTIALLY_PAID: '#0284c7', PAID: '#16a34a', OVERDUE: '#dc2626',
   NOT_REQUIRED: '#94a3b8', READY: '#0284c7', PENDING: '#f59e0b', FISCALISED: '#16a34a', RETRY: '#f59e0b', REJECTED: '#dc2626',
 };
 const invTone = (s: string) => STATUS_TONES[s] || '#94a3b8';
 const payTone = (s: string) => STATUS_TONES[s] || '#94a3b8';
 const fiscTone = (s: string) => STATUS_TONES[s] || '#94a3b8';
+function displayInvoiceLife(record: any) {
+  const life = String(record?.invoiceStatus || record?.status || '').toUpperCase();
+  if (life === 'DRAFT' || life === 'VOID') return life;
+  const pay = String(record?.paymentStatus || 'UNPAID').toUpperCase();
+  if (pay === 'PAID') return 'PAID';
+  if (pay === 'PARTIALLY_PAID') return 'PARTIALLY PAID';
+  if (pay === 'OVERDUE') return 'OVERDUE';
+  return 'AWAITING PAYMENT';
+}
 function hexFade(hex: string, a: number) { try { const h = hex.replace('#', ''); const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16); return `rgba(${r}, ${g}, ${b}, ${a})`; } catch { return hex; } }
 function StatusTile({ label, value, tone }: { label: string; value?: string; tone: string }) {
   return (
@@ -81,6 +91,8 @@ function BackBar({ to, title, actions }: { to: string; title: string; actions?: 
 export function InvoiceForm({ record, onSaved, initial }: { record?: any; onSaved: (id: string) => void; initial?: { customerId?: string; projectId?: string } }) {
   const qc = useQueryClient();
   const meta = useMeta();
+  const permissions = useAuth((s) => s.permissions);
+  const canPost = permissions.includes('sales.invoices.post') || permissions.includes('*') || permissions.includes('ALL');
   const [form] = Form.useForm();
   const [lines, setLines] = useState<Line[]>([]);
   const [saving, setSaving] = useState(false);
@@ -117,9 +129,13 @@ export function InvoiceForm({ record, onSaved, initial }: { record?: any; onSave
   function removeLine(k: number) { setLines((p) => p.filter((l) => l.key !== k)); }
   function addLine() { setLines((p) => [...p, { key: p.length + 1, description: '', quantity: 1, unitPrice: 0, taxRate: defaultTax }]); }
 
-  async function submit(mode: 'draft' | 'save') {
+  async function submit(mode: 'draft' | 'post' | 'send') {
     try {
       const v = await form.validateFields();
+      if (!lines.length || lines.every((l) => !l.description && !l.itemId)) {
+        message.error('Add at least one line');
+        return;
+      }
       setSaving(true);
       let id = record?.id;
       if (locked && record) {
@@ -132,15 +148,44 @@ export function InvoiceForm({ record, onSaved, initial }: { record?: any; onSave
       const payload = { branchId: v.branchId || meta.data?.branches?.[0]?.id, customerId: v.customerId, projectId: initial?.projectId, invoiceNo: v.invoiceNo || undefined, currency: 'USD', fiscalRequired: true, invoiceDate: v.invoiceDate ? v.invoiceDate.format('YYYY-MM-DD') : undefined, terms: v.terms, billingAddress: v.billingAddress, notes: messageText, statementMemo: memo, email: v.email, dueDate: v.dueDate ? v.dueDate.format('YYYY-MM-DD') : undefined, lines: lines.map((l) => ({ description: l.description, itemId: l.itemId, quantity: Number(l.quantity || 0), unitPrice: Number(l.unitPrice || 0), taxRate: Number(l.taxRate || 0) })) };
       if (record) { await api(`/sales/invoices/${record.id}`, { method: 'PATCH', body: JSON.stringify(payload) }); }
       else { const created = await api('/sales/invoices', { method: 'POST', body: JSON.stringify(payload) }); id = created.id; }
-      if (mode === 'save' && id && v.status) {
-        if (v.status === 'POSTED' && (!record || record.status === 'DRAFT')) await api(`/sales/invoices/${id}/post`, { method: 'POST' }).catch(() => {});
-        else if (v.status !== 'DRAFT' && (record ? record.status : 'DRAFT') !== v.status) await api(`/sales/invoices/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status: v.status }) }).catch(() => {});
+
+      if (mode === 'draft') {
+        message.success(record ? 'Draft updated' : 'Draft saved');
+        qc.invalidateQueries({ queryKey: ['/sales/invoices'] });
+        qc.invalidateQueries({ queryKey: ['sales-register'] });
+        qc.invalidateQueries({ queryKey: ['meta'] });
+        onSaved(id);
+        return;
       }
-      message.success(record ? 'Invoice updated' : 'Invoice saved');
+
+      if (!canPost) {
+        message.error('You do not have permission to post invoices.');
+        onSaved(id);
+        return;
+      }
+
+      const fin = await api(`/sales/invoices/${id}/finalize`, {
+        method: 'POST',
+        body: JSON.stringify({
+          action: mode === 'send' ? 'SEND' : 'POST',
+          to: v.email ? [v.email] : undefined,
+          subject: `Invoice`,
+        }),
+      });
+
+      if (mode === 'send') {
+        if (fin.emailError) message.warning(`Invoice posted successfully, but email could not be sent: ${fin.emailError}`);
+        else if (fin.emailed) message.success('Invoice posted and sent');
+        else message.success('Invoice posted. Use Resend if you need to email it.');
+      } else {
+        message.success('Invoice posted — awaiting payment');
+      }
+
       qc.invalidateQueries({ queryKey: ['/sales/invoices'] });
       qc.invalidateQueries({ queryKey: ['sales-register'] });
       qc.invalidateQueries({ queryKey: ['meta'] });
       onSaved(id);
+      if (mode === 'send' && fin.emailError && id) setSendEmail({ type: 'invoice', id });
     } catch (e: any) { message.error(e.message || 'Could not save invoice'); }
     finally { setSaving(false); }
   }
@@ -195,13 +240,26 @@ export function InvoiceForm({ record, onSaved, initial }: { record?: any; onSave
               <div className="text-[11px] text-[#cbd5e1]">INV-{record.invoiceNo}</div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <StatusTile label="Invoice Status" value={record.invoiceStatus} tone={invTone(record.invoiceStatus)} />
+              <StatusTile label="Invoice Status" value={displayInvoiceLife(record)} tone={invTone(String(record.invoiceStatus) === 'DRAFT' || String(record.invoiceStatus) === 'VOID' ? record.invoiceStatus : (record.paymentStatus === 'PAID' ? 'PAID' : 'AWAITING_PAYMENT'))} />
               <StatusTile label="Payment Status" value={(record.paymentStatus || '').replace(/_/g, ' ')} tone={payTone(record.paymentStatus)} />
               <StatusTile label="Fiscal Status" value={record.fiscalStatus} tone={fiscTone(record.fiscalStatus)} />
             </div>
-            <div className="mt-3 pt-3 border-t border-[#f1f5f9] flex items-center gap-2">
-              {record.invoiceStatus === 'DRAFT' && <Button size="small" type="primary" icon={<CheckOutlined />} onClick={() => api(`/sales/invoices/${record.id}/post`, { method: 'POST' }).then(() => { message.success('Invoice posted'); qc.invalidateQueries({ queryKey: ['/sales/invoices'] }); }).catch((e: any) => message.error(e.message))}>Post Invoice</Button>}
-              <span className="text-[11px] text-[#94a3b8]">Invoice lifecycle (DRAFT → POSTED → VOID) is independent of Payment Status (UNPAID / PARTIALLY PAID / PAID). Posted financial fields cannot be edited — use a credit note.</span>
+            <div className="mt-3 pt-3 border-t border-[#f1f5f9] flex items-center gap-2 flex-wrap">
+              {record.invoiceStatus === 'DRAFT' && canPost && (
+                <Dropdown.Button type="primary" size="small" icon={<DownOutlined />} loading={saving}
+                  onClick={() => submit('send')}
+                  menu={{ items: [
+                    { key: 'send', label: 'Save & Send', onClick: () => submit('send') },
+                    { key: 'post', label: 'Save & Post', onClick: () => submit('post') },
+                    { key: 'draft', label: 'Save Draft', onClick: () => submit('draft') },
+                  ] }}>
+                  Save & Send
+                </Dropdown.Button>
+              )}
+              {record.invoiceStatus !== 'DRAFT' && record.invoiceStatus !== 'VOID' && (
+                <Button size="small" icon={<MailOutlined />} onClick={openEmail}>Resend</Button>
+              )}
+              <span className="text-[11px] text-[#94a3b8]">Posted invoices update AR automatically. Use Resend if email failed after posting. Material changes require a credit note.</span>
             </div>
           </div>
         )}
@@ -245,8 +303,26 @@ export function InvoiceForm({ record, onSaved, initial }: { record?: any; onSave
 
       <div className="flex items-center justify-end gap-2 mt-5">
         <Link href="/sales/invoices"><Button>Cancel</Button></Link>
-        {!locked && <Button onClick={() => submit('draft')} loading={saving}>Save as Draft</Button>}
-        <Button type="primary" onClick={() => submit('save')} loading={saving}>{locked ? 'Save notes' : 'Save Invoice'}</Button>
+        {locked ? (
+          <Button type="primary" onClick={() => submit('draft')} loading={saving}>Save notes</Button>
+        ) : (
+          <>
+            <Button onClick={() => submit('draft')} loading={saving}>Save Draft</Button>
+            {canPost ? (
+              <Dropdown.Button type="primary" icon={<DownOutlined />} loading={saving}
+                onClick={() => submit('send')}
+                menu={{ items: [
+                  { key: 'send', label: 'Save & Send', onClick: () => submit('send') },
+                  { key: 'post', label: 'Save & Post', onClick: () => submit('post') },
+                  { key: 'draft', label: 'Save Draft', onClick: () => submit('draft') },
+                ] }}>
+                Save & Send
+              </Dropdown.Button>
+            ) : (
+              <Button type="primary" onClick={() => submit('draft')} loading={saving}>Save Draft</Button>
+            )}
+          </>
+        )}
       </div>
       <QuickAddCustomer open={custOpen} onClose={() => setCustOpen(false)} onCreated={(id) => { form.setFieldValue('customerId', id); setCustOpen(false); }} />
       <QuickAddItem open={itemModalKey !== null} onClose={() => setItemModalKey(null)} onCreated={(id, name) => { if (itemModalKey !== null) updateLine(itemModalKey, { itemId: id, description: name }); setItemModalKey(null); }} />
@@ -303,19 +379,20 @@ export function QuoteForm({ record, onSaved, initial }: { record?: any; onSaved:
     updateLine(key, patch);
     if (warning) message.warning(warning);
   }
-  async function submit() {
+  async function submit(andSend = false) {
     try {
       const v = await form.validateFields();
-      const payload = { branchId: meta.data?.branches?.[0]?.id, customerId: v.customerId, projectId: initial?.projectId, address: v.address, notes: messageText, statementMemo: memo, validUntil: v.validUntil?.format('YYYY-MM-DD'), status: v.status, lines: lines.map((l) => ({ description: l.description, itemId: l.itemId, quantity: Number(l.quantity || 0), unitPrice: Number(l.unitPrice || 0), taxRate: Number(l.taxRate || 0) })) };
+      const payload = { branchId: meta.data?.branches?.[0]?.id, customerId: v.customerId, projectId: initial?.projectId, address: v.address, notes: messageText, statementMemo: memo, validUntil: v.validUntil?.format('YYYY-MM-DD'), status: andSend ? 'SENT' : (v.status || 'DRAFT'), lines: lines.map((l) => ({ description: l.description, itemId: l.itemId, quantity: Number(l.quantity || 0), unitPrice: Number(l.unitPrice || 0), taxRate: Number(l.taxRate || 0) })) };
       setSaving(true);
       let id = record?.id;
       if (record) { await api(`/sales/quotations/${record.id}`, { method: 'PATCH', body: JSON.stringify(payload) }); }
       else { const created = await api('/sales/quotations', { method: 'POST', body: JSON.stringify(payload) }); id = created.id; }
-      if (v.status && v.status !== 'DRAFT' && id) await api(`/sales/quotations/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status: v.status }) });
-      message.success(record ? 'Quote updated' : 'Quote created');
+      if (payload.status && payload.status !== 'DRAFT' && id) await api(`/sales/quotations/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status: payload.status }) }).catch(() => {});
+      message.success(andSend ? 'Quote saved' : (record ? 'Draft updated' : 'Draft saved'));
       qc.invalidateQueries({ queryKey: ['/sales/quotations'] });
       qc.invalidateQueries({ queryKey: ['sales-register'] });
       onSaved(id);
+      if (andSend && id) setSendEmail({ type: 'quotation', id });
     } catch (e: any) { message.error(e.message || 'Could not save quote'); }
     finally { setSaving(false); }
   }
@@ -382,7 +459,8 @@ export function QuoteForm({ record, onSaved, initial }: { record?: any; onSaved:
       </div>
       <div className="flex items-center justify-end gap-2 mt-5">
         <Link href="/sales/quotations"><Button>Cancel</Button></Link>
-        <Button type="primary" onClick={submit} loading={saving}>Save Quote</Button>
+        <Button onClick={() => submit(false)} loading={saving}>Save Draft</Button>
+        <Button type="primary" icon={<MailOutlined />} onClick={() => submit(true)} loading={saving}>Save & Send</Button>
       </div>
       <QuickAddCustomer open={custOpen} onClose={() => setCustOpen(false)} onCreated={(id) => { form.setFieldValue('customerId', id); setCustOpen(false); }} />
       <QuickAddItem open={itemModalKey !== null} onClose={() => setItemModalKey(null)} onCreated={(id, name) => { if (itemModalKey !== null) updateLine(itemModalKey, { itemId: id, description: name }); setItemModalKey(null); }} />

@@ -38,34 +38,15 @@ function LoginCard() {
   const sp = useSearchParams();
   const returnTo = safeReturnTo(sp.get('returnTo'));
   const expired = sp.get('expired') === '1';
-  const { user, token, status, setSession, setStatus } = useAuth();
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [remember, setRemember] = useState(false);
-  const [caps, setCaps] = useState(false);
-  const [forgotOpen, setForgotOpen] = useState(false);
-  const [forgotEmail, setForgotEmail] = useState('');
-  const [forgotSending, setForgotSending] = useState(false);
-  const [forgotResult, setForgotResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [form] = Form.useForm();
-  const emailRef = useRef<any>(null);
-  const pwRef = useRef<any>(null);
+  const { user, token, status } = useAuth();
 
   useEffect(() => {
     if (status === 'authenticated' && token) router.replace(user?.isPlatformAdmin ? '/platform' : returnTo);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, token, user, router]);
 
-  // Only touch the form once it is actually mounted (status becomes
-  // 'unauthenticated' and the <Form> renders). Calling form methods earlier
-  // triggers the "not connected to any Form element" warning.
-  useEffect(() => {
-    if (status !== 'unauthenticated') return;
-    const saved = localStorage.getItem('nex-login-email');
-    if (saved) { form.setFieldsValue({ email: saved }); setRemember(true); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status]);
-
+  // Keep Form.useForm() inside LoginForm so it is never created while the
+  // Form element is unmounted (auth bootstrap / redirect spinner).
   if (status !== 'unauthenticated') {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-5" style={{ background: '#f6f7f9' }}>
@@ -74,6 +55,25 @@ function LoginCard() {
       </div>
     );
   }
+
+  return <LoginForm returnTo={returnTo} expired={expired} />;
+}
+
+function LoginForm({ returnTo, expired }: { returnTo: string; expired: boolean }) {
+  const router = useRouter();
+  const { setSession, setStatus } = useAuth();
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const savedEmail = typeof window !== 'undefined' ? localStorage.getItem('nex-login-email') || '' : '';
+  const [remember, setRemember] = useState(!!savedEmail);
+  const [caps, setCaps] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotSending, setForgotSending] = useState(false);
+  const [forgotResult, setForgotResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [form] = Form.useForm();
+  const emailRef = useRef<any>(null);
+  const pwRef = useRef<any>(null);
 
   async function submit(v: any) {
     if (loading) return;
@@ -163,7 +163,7 @@ function LoginCard() {
               </div>
             )}
 
-            <Form form={form} layout="vertical" onFinish={submit} requiredMark={false} className="mt-4">
+            <Form form={form} layout="vertical" onFinish={submit} requiredMark={false} className="mt-4" initialValues={{ email: savedEmail || undefined }}>
               <Form.Item label={label('Email address')} name="email" style={{ marginBottom: 18 }}
                 rules={[{ required: true, message: 'Email address is required.' }, { type: 'email', message: 'Enter a valid email address.' }]}>
                 <Input ref={emailRef} placeholder="name@company.com" size="large" autoComplete="username" prefix={<MailOutlined style={{ color: '#667085', fontSize: 16 }} />} className="!h-[48px] !rounded-[10px]" />

@@ -37,12 +37,22 @@ function CountsTab() {
   const [form] = Form.useForm();
   const itemOptions = (meta.data?.items || []).map((i: any) => ({ label: `${i.sku} — ${i.name}`, value: i.id }));
 
-  async function submit(v: any) {
+  async function submit() {
     try {
+      const v = await form.validateFields();
+      if (!v.lines?.length) {
+        message.error('Add at least one line');
+        return;
+      }
       setSaving(true);
       await api('/inventory/counts', { method: 'POST', body: JSON.stringify({ warehouseId: v.warehouseId, lines: v.lines.map((l: any) => ({ itemId: l.itemId, countedQty: l.countedQty })) }) });
-      message.success('Count created'); setOpen(false); form.resetFields(); qc.invalidateQueries({ queryKey: ['/inventory/counts'] });
-    } catch (e: any) { message.error(e.message); } finally { setSaving(false); }
+      message.success('Count created');
+      setOpen(false);
+      qc.invalidateQueries({ queryKey: ['/inventory/counts'] });
+    } catch (e: any) {
+      if (e?.errorFields) return;
+      message.error(e.message);
+    } finally { setSaving(false); }
   }
 
   async function post(id: string) {
@@ -52,7 +62,7 @@ function CountsTab() {
 
   return (
     <>
-      <div className="flex justify-end mb-4"><Button type="primary" icon={<PlusOutlined />} onClick={() => { form.resetFields(); setOpen(true); }}>New Count</Button></div>
+      <div className="flex justify-end mb-4"><Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>New Count</Button></div>
       <Table loading={list.isLoading} rowKey="id" dataSource={list.data || []} scroll={{ x: true }}
         columns={[
           { title: 'Count No', dataIndex: 'countNo', width: 120 }, { title: 'Warehouse', render: (_, r: any) => r.warehouse?.name || '—' },
@@ -61,7 +71,16 @@ function CountsTab() {
           { title: 'Actions', width: 100, render: (_, r: any) => r.status === 'DRAFT' && <Button size="small" type="primary" onClick={() => post(r.id)}>Post</Button> },
         ]}
       />
-      <Modal title="New stock count" open={open} onCancel={() => setOpen(false)} onOk={submit} confirmLoading={saving} width={620} destroyOnHidden>
+      <Modal
+        title="New stock count"
+        open={open}
+        onCancel={() => setOpen(false)}
+        onOk={submit}
+        confirmLoading={saving}
+        width={620}
+        forceRender
+        afterOpenChange={(visible) => { if (visible) form.resetFields(); }}
+      >
         <Form form={form} layout="vertical">
           <Form.Item label="Warehouse" name="warehouseId" rules={[{ required: true }]}>
             <Select showSearch optionFilterProp="label" options={(meta.data?.warehouses || []).map((w: any) => ({ label: w.name, value: w.id }))} />

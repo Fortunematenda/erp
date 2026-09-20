@@ -204,7 +204,7 @@ export function ReceiveCustomerPaymentDrawer({ open, onClose, onCreated, initial
   ];
 
   return (
-    <Drawer open={open} onClose={onClose} width={920} title="Receive Customer Payment" footer={<div className="flex items-center justify-end gap-2"><Button onClick={onClose}>Cancel</Button><Button type="primary" onClick={save} loading={saving} disabled={saving}>Post Receipt</Button></div>}>
+    <Drawer open={open} onClose={onClose} width={920} title="Record Customer Payment" footer={<div className="flex items-center justify-end gap-2"><Button onClick={onClose}>Cancel</Button><Button type="primary" onClick={save} loading={saving} disabled={saving}>Record Payment</Button></div>}>
       <Form form={form} layout="vertical">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4">
           <Form.Item label="Customer" name="customerId" className="!mb-3" rules={[{ required: true, message: 'Select a customer' }]}><Select showSearch optionFilterProp="label" placeholder="Select customer" disabled={!!initialCustomerId} onChange={(id) => { setCustomerId(id); setAlloc({}); setAmount(0); }} options={customerOptions(meta.data?.customers)} /></Form.Item>

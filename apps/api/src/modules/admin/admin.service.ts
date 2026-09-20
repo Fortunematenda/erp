@@ -786,9 +786,11 @@ const GROUPS: CfgGroup[] = [
   {
     id: 'finance', label: 'Finance', description: 'Accounting defaults.', prefix: 'cfg.finance.',
     fields: [
+      { key: 'transactionPostingMode', label: 'Transaction posting mode', type: 'select', default: 'AUTOMATIC', options: ['AUTOMATIC', 'MANUAL', 'APPROVAL_BASED'], hint: 'AUTOMATIC: Save & Send / Save & Post / Confirm Receipt post accounting. MANUAL: keep explicit Post. APPROVAL_BASED: Approve posts accounting.' },
       { key: 'allowNegativeStock', label: 'Allow negative stock', type: 'toggle', default: false, hint: 'Warn or block stock movements that take quantity below zero.' },
       { key: 'requireJournalReason', label: 'Require reason on journals', type: 'toggle', default: false },
       { key: 'defaultTaxRate', label: 'Default tax rate %', type: 'number', default: 15 },
+      { key: 'supplierBillRequiresApproval', label: 'Supplier bills require approval', type: 'toggle', default: false, hint: 'When enabled, non-approvers submit for approval; Approve posts the bill automatically.' },
     ],
   },
   {

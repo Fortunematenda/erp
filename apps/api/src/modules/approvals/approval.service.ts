@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuditService } from '../../core/common/audit.service';
-import { companyIdOf } from '../../core/context';
+import { PostingService } from '../finance/posting.service';
+import { getTransactionPostingMode } from '../finance/transaction-mode';
 
 export const APPROVAL_DOC_TYPES = [
   'PURCHASE_REQUISITION', 'PURCHASE_ORDER', 'SUPPLIER_INVOICE', 'BUDGET', 'JOURNAL_REVERSAL',
@@ -10,7 +11,7 @@ export const APPROVAL_DOC_TYPES = [
 
 @Injectable()
 export class ApprovalService {
-  constructor(private prisma: PrismaService, private audit: AuditService) {}
+  constructor(private prisma: PrismaService, private audit: AuditService, private posting: PostingService) {}
 
   async ensureDefaults(companyId: string) {
     for (const docType of APPROVAL_DOC_TYPES) {
@@ -82,6 +83,15 @@ export class ApprovalService {
     try {
       if (docType === 'PURCHASE_REQUISITION') await this.prisma.purchaseRequisition.updateMany({ where: { id: req.documentId, companyId }, data: { status } });
       else if (docType === 'PURCHASE_ORDER') await this.prisma.purchaseOrder.updateMany({ where: { id: req.documentId, companyId }, data: { status } });
+      else if (docType === 'SUPPLIER_INVOICE') {
+        await this.prisma.supplierInvoice.updateMany({ where: { id: req.documentId, companyId, status: { in: ['DRAFT', 'AWAITING_APPROVAL'] } }, data: { status: 'APPROVED' } });
+        const mode = await getTransactionPostingMode(this.prisma, companyId);
+        // Approve automatically posts AP when not in MANUAL mode.
+        if (mode !== 'MANUAL') {
+          await this.posting.postSupplierInvoice(companyId, req.documentId);
+          await this.audit.log(companyId, req.resolvedBy, 'POSTED_AUTOMATICALLY', 'SupplierInvoice', req.documentId, { via: 'approval' });
+        }
+      }
     } catch { /* ignore source mapping errors */ }
   }
 }

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -998,6 +998,70 @@ export class FinanceController {
     });
     await this.audit.log(companyId, req.user.sub, 'TRANSFER', 'BankAccount', body.fromAccountId, { to: body.toAccountId, amount });
     return journal;
+  }
+
+  /** Current (draft) or latest bank reconciliation for an account — DB-backed, not localStorage. */
+  @UseGuards(PermissionsGuard) @RequirePermissions('finance.bank.manage')
+  @Get('bank-reconciliations/current') async currentBankRecon(@Req() req: any, @Query() q: any) {
+    const companyId = companyIdOf(req.user);
+    if (!q.bankAccountId) throw new BadRequestException('bankAccountId is required');
+    const bank = await this.prisma.bankAccount.findFirst({ where: { id: String(q.bankAccountId), companyId } });
+    if (!bank) throw new BadRequestException('Bank account not found');
+    const draft = await this.prisma.bankReconciliation.findFirst({ where: { companyId, bankAccountId: bank.id, status: 'IN_PROGRESS' }, orderBy: { updatedAt: 'desc' } });
+    if (draft) return draft;
+    return { id: null, bankAccountId: bank.id, status: 'IN_PROGRESS', statementDate: new Date(), statementBalance: 0, bookBalance: 0, difference: 0, clearedLineIds: [] };
+  }
+
+  @UseGuards(PermissionsGuard) @RequirePermissions('finance.bank.manage')
+  @Put('bank-reconciliations/current') async saveBankRecon(@Req() req: any, @Body() body: any) {
+    const companyId = companyIdOf(req.user);
+    if (!body.bankAccountId) throw new BadRequestException('bankAccountId is required');
+    const bank = await this.prisma.bankAccount.findFirst({ where: { id: body.bankAccountId, companyId } });
+    if (!bank) throw new BadRequestException('Bank account not found');
+    const clearedLineIds = Array.isArray(body.clearedLineIds) ? body.clearedLineIds.map(String) : [];
+    const statementDate = body.statementDate ? new Date(body.statementDate) : new Date();
+    const statementBalance = Number(body.statementBalance ?? 0);
+    const bookBalance = Number(body.bookBalance ?? 0);
+    const difference = Number(body.difference ?? 0);
+    let row = await this.prisma.bankReconciliation.findFirst({ where: { companyId, bankAccountId: bank.id, status: 'IN_PROGRESS' }, orderBy: { updatedAt: 'desc' } });
+    if (row) {
+      row = await this.prisma.bankReconciliation.update({ where: { id: row.id }, data: { statementDate, statementBalance, bookBalance, difference, clearedLineIds } });
+    } else {
+      row = await this.prisma.bankReconciliation.create({ data: { companyId, bankAccountId: bank.id, statementDate, statementBalance, bookBalance, difference, clearedLineIds, status: 'IN_PROGRESS' } });
+    }
+    return row;
+  }
+
+  @UseGuards(PermissionsGuard) @RequirePermissions('finance.bank.manage')
+  @Post('bank-reconciliations/:id/complete') async completeBankRecon(@Req() req: any, @Param('id') id: string, @Body() body: any) {
+    const companyId = companyIdOf(req.user);
+    const row = await this.prisma.bankReconciliation.findFirst({ where: { id, companyId } });
+    if (!row) throw new BadRequestException('Reconciliation not found');
+    if (row.status === 'COMPLETED') return row;
+    const difference = body?.difference != null ? Number(body.difference) : Number(row.difference);
+    if (Math.abs(difference) > 0.01) throw new BadRequestException(`Cannot complete: difference is ${difference.toFixed(2)}. Clear outstanding items until balanced.`);
+    const updated = await this.prisma.bankReconciliation.update({
+      where: { id: row.id },
+      data: {
+        status: 'COMPLETED',
+        completedAt: new Date(),
+        completedBy: req.user.sub,
+        bookBalance: body?.bookBalance != null ? Number(body.bookBalance) : row.bookBalance,
+        statementBalance: body?.statementBalance != null ? Number(body.statementBalance) : row.statementBalance,
+        difference: 0,
+        clearedLineIds: Array.isArray(body?.clearedLineIds) ? body.clearedLineIds.map(String) : row.clearedLineIds,
+      },
+    });
+    await this.audit.log(companyId, req.user.sub, 'RECONCILE', 'BankReconciliation', updated.id, { bankAccountId: updated.bankAccountId, statementBalance: Number(updated.statementBalance) });
+    return updated;
+  }
+
+  @UseGuards(PermissionsGuard) @RequirePermissions('finance.bank.manage')
+  @Get('bank-reconciliations') listBankRecons(@Req() req: any, @Query() q: any) {
+    const where: any = { companyId: companyIdOf(req.user) };
+    if (q.bankAccountId) where.bankAccountId = String(q.bankAccountId);
+    if (q.status) where.status = String(q.status);
+    return this.prisma.bankReconciliation.findMany({ where, orderBy: { statementDate: 'desc' }, take: 50 });
   }
 
   // ----- Vendor Credits -----

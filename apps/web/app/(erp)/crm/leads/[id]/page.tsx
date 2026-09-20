@@ -162,7 +162,17 @@ export default function LeadDetail() {
     try { await api(`/crm/leads/${lead.id}/lost`, { method: 'POST', body: JSON.stringify({ lostReason }) }); message.success('Marked lost'); setLostModal(false); refresh(); } catch (e: any) { message.error(e.message); }
   }
   async function convert() {
-    try { const res = await api(`/crm/leads/${lead.id}/convert`, { method: 'POST', body: JSON.stringify({ createOpportunity: true, forceCreate: true }) }); message.success('Converted to customer + opportunity'); setConvertModal(false); refresh(); qc.invalidateQueries({ queryKey: ['/sales/customers'] }); } catch (e: any) { message.error(e.message); }
+    try {
+      const res = await api(`/crm/leads/${lead.id}/convert`, { method: 'POST', body: JSON.stringify({ createOpportunity: true }) });
+      if (res?.pending && res.duplicates?.length) {
+        message.warning(`Possible duplicate customer(s) found (${res.duplicates.map((d: any) => d.name || d.code).join(', ')}). Link an existing customer or force-create from the convert dialog.`);
+        return;
+      }
+      message.success('Converted to customer + opportunity');
+      setConvertModal(false);
+      refresh();
+      qc.invalidateQueries({ queryKey: ['/sales/customers'] });
+    } catch (e: any) { message.error(e.message); }
   }
 
   const salesCols: ColumnsType<any> = [

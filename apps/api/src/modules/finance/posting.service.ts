@@ -36,6 +36,7 @@ export class PostingService {
     this.assertBalanced(opts.lines);
     const period = await client.fiscalPeriod.findFirst({ where: { companyId, startDate: { lte: opts.date }, endDate: { gte: opts.date } } });
     if (period && period.status === 'CLOSED') throw new BadRequestException(`Posting blocked: ${period.name} is closed. Transactions cannot be posted to this accounting period. Choose an open posting date or request the period to be reopened.`);
+    if (period && (period.status === 'SOFT_CLOSED' || period.status === 'LOCKED')) throw new BadRequestException(`Posting blocked: ${period.name} is soft-locked. Reopen the period or use a date in an open period.`);
     if (period && period.status === 'FUTURE') throw new BadRequestException(`Posting blocked: ${period.name} is a future period and is not yet open.`);
     const byCode = await this.accountsByCode(companyId, client);
     for (const l of opts.lines) await this.requireAccount(byCode, l.code);
@@ -195,6 +196,9 @@ export class PostingService {
     const si = await this.prisma.supplierInvoice.findFirst({ where: { id: supplierInvoiceId, companyId }, include: { lines: true } });
     if (!si) throw new BadRequestException('Supplier invoice not found');
     if (si.status === 'POSTED') return si;
+    if (!['DRAFT', 'AWAITING_APPROVAL', 'APPROVED'].includes(String(si.status || ''))) {
+      throw new BadRequestException(`Cannot post bill in status ${si.status}`);
+    }
     if (!si.lines.length) throw new BadRequestException('Bill has no lines');
     const byCode = await this.accountsByCode(companyId);
     const drLines: { code: string; debit: number; credit: number; description: string }[] = [];

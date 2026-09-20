@@ -51,7 +51,7 @@ export default function BillsPage() {
     <div className="nex-fade">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <div><h1 className="text-[26px] font-bold text-[#171a2e]">Bill Management</h1><p className="text-[13px] text-[#64748b]">Accounts Payable workspace</p></div>
-        <Space><Button icon={<FileTextOutlined />} onClick={() => router.push('/procurement/vendor-credits')}>Vendor Credits</Button><Button icon={<ReloadOutlined />} onClick={() => router.refresh()} /><Button icon={<DollarOutlined />} onClick={() => setTab('pay')}>Pay Supplier</Button></Space>
+        <Space><Button icon={<FileTextOutlined />} onClick={() => router.push('/expenses/vendor-credits')}>Vendor Credits</Button><Button icon={<ReloadOutlined />} onClick={() => router.refresh()} /><Button icon={<DollarOutlined />} onClick={() => setTab('pay')}>Pay Supplier</Button></Space>
       </div>
       <Card className="nex-card" styles={{ body: { padding: '18px 20px' } }}>
         <Tabs items={items} activeKey={tab} onChange={setTab} destroyOnHidden />
@@ -97,7 +97,7 @@ function BillManagementTab({ onOpen, onPay, onGoPay }: { onOpen: (id: string) =>
     { title: 'Payment', dataIndex: 'paymentStatus', width: 130, sorter: true, render: (v: any) => <StatusTag value={v} /> },
     { title: 'Document', dataIndex: 'status', width: 110, sorter: true, render: (v: any) => <StatusTag value={v} /> },
     ...(colsOn.currency ? [{ title: 'Currency', dataIndex: 'currency', width: 90 }] : []),
-    ...(colsOn.po ? [{ title: 'PO', render: (_: any, r: any) => r.purchaseOrder?.orderNo || '—', width: 110 }] : []),
+    ...(colsOn.po ? [{ title: 'PO', render: (_: any, r: any) => r.purchaseOrder?.poNo || '—', width: 110 }] : []),
     ...(colsOn.project ? [{ title: 'Project', dataIndex: 'project', render: (v: any) => v?.name || '—', width: 130 }] : []),
     ...(colsOn.matchStatus ? [{ title: 'Match', dataIndex: 'matchStatus', width: 130, render: (v: any) => <StatusTag value={v} /> }] : []),
     ...(colsOn.created ? [{ title: 'Created', dataIndex: 'createdAt', width: 110, render: fmtDate }] : []),
@@ -145,7 +145,7 @@ function BillRowActions({ bill, onOpen, onPay }: { bill: any; onOpen: () => void
       { key: 'view', label: 'View Bill', icon: <EyeOutlined />, onClick: onOpen },
       { key: 'edit', label: 'Edit', icon: <EditOutlined />, hidden: bill.status !== 'DRAFT', onClick: onOpen },
       { key: 'pay', label: payLabel, icon: <PayCircleOutlined />, hidden: !canPay, onClick: onPay },
-      { key: 'post', label: 'Post Bill', icon: <FileDoneOutlined />, onClick: async () => { try { await api(`/procurement/supplier-invoices/${bill.id}/post`, { method: 'POST', body: '{}' }); message.success('Bill posted'); qc.invalidateQueries({ queryKey: ['/procurement/bills'] }); qc.invalidateQueries({ queryKey: ['/procurement/dashboard'] }); } catch (e: any) { message.error(e.message); } } },
+      { key: 'post', label: 'Save & Post', icon: <FileDoneOutlined />, onClick: async () => { try { await api(`/procurement/supplier-invoices/${bill.id}/finalize`, { method: 'POST', body: JSON.stringify({ action: 'POST' }) }); message.success('Bill posted — awaiting payment'); qc.invalidateQueries({ queryKey: ['/procurement/bills'] }); qc.invalidateQueries({ queryKey: ['/procurement/dashboard'] }); } catch (e: any) { message.error(e.message); } } },
       { key: 'journal', label: 'View Journal Entry', icon: <FileTextOutlined />, hidden: bill.status !== 'POSTED', onClick: () => window.open('/finance/journals', '_blank') },
       { key: 'flow', label: 'Document Flow', icon: <FileDoneOutlined />, hidden: bill.status !== 'POSTED', onClick: () => window.open('/procurement', '_blank') },
       { key: 'void', label: 'Void Bill', icon: <RollbackOutlined />, danger: true, hidden: bill.status !== 'POSTED', onClick: async () => { try { await api(`/procurement/supplier-invoices/${bill.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'VOID' }) }); message.success('Bill voided'); qc.invalidateQueries({ queryKey: ['/procurement/bills'] }); } catch (e: any) { message.error(e.message); } } },
@@ -176,8 +176,8 @@ function EnterBillTab({ onSaved }: { onSaved: () => void }) {
       const body = { supplierId: vendorId, invoiceNo: billNo || undefined, supplierInvoiceNo: supplierInvNo || undefined, invoiceDate: billDate.format('YYYY-MM-DD'), dueDate: dueDate ? dueDate.format('YYYY-MM-DD') : undefined, terms, currency, ref, memo, projectId: projectId || undefined, lines: v.lines.map((l: any) => ({ description: l.description, itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice, discount: l.discount || 0, taxRate: l.taxRate || 0, accountId: l.accountId })) };
       const bill = await api('/procurement/supplier-invoices', { method: 'POST', body: JSON.stringify(body) });
       if (attachment) await api(`/procurement/supplier-invoices/${bill.id}/attachments`, { method: 'POST', body: JSON.stringify({ name: attachment.name, mime: attachment.mime, size: attachment.size, dataUrl: attachment.dataUrl }) });
-      if (post) await api(`/procurement/supplier-invoices/${bill.id}/post`, { method: 'POST', body: '{}' });
-      message.success(post ? 'Bill posted' : 'Draft saved'); qc.invalidateQueries({ queryKey: ['/procurement/bills'] }); qc.invalidateQueries({ queryKey: ['/procurement/dashboard'] }); onSaved();
+      if (post) await api(`/procurement/supplier-invoices/${bill.id}/finalize`, { method: 'POST', body: JSON.stringify({ action: 'POST' }) });
+      message.success(post ? 'Bill posted — awaiting payment' : 'Draft saved'); qc.invalidateQueries({ queryKey: ['/procurement/bills'] }); qc.invalidateQueries({ queryKey: ['/procurement/dashboard'] }); onSaved();
     } catch (e: any) { message.error(e.message); } finally { setSaving(false); }
   }
 
@@ -220,10 +220,10 @@ function EnterBillTab({ onSaved }: { onSaved: () => void }) {
             </Upload.Dragger>
           )}
         </div>
-        <Form.Item label="Bill Lines" required><LineItems form={form} lines="lines" items={(meta.data?.items || []).map((i: any) => ({ label: `${i.sku} — ${i.name}`, value: i.id }))} account priceKey="purchaseCost" /></Form.Item>
+        <Form.Item label="Bill Lines" required><LineItems form={form} lines="lines" items={meta.data?.items || []} account priceKey="purchaseCost" /></Form.Item>
         <div className="flex justify-end font-semibold text-[15px] text-[#171a2e] mb-2">Total: <span className="text-[#003366] ml-2">{fmtMoney(total)}</span></div>
         <div className="text-[12px] text-[#64748b] mb-4">Unpaid — creates Accounts Payable</div>
-        <div className="flex justify-end gap-2"><Button onClick={onSaved}>Cancel</Button><Button onClick={() => save(false)} disabled={saving}>Save Draft</Button><Button type="primary" onClick={() => save(true)} loading={saving}>Post Bill</Button></div>
+        <div className="flex justify-end gap-2"><Button onClick={onSaved}>Cancel</Button><Button onClick={() => save(false)} disabled={saving}>Save Draft</Button><Button type="primary" onClick={() => save(true)} loading={saving}>Save & Post</Button></div>
       </Form>
     </div>
   );
@@ -290,14 +290,14 @@ function BillDetailModal({ billId, onClose, onPay }: { billId: string; onClose: 
   ];
   const tabs = [
     { key: 'details', label: 'Bill Details', children: <div>
-      <Descriptions column={3} size="small" bordered items={[{ label: 'Vendor', children: bill.supplier?.name }, { label: 'Vendor Invoice #', children: bill.supplierInvoiceNo || '—' }, { label: 'Bill #', children: bill.invoiceNo }, { label: 'Bill Date', children: fmtDate(bill.invoiceDate) }, { label: 'Terms', children: bill.terms || '—' }, { label: 'Due Date', children: bill.dueDate ? fmtDate(bill.dueDate) : '—' }, { label: 'Currency', children: bill.currency }, { label: 'PO', children: bill.purchaseOrder?.orderNo || '—' }, { label: 'Project', children: bill.project?.name || '—' }, { label: 'Reference', children: bill.ref || '—' }, { label: 'Memo', children: bill.memo || '—' }]} />
+      <Descriptions column={3} size="small" bordered items={[{ label: 'Vendor', children: bill.supplier?.name }, { label: 'Vendor Invoice #', children: bill.supplierInvoiceNo || '—' }, { label: 'Bill #', children: bill.invoiceNo }, { label: 'Bill Date', children: fmtDate(bill.invoiceDate) }, { label: 'Terms', children: bill.terms || '—' }, { label: 'Due Date', children: bill.dueDate ? fmtDate(bill.dueDate) : '—' }, { label: 'Currency', children: bill.currency }, { label: 'PO', children: bill.purchaseOrder?.poNo || '—' }, { label: 'Project', children: bill.project?.name || '—' }, { label: 'Reference', children: bill.ref || '—' }, { label: 'Memo', children: bill.memo || '—' }]} />
       <div className="mt-4"><Table rowKey="id" size="small" dataSource={bill.lines || []} columns={lineCols} pagination={false} /></div>
       <div className="flex justify-end mt-3 max-w-md ml-auto"><Descriptions column={1} size="small" bordered items={[{ label: 'Subtotal', children: fmtMoney(bill.subtotal) }, { label: 'Tax', children: fmtMoney(bill.taxTotal) }, { label: 'Total', children: <b>{fmtMoney(bill.total)}</b> }, { label: 'Paid', children: <span className="text-[#16a34a]">{fmtMoney(bill.amountPaid)}</span> }, { label: 'Balance Due', children: <span className="text-[#F97316] font-semibold">{fmtMoney(bill.remaining)}</span> }]} /></div>
     </div> },
     { key: 'payments', label: 'Payments', children: <Table rowKey="id" size="small" dataSource={bill.payments || []} columns={payCols} pagination={false} /> },
     { key: 'attachments', label: 'Attachments', children: arr(bill.attachments).length ? <div className="space-y-2">{arr(bill.attachments).map((a: any) => <div key={a.id} className="rounded-xl border p-3 flex items-center gap-3"><FileTextOutlined /><div className="flex-1 truncate">{a.name}</div><Tooltip title="Preview"><Button size="small" icon={<EyeOutlined />} onClick={() => window.open(a.dataUrl, '_blank')} /></Tooltip></div>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No attachments" /> },
     { key: 'flow', label: 'Document Flow', children: <div className="space-y-2">
-      <FlowRow type="Purchase Order" ref={bill.purchaseOrder?.orderNo || '—'} href={bill.purchaseOrderId ? `/documents/purchase-order/${bill.purchaseOrderId}` : undefined} />
+      <FlowRow type="Purchase Order" ref={bill.purchaseOrder?.poNo || '—'} href={bill.purchaseOrderId ? `/documents/purchase-order/${bill.purchaseOrderId}` : undefined} />
       <FlowRow type="Goods Receipt" ref="—" />
       <FlowRow type="Supplier Bill" ref={bill.invoiceNo} href={`/documents/supplier-invoice/${bill.id}`} />
       {(bill.payments || []).map((p: any) => <FlowRow key={p.id} type="Supplier Payment" ref={p.paymentNo} href="/procurement" />)}
@@ -310,7 +310,7 @@ function BillDetailModal({ billId, onClose, onPay }: { billId: string; onClose: 
   ];
   return (
     <Drawer open onClose={onClose} width={980} title={<span>Supplier Bill <b>{bill.invoiceNo}</b></span>}
-      extra={<Space wrap>{payable && <Button type="primary" icon={<PayCircleOutlined />} onClick={() => onPay(bill.id)}>{Number(bill.amountPaid) > 0.005 ? 'Pay Balance' : 'Pay Bill'}</Button>}<Tooltip title="Print"><a href={`/documents/supplier-invoice/${bill.id}`} target="_blank"><Button icon={<PrinterOutlined />} /></a></Tooltip>{bill.status === 'DRAFT' && <Button icon={<CheckCircleOutlined />} onClick={() => { api(`/procurement/supplier-invoices/${bill.id}/post`, { method: 'POST', body: '{}' }).then(() => { message.success('Posted'); onClose(); }).catch((e) => message.error(e.message)); }}>Post Bill</Button>}</Space>}>
+      extra={<Space wrap>{payable && <Button type="primary" icon={<PayCircleOutlined />} onClick={() => onPay(bill.id)}>{Number(bill.amountPaid) > 0.005 ? 'Pay Balance' : 'Make Payment'}</Button>}<Tooltip title="Print"><a href={`/documents/supplier-invoice/${bill.id}`} target="_blank"><Button icon={<PrinterOutlined />} /></a></Tooltip>{bill.status === 'DRAFT' && <Button icon={<CheckCircleOutlined />} onClick={() => { api(`/procurement/supplier-invoices/${bill.id}/finalize`, { method: 'POST', body: JSON.stringify({ action: 'POST' }) }).then(() => { message.success('Bill posted — awaiting payment'); onClose(); }).catch((e) => message.error(e.message)); }}>Save & Post</Button>}</Space>}>
       <div className="mb-4 flex flex-wrap gap-8 rounded-xl bg-[#f8f9ff] px-5 py-3">
         {[{ l: 'Bill Total', v: fmtMoney(bill.total), c: '#171a2e' }, { l: 'Paid', v: fmtMoney(bill.amountPaid), c: '#16a34a' }, { l: 'Balance Due', v: fmtMoney(bill.remaining), c: '#F97316' }, { l: 'Due Date', v: bill.dueDate ? fmtDate(bill.dueDate) : '—', c: '#64748b' }].map((k) => <div key={k.l}><div className="text-[12px] text-[#64748b]">{k.l}</div><div className="text-[18px] font-bold" style={{ color: k.c }}>{k.v}</div></div>)}
         <div className="flex items-center gap-2 ml-auto"><StatusTag value={bill.status} /><StatusTag value={bill.paymentStatus} /></div>

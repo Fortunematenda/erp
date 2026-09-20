@@ -6,12 +6,51 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { assertJwtSecretForStartup } from './core/security/jwt-secret';
 
+function configuredWebOrigins(): string[] {
+  const raw = process.env.WEB_ORIGIN || 'http://localhost:3000';
+  return raw
+    .split(',')
+    .map((s) => s.trim().replace(/^["']|["']$/g, ''))
+    .filter(Boolean);
+}
+
+function isDevBrowserOrigin(origin: string): boolean {
+  try {
+    const u = new URL(origin);
+    if (!['http:', 'https:'].includes(u.protocol)) return false;
+    const host = u.hostname;
+    return (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '::1' ||
+      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(host) ||
+      /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
+      /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(host)
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function bootstrap() {
   assertJwtSecretForStartup();
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix('api');
   app.use(helmet());
-  app.enableCors({ origin: process.env.WEB_ORIGIN?.split(',') ?? ['http://localhost:3000'], credentials: true });
+  const allowed = configuredWebOrigins();
+  app.enableCors({
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      // Non-browser clients (no Origin header) are allowed.
+      if (!origin) return callback(null, true);
+      if (allowed.includes(origin)) return callback(null, true);
+      // Local/dev: accept localhost, 127.0.0.1, and private LAN so login works from Network URL.
+      if (process.env.NODE_ENV !== 'production' && isDevBrowserOrigin(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error(`CORS blocked for origin ${origin}`), false);
+    },
+    credentials: true,
+  });
   app.useGlobalPipes(new ValidationPipe({
     whitelist: true,
     transform: true,

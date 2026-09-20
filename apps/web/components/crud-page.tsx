@@ -1,7 +1,7 @@
 'use client';
 import { useMemo, useState } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, DatePicker, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tooltip, message } from 'antd';
+import { Alert, App, Button, Card, DatePicker, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { DeleteOutlined, EditOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
@@ -87,6 +87,7 @@ export function CrudPage(props: CrudPageProps) {
     noPagination, extra, createLabel = 'New', statusTag, documentType,
     createSubmitLabel = 'Save', editSubmitLabel = 'Save',
   } = props;
+  const { message } = App.useApp();
   const qc = useQueryClient();
   const meta = useMeta();
   const [open, setOpen] = useState(false);
@@ -129,23 +130,47 @@ export function CrudPage(props: CrudPageProps) {
     (extraKeys || []).forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
   }
 
-  function openCreate() { setEditing(null); form.resetFields(); fields.forEach((f) => { if (f.defaultValue !== undefined) form.setFieldValue(f.name, f.defaultValue); }); setOpen(true); }
+  // Seed only after the overlay has opened and <Form form={form}> is mounted.
+  // destroyOnHidden + resetFields-before-open caused Ant Design's disconnected useForm warning.
+  function openCreate() { setEditing(null); setOpen(true); }
+  function openEdit(record: any) { setEditing(record); setOpen(true); }
 
-  function openEdit(record: any) {
-    setEditing(record);
+  function formSafeValue(f: FieldDef, raw: any) {
+    if (raw === undefined || raw === null) return undefined;
+    if (f.type === 'date') {
+      const d = dayjs(raw);
+      return d.isValid() ? d : undefined;
+    }
+    // Never put nested API records into the form store — Ant Design cloneDeep warns on cycles.
+    if (typeof raw === 'object') return undefined;
+    return raw;
+  }
+
+  function seedForm() {
     form.resetFields();
-    const values = editValues ? editValues(record) : {};
-    fields.forEach((f) => {
-      if (f.type === 'date') {
-        const raw = values[f.name] ?? record[f.name];
-        if (raw) values[f.name] = raw;
-      }
-    });
-    form.setFieldsValue({ ...values });
-    setOpen(true);
+    const patch: { name: string; value: any }[] = [];
+    if (editing) {
+      const fromEdit = editValues ? editValues(editing) : {};
+      fields.forEach((f) => {
+        const raw = fromEdit[f.name] !== undefined ? fromEdit[f.name] : editing[f.name];
+        const value = formSafeValue(f, raw);
+        if (value !== undefined) patch.push({ name: f.name, value });
+      });
+    } else {
+      fields.forEach((f) => {
+        if (f.defaultValue === undefined) return;
+        const value = formSafeValue(f, f.defaultValue);
+        if (value !== undefined) patch.push({ name: f.name, value });
+      });
+    }
+    if (patch.length) form.setFields(patch);
   }
 
   async function submit() {
+    if (!fields.length) {
+      setOpen(false);
+      return;
+    }
     const values = await form.validateFields();
     const clean: any = {};
     Object.entries(values).forEach(([k, v]) => {
@@ -184,7 +209,9 @@ export function CrudPage(props: CrudPageProps) {
         const res = listCache[f.selectPath];
         options = (res || []).map((r: any) => ({ label: f.selectLabel ? f.selectLabel(r) : String(r.name ?? r.id), value: r.id }));
       }
-      return <Select allowClear showSearch optionFilterProp="label" options={options} {...shared} />;
+      // Plain {label,value} only — extra keys on options can trigger form cloneDeep circular warnings.
+      const safeOptions = options.map((o) => ({ label: o.label, value: o.value }));
+      return <Select allowClear showSearch optionFilterProp="label" options={safeOptions} {...shared} />;
     }
     if (f.type === 'date') return <DatePicker className="w-full" style={{ width: '100%' }} {...shared} />;
     if (f.type === 'textarea') return <Input.TextArea rows={3} {...shared} />;
@@ -192,9 +219,11 @@ export function CrudPage(props: CrudPageProps) {
     return <Input {...shared} />;
   }
 
+  const canEdit = !hideEdit && fields.length > 0;
+
   const columnsWithActions = useMemo(() => {
     const cols = [...columns];
-    if (rowActions.length || canDelete || !hideEdit || documentType) {
+    if (rowActions.length || canDelete || canEdit || documentType) {
       cols.push({
         ...ACTIONS_COL,
         render: (_: any, record: any) => (
@@ -209,7 +238,7 @@ export function CrudPage(props: CrudPageProps) {
                 try {
                   const res = await api((a.url ? a.url(record) : `${path}/${record[idKey]}`), {
                     method: a.method || 'POST',
-                    body: a.body ? JSON.stringify(a.body(record)) : undefined,
+                    body: a.body ? JSON.stringify(a.body(record)) : (a.method === 'POST' || !a.method ? '{}' : undefined),
                   });
                   if (a.onDone) a.onDone(res, record);
                   message.success(`${a.label} done`);
@@ -220,7 +249,7 @@ export function CrudPage(props: CrudPageProps) {
               },
             })),
             ...(documentType ? [{ key: 'print', label: 'Print / PDF', icon: <PrinterOutlined />, onClick: () => window.open(`/documents/${documentType}/${record[idKey]}`, '_blank') }] : []),
-            ...(!hideEdit ? [{ key: 'edit', label: 'Edit', icon: <EditOutlined />, onClick: () => openEdit(record) }] : []),
+            ...(canEdit ? [{ key: 'edit', label: 'Edit', icon: <EditOutlined />, onClick: () => openEdit(record) }] : []),
             ...(canDelete ? [{ key: 'delete', label: 'Delete', icon: <DeleteOutlined />, danger: true as const, confirm: 'Delete this record?', onClick: async () => {
               try { await api((deleteUrl ? deleteUrl(record) : `${path}/${record[idKey]}`), { method: 'DELETE' }); message.success('Deleted'); invalidate(); }
               catch (e: any) { message.error(e.message); }
@@ -231,7 +260,7 @@ export function CrudPage(props: CrudPageProps) {
     }
     return cols;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columns, rowActions, canDelete, hideEdit, path, editing]);
+  }, [columns, rowActions, canDelete, canEdit, path, editing]);
 
   const statusOptions = props.statusOptions || (props.statusFilter
     ? [...new Set((list.data || []).map((r: any) => r[props.statusFilter as string]).filter(Boolean))].map((s) => ({ label: String(s).replace(/_/g, ' '), value: s }))
@@ -321,7 +350,7 @@ export function CrudPage(props: CrudPageProps) {
           pagination={noPagination ? false : { pageSize: 10, showSizeChanger: false, showTotal: (t: number) => `${t} records` }}
         />
       </Card>
-      {!props.useDrawer && (
+      {!props.useDrawer && fields.length > 0 && (
         <Modal
           title={editing ? `Edit ${title}` : `New ${createLabel}`}
           open={open}
@@ -329,7 +358,8 @@ export function CrudPage(props: CrudPageProps) {
           onOk={submit}
           confirmLoading={saving}
           width={720}
-          destroyOnHidden
+          forceRender
+          afterOpenChange={(visible) => { if (visible) seedForm(); }}
         >
           <Form form={form} layout="vertical">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4">
@@ -348,12 +378,14 @@ export function CrudPage(props: CrudPageProps) {
           </Form>
         </Modal>
       )}
-      {props.useDrawer && (
+      {props.useDrawer && fields.length > 0 && (
         <Drawer
           open={open}
           onClose={() => setOpen(false)}
           title={editing ? `Edit ${title}` : `New ${createLabel}`}
           width={700}
+          forceRender
+          afterOpenChange={(visible) => { if (visible) seedForm(); }}
           footer={<div className="flex items-center justify-end gap-2"><Button onClick={() => setOpen(false)}>Cancel</Button><Button type="primary" onClick={submit} loading={saving}>{editing ? editSubmitLabel : createSubmitLabel}</Button></div>}
         >
           <Form form={form} layout="vertical">

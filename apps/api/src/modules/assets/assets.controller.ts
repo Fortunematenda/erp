@@ -91,7 +91,7 @@ export class AssetsController {
       await this.prisma.asset.update({ where: { id: a.id }, data: { accumulatedDepreciation: Number((base + amount).toFixed(2)) } });
       const depExp = await this.prisma.ledgerAccount.findFirst({ where: { companyId, code: a.assetCategory?.depreciationExpenseAccount || '6500' } });
       const accDep = await this.prisma.ledgerAccount.findFirst({ where: { companyId, code: a.assetCategory?.accumulatedDepreciationAccount || '1509' } });
-      if (depExp && accDep) await this.posting.postJournal(companyId, { date: new Date(), description: `Depreciation ${a.assetNo} (${period})`, reference: `${a.assetNo}-${period}`, sourceType: 'DEPRECIATION', sourceId: run.id, lines: [
+      if (depExp && accDep) await this.posting.postJournal(companyId, { date: new Date(), description: `Depreciation ${a.assetNo} (${period})`, reference: `${a.assetNo}-${period}`, sourceType: 'DEPRECIATION', sourceId: `${run.id}:${a.id}`, lines: [
         { code: depExp.code, debit: Number(amount.toFixed(2)), credit: 0, description: 'Depreciation expense' },
         { code: accDep.code, debit: 0, credit: Number(amount.toFixed(2)), description: 'Accumulated depreciation' },
       ] });

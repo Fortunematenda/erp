@@ -9,10 +9,13 @@ import { NumberingService } from '../../core/common/numbering.service';
 import { AuditService } from '../../core/common/audit.service';
 import { PostingService } from '../finance/posting.service';
 import { StatusDto } from '../sales/sales.dto';
+import { getTransactionPostingMode } from '../finance/transaction-mode';
+import { ApprovalService } from '../approvals/approval.service';
+import { InventoryMovementService } from '../inventory/inventory-movement.service';
 
 @ApiTags('Procurement') @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Controller('procurement')
 export class ProcurementController {
-  constructor(private prisma: PrismaService, private numbering: NumberingService, private audit: AuditService, private posting: PostingService) {}
+  constructor(private prisma: PrismaService, private numbering: NumberingService, private audit: AuditService, private posting: PostingService, private approvals: ApprovalService, private stock: InventoryMovementService) {}
 
   private async accountByCode(companyId: string, id?: string) {
     if (!id) return { code: '1000', name: 'Cash / Bank' };
@@ -179,16 +182,26 @@ export class ProcurementController {
   @Patch('purchase-orders/:id/status') setOrderStatus(@Req() req: any, @Param('id') id: string, @Body() dto: StatusDto) {
     return this.prisma.purchaseOrder.updateMany({ where: { id, companyId: companyIdOf(req.user) }, data: { status: dto.status as any } });
   }
-  @Post('purchase-orders/:id/receive') async receiveOrder(@Req() req: any, @Param('id') id: string, @Body() dto: { warehouseId?: string; reference?: string; lines?: { quantity: number }[] }) {
+  @Post('purchase-orders/:id/receive') async receiveOrder(@Req() req: any, @Param('id') id: string, @Body() dto: { warehouseId?: string; reference?: string; lines?: { quantity: number }[]; confirm?: boolean } = {}) {
     const companyId = companyIdOf(req.user);
     const po = await this.prisma.purchaseOrder.findFirst({ where: { id, companyId }, include: { lines: true } });
-    if (!po) throw new Error('Purchase order not found');
-    const warehouseId = dto.warehouseId || (await this.prisma.warehouse.findFirst({ where: { companyId } }))?.id;
-    if (!warehouseId) throw new Error('Create a warehouse first');
+    if (!po) throw new BadRequestException('Purchase order not found');
+    const payload = dto || {};
+    const warehouseId = payload.warehouseId || (await this.prisma.warehouse.findFirst({ where: { companyId } }))?.id;
+    if (!warehouseId) throw new BadRequestException('Create a warehouse first');
     const grnNo = await this.numbering.next(companyId, 'GRN');
-    const lines = dto.lines?.length ? po.lines.map((l, i) => ({ itemId: l.itemId, quantity: dto.lines![i]?.quantity ?? l.quantity, unitCost: l.unitPrice, lineTotal: Number((Number(l.unitPrice) * (dto.lines![i]?.quantity ?? l.quantity)).toFixed(2)) })) : po.lines.map((l) => ({ itemId: l.itemId, quantity: l.quantity, unitCost: l.unitPrice, lineTotal: l.lineTotal }));
-    const grn = await this.prisma.goodsReceivedNote.create({ data: { companyId, purchaseOrderId: po.id, supplierId: po.supplierId, warehouseId, grnNo, reference: dto.reference || po.poNo, status: 'DRAFT', lines: { create: lines } }, include: { lines: true } });
+    const lines = payload.lines?.length
+      ? po.lines.map((l, i) => ({ itemId: l.itemId, quantity: payload.lines![i]?.quantity ?? l.quantity, unitCost: l.unitPrice, lineTotal: Number((Number(l.unitPrice) * (payload.lines![i]?.quantity ?? l.quantity)).toFixed(2)) }))
+      : po.lines.map((l) => ({ itemId: l.itemId, quantity: l.quantity, unitCost: l.unitPrice, lineTotal: l.lineTotal }));
+    const grn = await this.prisma.goodsReceivedNote.create({ data: { companyId, purchaseOrderId: po.id, supplierId: po.supplierId, warehouseId, grnNo, reference: payload.reference || po.poNo, status: 'DRAFT', lines: { create: lines } }, include: { lines: true } });
     await this.audit.log(companyId, req.user.sub, 'RECEIVE', 'PurchaseOrder', po.id, { grnNo });
+    // Automatic mode: Confirm Receipt in one step (inventory update). MANUAL keeps draft GRN.
+    const mode = await getTransactionPostingMode(this.prisma, companyId);
+    const shouldConfirm = payload.confirm !== false && mode !== 'MANUAL';
+    if (shouldConfirm) {
+      const confirmed = await this.confirmGrn(companyId, grn.id, req.user.sub);
+      return confirmed;
+    }
     return grn;
   }
   @Get('purchase-orders/:id/match') async match(@Req() req: any, @Param('id') id: string) {
@@ -229,7 +242,14 @@ export class ProcurementController {
     return grn;
   }
   @Post('grns/:id/post') async postGrn(@Req() req: any, @Param('id') id: string) {
-    const companyId = companyIdOf(req.user);
+    return this.confirmGrn(companyIdOf(req.user), id, req.user.sub);
+  }
+  /** User-facing alias — Confirm Receipt (same as post GRN / inventory update). */
+  @Post('grns/:id/confirm') async confirmGrnRoute(@Req() req: any, @Param('id') id: string) {
+    return this.confirmGrn(companyIdOf(req.user), id, req.user.sub);
+  }
+
+  private async confirmGrn(companyId: string, id: string, userId?: string) {
     const grn = await this.prisma.goodsReceivedNote.findFirst({ where: { id, companyId }, include: { lines: true, purchaseOrder: { include: { lines: true } } } });
     if (!grn) throw new Error('GRN not found');
     if (grn.status !== 'DRAFT') return grn;
@@ -246,21 +266,26 @@ export class ProcurementController {
         }
       }
       await tx.goodsReceivedNote.update({ where: { id: grn.id }, data: { status: 'POSTED' } });
-    });
-    if (grn.purchaseOrderId) {
-      const po = grn.purchaseOrder;
-      if (po) {
-        const received = await this.prisma.goodsReceivedNoteLine.aggregate({ where: { grn: { companyId, purchaseOrderId: po.id, status: 'POSTED' } }, _sum: { quantity: true } });
-        const ordered = po.lines.reduce((s, l) => s + Number(l.quantity), 0);
-        const rs = Number(received._sum.quantity || 0) >= ordered - 0.001 ? 'RECEIVED' : Number(received._sum.quantity || 0) > 0 ? 'PARTIALLY_RECEIVED' : 'NOT_RECEIVED';
-        await this.prisma.purchaseOrder.update({ where: { id: po.id }, data: { receiptStatus: rs } });
+      if (grn.purchaseOrderId) {
+        const po = await tx.purchaseOrder.findFirst({ where: { id: grn.purchaseOrderId }, include: { lines: true } });
+        if (po) {
+          const allRecv = po.lines.every((l) => Number(l.receivedQty || 0) >= Number(l.quantity) - 0.001);
+          const anyRecv = po.lines.some((l) => Number(l.receivedQty || 0) > 0);
+          const receiptStatus = allRecv ? 'RECEIVED' : anyRecv ? 'PARTIALLY_RECEIVED' : 'NOT_RECEIVED';
+          const status = allRecv ? 'RECEIVED' : anyRecv ? 'PART_RECEIVED' : po.status;
+          await tx.purchaseOrder.update({ where: { id: po.id }, data: { receiptStatus, status: status as any } });
+        }
       }
-    }
-    await this.audit.log(companyId, req.user.sub, 'POST', 'GoodsReceivedNote', grn.id, { grnNo: grn.grnNo });
-    return this.prisma.goodsReceivedNote.findUnique({ where: { id: grn.id }, include: { lines: true } });
+    });
+    await this.audit.log(companyId, userId, 'RECEIPT_CONFIRMED', 'GoodsReceivedNote', id, { grnNo: grn.grnNo });
+    return this.prisma.goodsReceivedNote.findUnique({ where: { id }, include: { lines: true, purchaseOrder: true, warehouse: true } });
   }
   @Delete('grns/:id') async deleteGrn(@Req() req: any, @Param('id') id: string) {
-    await this.prisma.goodsReceivedNote.deleteMany({ where: { id, companyId: companyIdOf(req.user) } });
+    const companyId = companyIdOf(req.user);
+    const grn = await this.prisma.goodsReceivedNote.findFirst({ where: { id, companyId } });
+    if (!grn) throw new BadRequestException('GRN not found');
+    if (grn.status === 'POSTED') throw new BadRequestException('Posted GRNs cannot be deleted. Reverse stock via a return or adjustment.');
+    await this.prisma.goodsReceivedNote.deleteMany({ where: { id, companyId } });
     return { ok: true };
   }
 
@@ -411,18 +436,19 @@ export class ProcurementController {
   @Post('supplier-invoices') async createSupplierInvoice(@Req() req: any, @Body() dto: CreateSupplierInvoiceDto) {
     const companyId = companyIdOf(req.user);
     if (dto.invoiceNo && dto.invoiceNo.trim()) {
-      const dup = await this.prisma.supplierInvoice.findFirst({ where: { companyId, supplierId: dto.supplierId, supplierInvoiceNo: dto.invoiceNo.trim() } });
-      if (dup) throw new BadRequestException(`This supplier invoice number (${dto.invoiceNo}) already exists for this supplier. Bill: ${dup.invoiceNo}`);
+      const normalized = dto.invoiceNo.trim().replace(/\s+/g, ' ').toLowerCase();
+      const existing = await this.prisma.supplierInvoice.findMany({ where: { companyId, supplierId: dto.supplierId, status: { notIn: ['VOID'] }, supplierInvoiceNo: { not: null } }, select: { id: true, invoiceNo: true, supplierInvoiceNo: true } });
+      const dup = existing.find((b) => String(b.supplierInvoiceNo || '').trim().replace(/\s+/g, ' ').toLowerCase() === normalized);
+      if (dup) throw new BadRequestException(`This supplier invoice number (${dto.invoiceNo.trim()}) already exists for this supplier. Bill: ${dup.invoiceNo}`);
     }
     if (dto.purchaseOrderId) {
-      const dup = await this.prisma.supplierInvoice.findFirst({ where: { companyId, purchaseOrderId: dto.purchaseOrderId, status: { notIn: ['VOID'] } } });
-      if (dup) throw new BadRequestException('Purchase order already billed');
+      // Allow multiple bills against one PO while received qty remains (partial billing).
       const po = await this.prisma.purchaseOrder.findFirst({ where: { id: dto.purchaseOrderId, companyId }, include: { lines: true } });
-      if (po) {
-        const totalInv = dto.lines.reduce((s, l) => s + Number(l.quantity), 0);
-        const received = po.lines.reduce((s, l) => s + Number(l.receivedQty || 0), 0);
-        if (totalInv > received + 0.001) throw new BadRequestException('Cannot bill more than the received quantity');
-      }
+      if (!po) throw new BadRequestException('Purchase order not found');
+      const totalInv = dto.lines.reduce((s, l) => s + Number(l.quantity), 0);
+      const received = po.lines.reduce((s, l) => s + Number(l.receivedQty || 0), 0);
+      const alreadyInvoiced = po.lines.reduce((s, l) => s + Number(l.invoicedQty || 0), 0);
+      if (totalInv > received - alreadyInvoiced + 0.001) throw new BadRequestException(`Cannot bill more than remaining received quantity (received ${received}, already billed ${alreadyInvoiced}, this bill ${totalInv})`);
     }
     const { mapped, subtotal, taxTotal, total } = this.computeLines(dto.lines);
     for (const l of mapped) { if (l.accountId) { const v = await this.validateLineAccount(companyId, l.accountId); l.accountCode = v?.code; } }
@@ -445,8 +471,34 @@ export class ProcurementController {
     return si;
   }
   @UseGuards(PermissionsGuard) @RequirePermissions('procurement.bills.manage')
-  @Post('supplier-invoices/:id/post') postSupplierInvoice(@Req() req: any, @Param('id') id: string) {
-    return this.posting.postSupplierInvoice(companyIdOf(req.user), id);
+  @Post('supplier-invoices/:id/post') async postSupplierInvoice(@Req() req: any, @Param('id') id: string) {
+    const companyId = companyIdOf(req.user);
+    const res = await this.posting.postSupplierInvoice(companyId, id);
+    await this.audit.log(companyId, req.user.sub, 'POSTED_AUTOMATICALLY', 'SupplierInvoice', id, { module: 'procurement', result: 'SUCCESS' });
+    return res;
+  }
+  /** Save & Post / Submit for Approval — business finalize for supplier bills. */
+  @UseGuards(PermissionsGuard) @RequirePermissions('procurement.bills.manage')
+  @Post('supplier-invoices/:id/finalize') async finalizeSupplierInvoice(@Req() req: any, @Param('id') id: string, @Body() body: { action?: 'POST' | 'SUBMIT' }) {
+    const companyId = companyIdOf(req.user);
+    const action = (body?.action || 'POST').toUpperCase();
+    const bill = await this.prisma.supplierInvoice.findFirst({ where: { id, companyId } });
+    if (!bill) throw new BadRequestException('Supplier bill not found');
+    if (action === 'SUBMIT') {
+      await this.prisma.supplierInvoice.update({ where: { id }, data: { status: 'AWAITING_APPROVAL' } });
+      await this.approvals.submit(companyId, req.user.sub, {
+        documentType: 'SUPPLIER_INVOICE',
+        documentId: id,
+        documentNo: bill.invoiceNo,
+        amount: Number(bill.total || 0),
+        comment: 'Submitted for approval from procurement',
+      });
+      await this.audit.log(companyId, req.user.sub, 'SUBMITTED_FOR_APPROVAL', 'SupplierInvoice', id, {});
+      return this.prisma.supplierInvoice.findUnique({ where: { id }, include: { lines: true } });
+    }
+    const res = await this.posting.postSupplierInvoice(companyId, id);
+    await this.audit.log(companyId, req.user.sub, 'POSTED_AUTOMATICALLY', 'SupplierInvoice', id, {});
+    return res;
   }
   @UseGuards(PermissionsGuard) @RequirePermissions('procurement.bills.manage')
   @Post('supplier-invoices/:id/attachments') async addBillAttachment(@Req() req: any, @Param('id') id: string, @Body() b: any) {
@@ -467,7 +519,11 @@ export class ProcurementController {
     return { ok: true };
   }
   @Delete('supplier-invoices/:id') async deleteSupplierInvoice(@Req() req: any, @Param('id') id: string) {
-    await this.prisma.supplierInvoice.deleteMany({ where: { id, companyId: companyIdOf(req.user) } });
+    const companyId = companyIdOf(req.user);
+    const bill = await this.prisma.supplierInvoice.findFirst({ where: { id, companyId } });
+    if (!bill) throw new BadRequestException('Supplier bill not found');
+    if (!['DRAFT', 'AWAITING_APPROVAL'].includes(bill.status)) throw new BadRequestException('Only draft / awaiting-approval bills can be deleted. Void or credit posted bills.');
+    await this.prisma.supplierInvoice.deleteMany({ where: { id, companyId } });
     return { ok: true };
   }
 
@@ -577,5 +633,139 @@ export class ProcurementController {
       byMonth[key].value += Number(po.total);
     }
     return Object.values(byMonth).sort((a, b) => a.month.localeCompare(b.month));
+  }
+
+  // ----- Supplier goods returns (physical RETURN_OUT → optional Vendor Credit) -----
+  @Get('supplier-returns') supplierReturns(@Req() req: any) {
+    return this.prisma.supplierReturn.findMany({
+      where: { companyId: companyIdOf(req.user) },
+      include: { supplier: true, purchaseOrder: true, grn: true, supplierInvoice: true, warehouse: true, vendorCredit: true, lines: true },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  @Post('supplier-returns') async createSupplierReturn(@Req() req: any, @Body() body: any) {
+    const companyId = companyIdOf(req.user);
+    if (!body?.supplierId) throw new BadRequestException('Supplier is required');
+    if (!body?.warehouseId) throw new BadRequestException('Warehouse is required for goods returns');
+    const lines = Array.isArray(body.lines) ? body.lines.filter((l: any) => Number(l.quantity) > 0) : [];
+    if (!lines.length) throw new BadRequestException('Add at least one return line with quantity');
+    if (lines.some((l: any) => !l.itemId)) throw new BadRequestException('Every goods-return line needs an inventory item');
+    const warehouse = await this.prisma.warehouse.findFirst({ where: { id: body.warehouseId, companyId } });
+    if (!warehouse) throw new BadRequestException('Warehouse not found');
+    const returnNo = await this.numbering.next(companyId, 'SRTN');
+    const row = await this.prisma.supplierReturn.create({
+      data: {
+        companyId,
+        returnNo,
+        supplierId: body.supplierId,
+        purchaseOrderId: body.purchaseOrderId || null,
+        grnId: body.grnId || null,
+        supplierInvoiceId: body.supplierInvoiceId || null,
+        warehouseId: body.warehouseId,
+        reason: body.reason || 'Supplier return',
+        notes: body.notes,
+        returnedAt: body.returnedAt ? new Date(body.returnedAt) : new Date(),
+        status: 'DRAFT',
+        lines: {
+          create: lines.map((l: any) => ({
+            description: l.description || 'Return line',
+            itemId: l.itemId,
+            quantity: Number(l.quantity),
+            unitPrice: Number(l.unitPrice || 0),
+            taxRate: Number(l.taxRate || 0),
+            unitCost: Number(l.unitCost || 0),
+          })),
+        },
+      },
+      include: { lines: true, supplier: true },
+    });
+    await this.audit.log(companyId, req.user.sub, 'CREATE', 'SupplierReturn', row.id, { returnNo });
+    if (body.confirm) return this.confirmSupplierReturn(req, row.id, { issueCredit: body.issueCredit !== false, postCredit: !!body.postCredit });
+    return row;
+  }
+
+  @Post('supplier-returns/:id/confirm') async confirmSupplierReturn(@Req() req: any, @Param('id') id: string, @Body() body: any = {}) {
+    const companyId = companyIdOf(req.user);
+    const ret = await this.prisma.supplierReturn.findFirst({ where: { id, companyId }, include: { lines: true } });
+    if (!ret) throw new BadRequestException('Supplier return not found');
+    if (ret.status === 'CONFIRMED') {
+      return this.prisma.supplierReturn.findFirst({ where: { id }, include: { lines: true, vendorCredit: true, supplier: true, warehouse: true, purchaseOrder: true, grn: true, supplierInvoice: true } });
+    }
+    if (ret.status === 'CANCELLED') throw new BadRequestException('Return is cancelled');
+    if (!ret.warehouseId) throw new BadRequestException('Warehouse is required');
+
+    let vendorCreditId = ret.vendorCreditId;
+    await this.prisma.$transaction(async (tx) => {
+      for (const line of ret.lines) {
+        if (!line.itemId) continue;
+        await this.stock.create(companyId, {
+          warehouseId: ret.warehouseId!,
+          itemId: line.itemId,
+          type: 'RETURN_OUT',
+          quantity: Number(line.quantity),
+          unitCost: Number(line.unitCost || line.unitPrice || 0),
+          reference: ret.returnNo,
+          occurredAt: ret.returnedAt,
+        }, req.user.sub, tx);
+      }
+      await tx.supplierReturn.update({ where: { id: ret.id }, data: { status: 'CONFIRMED' } });
+    });
+
+    if (body?.issueCredit !== false && !vendorCreditId) {
+      let subtotal = 0; let taxTotal = 0;
+      const mapped = ret.lines.map((l) => {
+        const net = Number(l.quantity) * Number(l.unitPrice);
+        const tax = net * (Number(l.taxRate) / 100);
+        subtotal += net; taxTotal += tax;
+        return {
+          description: l.description,
+          itemId: l.itemId,
+          quantity: Number(l.quantity),
+          unitPrice: Number(l.unitPrice),
+          taxRate: Number(l.taxRate),
+          taxAmount: Number(tax.toFixed(2)),
+          lineTotal: Number((net + tax).toFixed(2)),
+        };
+      });
+      const no = await this.numbering.next(companyId, 'VC');
+      const vc = await this.prisma.vendorCredit.create({
+        data: {
+          companyId,
+          supplierId: ret.supplierId,
+          vendorCreditNo: no,
+          creditDate: ret.returnedAt,
+          status: 'DRAFT',
+          applicationStatus: 'UNAPPLIED',
+          currency: 'USD',
+          subtotal: Number(subtotal.toFixed(2)),
+          taxTotal: Number(taxTotal.toFixed(2)),
+          total: Number((subtotal + taxTotal).toFixed(2)),
+          reason: ret.reason || 'Supplier return',
+          sourceInvoiceId: ret.supplierInvoiceId,
+          sourcePurchaseOrderId: ret.purchaseOrderId,
+          sourceGrnId: ret.grnId,
+          createdById: req.user.sub,
+          lines: { create: mapped },
+        },
+      });
+      vendorCreditId = vc.id;
+      await this.prisma.supplierReturn.update({ where: { id: ret.id }, data: { vendorCreditId: vc.id } });
+      await this.audit.log(companyId, req.user.sub, 'VENDOR_CREDIT_CREATED', 'VendorCredit', vc.id, { vcNo: no, via: 'supplierReturn', returnNo: ret.returnNo });
+      if (body?.postCredit) {
+        // Reuse finance posting path via PostingService journal shape used by vendor credits
+        const lines: any[] = [];
+        for (const l of mapped) {
+          lines.push({ code: l.itemId ? '1200' : '6000', debit: 0, credit: Number((l.lineTotal - l.taxAmount).toFixed(2)), description: l.description });
+        }
+        if (taxTotal > 0) lines.push({ code: '2100', debit: 0, credit: Number(taxTotal.toFixed(2)), description: 'Input VAT reversal' });
+        lines.push({ code: '2000', debit: Number((subtotal + taxTotal).toFixed(2)), credit: 0, description: 'Accounts payable reduction' });
+        await this.posting.postJournal(companyId, { date: ret.returnedAt, description: `Vendor credit ${no}`, reference: no, sourceType: 'VENDOR_CREDIT', sourceId: vc.id, lines, userId: req.user.sub });
+        await this.prisma.vendorCredit.update({ where: { id: vc.id }, data: { status: 'POSTED' } });
+      }
+    }
+
+    await this.audit.log(companyId, req.user.sub, 'CONFIRM', 'SupplierReturn', ret.id, { returnNo: ret.returnNo, vendorCreditId });
+    return this.prisma.supplierReturn.findFirst({ where: { id: ret.id }, include: { lines: true, vendorCredit: true, supplier: true, warehouse: true, purchaseOrder: true, grn: true, supplierInvoice: true } });
   }
 }

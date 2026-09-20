@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Card, DatePicker, Form, Input, Modal, Select, Table, Tabs, Tooltip, message } from 'antd';
+import { App, Button, Card, DatePicker, Form, Input, Modal, Select, Table, Tabs, Tooltip } from 'antd';
 import { DollarOutlined, FileDoneOutlined, PlusOutlined, PrinterOutlined, ShopOutlined, ShoppingCartOutlined, TeamOutlined, WarningOutlined, PayCircleOutlined, CheckCircleOutlined, CloseOutlined, SwapOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import Link from 'next/link';
@@ -17,34 +17,57 @@ import { useMeta } from '@/lib/meta';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
 
+function mapLines(lines: any[] | undefined) {
+  return (lines || []).map((l: any) => ({
+    description: l.description,
+    itemId: l.itemId,
+    quantity: l.quantity,
+    unitPrice: l.unitPrice,
+  }));
+}
+
 function ProcDocTab({ path, invalidates, idPrefix, numberKey, supplierRequired = true, extraCols = [], createFn, actions = [], printType }: any) {
+  const { message } = App.useApp();
   const qc = useQueryClient();
   const meta = useMeta();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
   const list = useQuery({ queryKey: [path], queryFn: () => api(path) });
-  const itemOptions = (meta.data?.items || []).map((i: any) => ({ label: `${i.sku} — ${i.name}`, value: i.id }));
   const cols: ColumnsType<any> = extraCols || [];
 
-  async function submit(v: any) {
+  async function submit() {
     try {
+      const v = await form.validateFields();
+      if (!v.lines?.length) {
+        message.error('Add at least one line');
+        return;
+      }
       setSaving(true);
       const body = createFn ? createFn(v) : v;
       await api(path, { method: 'POST', body: JSON.stringify(body) });
-      message.success(`${idPrefix} created`); setOpen(false); form.resetFields();
+      message.success(`${idPrefix} created`);
+      setOpen(false);
       invalidates.forEach((k: string) => qc.invalidateQueries({ queryKey: [k] }));
-    } catch (e: any) { message.error(e.message); } finally { setSaving(false); }
+    } catch (e: any) {
+      if (e?.errorFields) return;
+      message.error(e.message);
+    } finally { setSaving(false); }
   }
 
   async function act(record: any, a: any) {
-    try { await api(a.url(record), { method: a.method || 'POST', body: a.body ? JSON.stringify(a.body(record)) : undefined }); if (a.done) message.success(a.done); invalidates.forEach((k: string) => qc.invalidateQueries({ queryKey: [k] })); }
-    catch (e: any) { message.error(e.message); }
+    try {
+      const method = a.method || 'POST';
+      const body = a.body ? JSON.stringify(a.body(record)) : (method === 'POST' || method === 'PATCH' ? '{}' : undefined);
+      await api(a.url(record), { method, body });
+      if (a.done) message.success(a.done);
+      invalidates.forEach((k: string) => qc.invalidateQueries({ queryKey: [k] }));
+    } catch (e: any) { message.error(e.message); }
   }
 
   return (
     <>
-      <div className="flex justify-end mb-4"><Button type="primary" icon={<PlusOutlined />} onClick={() => { form.resetFields(); setOpen(true); }}>New {idPrefix}</Button></div>
+      <div className="flex justify-end mb-4"><Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>New {idPrefix}</Button></div>
       <Table loading={list.isLoading} rowKey="id" dataSource={list.data || []} scroll={{ x: true }}
         columns={[
           { title: idPrefix, dataIndex: numberKey, width: 120 },
@@ -70,7 +93,16 @@ function ProcDocTab({ path, invalidates, idPrefix, numberKey, supplierRequired =
           }] : []),
         ]}
       />
-      <Modal title={`New ${idPrefix}`} open={open} onCancel={() => setOpen(false)} onOk={submit} confirmLoading={saving} width={860} destroyOnHidden>
+      <Modal
+        title={`New ${idPrefix}`}
+        open={open}
+        onCancel={() => setOpen(false)}
+        onOk={submit}
+        confirmLoading={saving}
+        width={860}
+        forceRender
+        afterOpenChange={(visible) => { if (visible) form.resetFields(); }}
+      >
         <Form form={form} layout="vertical">
           <div className="grid grid-cols-2 gap-3">
             <Form.Item label="Supplier" name="supplierId" rules={supplierRequired ? [{ required: true }] : []}>
@@ -78,7 +110,7 @@ function ProcDocTab({ path, invalidates, idPrefix, numberKey, supplierRequired =
             </Form.Item>
             <Form.Item label="Date required" name="dateRequired"><DatePicker className="w-full" /></Form.Item>
           </div>
-          <Form.Item label="Lines" required><LineItems form={form} lines="lines" items={itemOptions} priceKey="purchaseCost" /></Form.Item>
+          <Form.Item label="Lines" required><LineItems form={form} lines="lines" items={meta.data?.items || []} priceKey="purchaseCost" /></Form.Item>
         </Form>
       </Modal>
     </>
@@ -127,7 +159,7 @@ export default function Procurement() {
       ]}
     /> },
     { key: 'requisitions', label: 'Requisitions', children: <ProcDocTab path="/procurement/requisitions" invalidates={['/procurement/requisitions', '/procurement/purchase-orders']} idPrefix="Requisition" numberKey="requisitionNo" supplierRequired={false}
-      createFn={(v: any) => ({ branchId: v.branchId, requestedBy: v.requestedBy, dateRequired: v.dateRequired?.format('YYYY-MM-DD'), notes: v.notes, lines: v.lines.map((l: any) => ({ description: l.description, itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice })) })}
+      createFn={(v: any) => ({ branchId: v.branchId, requestedBy: v.requestedBy, dateRequired: v.dateRequired?.format('YYYY-MM-DD'), notes: v.notes, lines: mapLines(v.lines) })}
       actions={[
         { label: 'Submit', show: (r: any) => r.status === 'DRAFT', url: (r: any) => `/procurement/requisitions/${r.id}/status`, ...statusPatch('SUBMITTED'), done: 'Submitted' },
         { label: 'Approve', type: 'primary', show: (r: any) => ['DRAFT', 'SUBMITTED'].includes(r.status), url: (r: any) => `/procurement/requisitions/${r.id}/status`, ...statusPatch('APPROVED'), done: 'Approved' },
@@ -135,26 +167,26 @@ export default function Procurement() {
         { label: 'Convert → PO', type: 'primary', show: (r: any) => r.status === 'APPROVED', url: (r: any) => `/procurement/requisitions/${r.id}/convert`, done: 'Converted to PO' },
       ]}
     /> },
-    { key: 'orders', label: 'Purchase Orders', children: <ProcDocTab path="/procurement/purchase-orders" invalidates={['/procurement/purchase-orders', '/procurement/grns', '/inventory/stock']} idPrefix="Purchase Order" numberKey="orderNo" printType="purchase-order"
-      createFn={(v: any) => ({ supplierId: v.supplierId, orderDate: v.dateRequired?.format('YYYY-MM-DD'), currency: 'USD', lines: v.lines.map((l: any) => ({ description: l.description, itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice })) })}
+    { key: 'orders', label: 'Purchase Orders', children: <ProcDocTab path="/procurement/purchase-orders" invalidates={['/procurement/purchase-orders', '/procurement/grns', '/inventory/stock']} idPrefix="Purchase Order" numberKey="poNo" printType="purchase-order"
+      createFn={(v: any) => ({ supplierId: v.supplierId, orderDate: v.dateRequired?.format('YYYY-MM-DD'), currency: 'USD', lines: mapLines(v.lines) })}
       actions={[
-        { label: 'Approve', type: 'primary', show: (r: any) => r.status === 'DRAFT', url: (r: any) => `/procurement/purchase-orders/${r.id}/status`, ...statusPatch('APPROVED'), done: 'Approved' },
-        { label: 'Receive → GRN', type: 'primary', show: (r: any) => r.status === 'APPROVED', url: (r: any) => `/procurement/purchase-orders/${r.id}/receive`, done: 'Goods received (GRN created)' },
-        { label: 'Close', show: (r: any) => ['RECEIVED'].includes(r.status), url: (r: any) => `/procurement/purchase-orders/${r.id}/status`, ...statusPatch('CLOSED'), done: 'Closed' },
+        { label: 'Approve', type: 'primary', show: (r: any) => r.status === 'DRAFT', url: (r: any) => `/procurement/purchase-orders/${r.id}/status`, ...statusPatch('APPROVED'), done: 'Purchase order approved' },
+        { label: 'Receive Items', type: 'primary', show: (r: any) => ['APPROVED', 'PART_RECEIVED'].includes(r.status) || ['PARTIALLY_RECEIVED', 'NOT_RECEIVED'].includes(r.receiptStatus), url: (r: any) => `/procurement/purchase-orders/${r.id}/receive`, body: () => ({}), done: 'Receipt confirmed — stock updated' },
+        { label: 'Cancel', danger: true, show: (r: any) => r.status === 'DRAFT' || r.status === 'APPROVED', url: (r: any) => `/procurement/purchase-orders/${r.id}/status`, ...statusPatch('CANCELLED'), done: 'Purchase order cancelled' },
       ]}
     /> },
-    { key: 'grns', label: 'GRNs', children: <CrudPage title="Goods Received Notes" path="/procurement/grns" hideCreate canDelete
+    { key: 'grns', label: 'GRNs', children: <CrudPage title="Goods Received Notes" path="/procurement/grns" hideCreate hideEdit canDelete
       columns={[
-        { title: 'GRN', dataIndex: 'grnNo', width: 120 }, { title: 'PO', render: (_, r: any) => r.purchaseOrder?.orderNo || '—' },
+        { title: 'GRN', dataIndex: 'grnNo', width: 120 }, { title: 'PO', render: (_, r: any) => r.purchaseOrder?.poNo || '—' },
         { title: 'Supplier', render: (_, r: any) => r.supplier?.name || '—' }, { title: 'Warehouse', render: (_, r: any) => r.warehouse?.name || '—' },
         { title: 'Total', dataIndex: 'total', align: 'right', render: (v: any) => fmtMoney(v) },
         { title: 'Status', dataIndex: 'status', width: 110, render: (v: any) => <StatusTag value={v} /> },
       ]}
-      rowActions={[{ key: 'post', label: 'Post', type: 'primary', show: (r) => r.status === 'DRAFT', url: (r) => `/procurement/grns/${r.id}/post`, extraInvalidate: ['/inventory/stock'] }]}
+      rowActions={[{ key: 'confirm', label: 'Confirm Receipt', type: 'primary', show: (r) => r.status === 'DRAFT', url: (r) => `/procurement/grns/${r.id}/confirm`, extraInvalidate: ['/inventory/stock', '/procurement/purchase-orders'] }]}
     /> },
     { key: 'supplier-invoices', label: 'Supplier Invoices', children: <ProcDocTab path="/procurement/supplier-invoices" invalidates={['/procurement/supplier-invoices']} idPrefix="Supplier Invoice" numberKey="invoiceNo" printType="supplier-invoice"
-      createFn={(v: any) => ({ supplierId: v.supplierId, invoiceDate: v.dateRequired?.format('YYYY-MM-DD'), dueDate: v.dueDate?.format('YYYY-MM-DD'), currency: 'USD', lines: v.lines.map((l: any) => ({ description: l.description, itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice })) })}
-      actions={[{ label: 'Post', type: 'primary', show: (r: any) => r.status === 'DRAFT', url: (r: any) => `/procurement/supplier-invoices/${r.id}/post`, done: 'Invoice posted (AP + inventory)' }]}
+      createFn={(v: any) => ({ supplierId: v.supplierId, invoiceDate: v.dateRequired?.format('YYYY-MM-DD'), dueDate: v.dueDate?.format('YYYY-MM-DD'), currency: 'USD', lines: mapLines(v.lines) })}
+      actions={[{ label: 'Save & Post', type: 'primary', show: (r: any) => r.status === 'DRAFT', url: (r: any) => `/procurement/supplier-invoices/${r.id}/finalize`, method: 'POST', body: () => ({ action: 'POST' }), done: 'Bill posted — awaiting payment' }]}
     /> },
     { key: 'payments', label: 'Supplier Payments', children: <CrudPage title="Supplier Payments" path="/procurement/supplier-payments" createLabel="Payment" canDelete
       sources={['/procurement/supplier-invoices']}

@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { App, Button, DatePicker, Drawer, Form, Input, InputNumber, Select, Table } from 'antd';
+import { App, Button, DatePicker, Drawer, Form, Input, InputNumber, Select, Space, Table } from 'antd';
 import { DeleteOutlined, DollarOutlined, EyeOutlined, FileDoneOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, UndoOutlined, ThunderboltOutlined, RobotOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import Link from 'next/link';
@@ -19,7 +19,7 @@ const REASONS = ['Returned Goods', 'Pricing Error', 'Overcharge', 'Damaged Goods
 const DOC_STATUS = ['DRAFT', 'POSTED', 'VOID'];
 const APP_STATUS = ['UNAPPLIED', 'PARTIALLY_APPLIED', 'APPLIED', 'REFUNDED'];
 const FISC_STATUS = ['NOT_REQUIRED', 'READY', 'PENDING', 'FISCALISED', 'RETRY', 'REJECTED'];
-type Line = { key: number; description: string; quantity: number; unitPrice: number; taxRate: number };
+type Line = { key: number; description: string; itemId?: string; quantity: number; unitPrice: number; taxRate: number };
 
 export function CreditNotesWorkspace() {
   const qc = useQueryClient();
@@ -98,7 +98,7 @@ export function CreditNotesWorkspace() {
         {rows.length === 0 ? <EmptyState title="No credit notes" description="Create a credit note to adjust a customer balance." action={<Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>New Credit Note</Button>} /> : <Table rowKey="id" loading={list.isLoading} dataSource={rows} columns={columns} scroll={{ x: true }} pagination={{ pageSize: 10, showSizeChanger: false }} />}
       </div>
       <CreditNoteCreateDrawer open={createOpen} initialInvoiceId={sp.get('invoice') || undefined} onClose={() => setCreateOpen(false)} onCreated={() => { qc.invalidateQueries({ queryKey: ['/sales/credit-notes'] }); qc.invalidateQueries({ queryKey: ['/sales/invoices'] }); setCreateOpen(false); }} />
-      <CreditNoteViewDrawer cn={applyCn} onClose={() => setApplyCn(null)} onAction={doApi} />
+      <CreditNoteApplyDrawer cn={applyCn} onClose={() => setApplyCn(null)} onApplied={() => { qc.invalidateQueries({ queryKey: ['/sales/credit-notes'] }); qc.invalidateQueries({ queryKey: ['/sales/invoices'] }); setApplyCn(null); }} />
       <CreditNoteViewDrawer cn={view} onClose={() => setView(null)} onAction={doApi} />
     </div>
   );
@@ -124,34 +124,81 @@ function CreditNoteCreateDrawer({ open, initialInvoiceId, onClose, onCreated }: 
   const invoices = useQuery({ queryKey: ['/sales/invoices'], queryFn: () => api('/sales/invoices'), enabled: open });
   const [lines, setLines] = useState<Line[]>([{ key: 1, description: '', quantity: 1, unitPrice: 0, taxRate: 0 }]);
   const [saving, setSaving] = useState(false);
+  const [restock, setRestock] = useState(false);
   const allInvoices = useMemo(() => (Array.isArray(invoices.data) ? invoices.data : []), [invoices.data]);
-  useEffect(() => { if (open && initialInvoiceId) { const inv = allInvoices.find((i: any) => i.id === initialInvoiceId); if (inv) { form.setFieldsValue({ customerId: inv.customerId, invoiceId: inv.id }); setLines((inv.lines || []).map((l: any, i: number) => ({ key: i + 1, description: l.description, quantity: Number(l.quantity), unitPrice: Number(l.unitPrice), taxRate: Number(l.taxRate) }))); } } }, [open, initialInvoiceId, allInvoices]);
+  const itemOpts = useMemo(() => (meta.data?.items || []).map((i: any) => ({ label: `${i.sku} — ${i.name}`, value: i.id, name: i.name, price: Number(i.sellingPrice || 0) })), [meta.data?.items]);
+  useEffect(() => { if (open && initialInvoiceId) { const inv = allInvoices.find((i: any) => i.id === initialInvoiceId); if (inv) { form.setFieldsValue({ customerId: inv.customerId, invoiceId: inv.id }); setLines((inv.lines || []).map((l: any, i: number) => ({ key: i + 1, description: l.description, itemId: l.itemId, quantity: Number(l.quantity), unitPrice: Number(l.unitPrice), taxRate: Number(l.taxRate) }))); } } }, [open, initialInvoiceId, allInvoices]); // eslint-disable-line
   const totals = useMemo(() => { const sub = lines.reduce((s: number, l) => s + Number(l.quantity) * Number(l.unitPrice), 0); const tax = lines.reduce((s: number, l) => s + Number(l.quantity) * Number(l.unitPrice) * Number(l.taxRate) / 100, 0); return { sub, tax, total: sub + tax }; }, [lines]);
   function upd(k: number, p: Partial<Line>) { setLines((prev) => prev.map((l) => (l.key === k ? { ...l, ...p } : l))); }
   async function save(post: boolean) {
-    try { setSaving(true); const v = await form.validateFields(); if (!v.customerId) { message.warning('Select a customer'); return; }
-      const payload = { customerId: v.customerId, invoiceId: v.invoiceId || undefined, creditNoteDate: v.creditNoteDate?.format('YYYY-MM-DD'), reason: v.reason, lines: lines.map((l) => ({ description: l.description, quantity: Number(l.quantity || 0), unitPrice: Number(l.unitPrice || 0), taxRate: Number(l.taxRate || 0) })) };
-      const created: any = await api('/sales/credit-notes', { method: 'POST', body: JSON.stringify(payload) });
-      if (post && created?.id) await api(`/sales/credit-notes/${created.id}/post`, { method: 'POST' });
-      message.success(post ? 'Credit note posted' : 'Draft saved'); onCreated();
+    try {
+      setSaving(true);
+      const v = await form.validateFields();
+      if (!v.customerId) { message.warning('Select a customer'); return; }
+      const mapped = lines
+        .filter((l) => Number(l.quantity) > 0)
+        .map((l) => ({
+          description: (l.description || '').trim() || (l.itemId ? itemOpts.find((o) => o.value === l.itemId)?.name : '') || 'Credit line',
+          itemId: l.itemId || undefined,
+          quantity: Number(l.quantity || 0),
+          unitPrice: Number(l.unitPrice || 0),
+          taxRate: Number(l.taxRate || 0),
+        }));
+      if (!mapped.length) { message.warning('Add at least one line with quantity'); return; }
+      if (restock) {
+        if (!v.warehouseId) { message.warning('Select a warehouse for goods return'); return; }
+        if (mapped.some((l) => !l.itemId)) { message.warning('Each restock line needs an item'); return; }
+        await api('/sales/customer-returns', {
+          method: 'POST',
+          body: JSON.stringify({
+            customerId: v.customerId,
+            invoiceId: v.invoiceId || undefined,
+            warehouseId: v.warehouseId,
+            reason: v.reason || 'Returned Goods',
+            returnedAt: v.creditNoteDate?.format('YYYY-MM-DD'),
+            confirm: true,
+            issueCredit: true,
+            postCredit: post,
+            lines: mapped,
+          }),
+        });
+        message.success(post ? 'Goods returned, stock updated, credit posted' : 'Goods returned, stock updated, credit draft created');
+      } else {
+        const payload = { customerId: v.customerId, invoiceId: v.invoiceId || undefined, creditNoteDate: v.creditNoteDate?.format('YYYY-MM-DD'), reason: v.reason, lines: mapped };
+        const created: any = await api('/sales/credit-notes', { method: 'POST', body: JSON.stringify(payload) });
+        if (post && created?.id) await api(`/sales/credit-notes/${created.id}/post`, { method: 'POST' });
+        message.success(post ? 'Credit note posted' : 'Draft saved');
+      }
+      onCreated();
     } catch (e: any) { message.error(e.message || 'Could not save'); } finally { setSaving(false); }
   }
   return (
-    <Drawer open={open} onClose={onClose} width={820} title="New Credit Note" footer={<div className="flex items-center justify-end gap-2"><Button onClick={onClose}>Cancel</Button><Button onClick={() => save(false)} loading={saving}>Save Draft</Button><Button type="primary" onClick={() => save(true)} loading={saving}>Post Credit Note</Button></div>}>
+    <Drawer open={open} onClose={onClose} width={860} title="New Credit Note" footer={<div className="flex items-center justify-end gap-2"><Button onClick={onClose}>Cancel</Button><Button onClick={() => save(false)} loading={saving}>{restock ? 'Return & Draft Credit' : 'Save Draft'}</Button><Button type="primary" onClick={() => save(true)} loading={saving}>{restock ? 'Return & Issue Credit' : 'Issue Credit'}</Button></div>}>
       <Form form={form} layout="vertical">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4">
           <Form.Item label="Customer" name="customerId" rules={[{ required: true }]} className="!mb-3"><Select showSearch optionFilterProp="label" placeholder="Select customer" options={customerOptions(meta.data?.customers)} /></Form.Item>
           <Form.Item label="Credit Note Date" name="creditNoteDate" className="!mb-3" initialValue={dayjs()}><DatePicker className="w-full" /></Form.Item>
           <Form.Item label="Source Invoice" name="invoiceId" className="!mb-3"><Select allowClear showSearch optionFilterProp="label" placeholder="Select invoice" options={allInvoices.map((i: any) => ({ label: `${i.invoiceNo} · ${i.customer?.name || ''}`, value: i.id }))} /></Form.Item>
           <Form.Item label="Reason" name="reason" rules={[{ required: true }]} className="!mb-3"><Select options={REASONS.map((r) => ({ label: r, value: r }))} /></Form.Item>
+          <Form.Item label="Physical goods return (restock)" className="!mb-3 md:col-span-2">
+            <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={restock} onChange={(e) => { setRestock(e.target.checked); if (e.target.checked) form.setFieldValue('reason', 'Returned Goods'); else form.setFieldValue('warehouseId', undefined); }} /> Restock inventory (creates RETURN_IN + credit note)</label>
+          </Form.Item>
+          {restock && (
+            <Form.Item label="Warehouse" name="warehouseId" rules={[{ required: true, message: 'Warehouse required' }]} className="!mb-3">
+              <Select showSearch optionFilterProp="label" options={(meta.data?.warehouses || []).map((w: any) => ({ label: w.name || w.code, value: w.id }))} />
+            </Form.Item>
+          )}
         </div>
         <div className="text-[12px] font-semibold text-[#64748b] uppercase tracking-wide mb-2">Credit Lines</div>
         {lines.map((l) => (
-          <div key={l.key} className="grid grid-cols-[1.6fr_0.6fr_0.9fr_0.7fr_0.9fr_40px] gap-3 items-center mb-2">
+          <div key={l.key} className={`grid gap-3 items-center mb-2 ${restock ? 'grid-cols-[1.4fr_1.4fr_0.55fr_0.8fr_0.65fr_0.85fr_40px]' : 'grid-cols-[1.6fr_0.6fr_0.9fr_0.7fr_0.9fr_40px]'}`}>
+            {restock && (
+              <Select showSearch optionFilterProp="label" value={l.itemId} options={itemOpts} placeholder="Item" onChange={(v) => { const o = itemOpts.find((x) => x.value === v); upd(l.key, { itemId: v, description: l.description || o?.name || '', unitPrice: l.unitPrice || o?.price || 0 }); }} />
+            )}
             <Input value={l.description} onChange={(e) => upd(l.key, { description: e.target.value })} placeholder="Description" />
             <InputNumber className="w-full" min={0} value={l.quantity} onChange={(v) => upd(l.key, { quantity: Number(v || 0) })} />
             <InputNumber className="w-full" min={0} prefix="$" value={l.unitPrice} onChange={(v) => upd(l.key, { unitPrice: Number(v || 0) })} />
-            <InputNumber className="w-full" min={0} value={l.taxRate} onChange={(v) => upd(l.key, { taxRate: Number(v || 0) })} addonAfter="%" />
+            <Space.Compact className="w-full"><InputNumber className="w-full" min={0} value={l.taxRate} onChange={(v) => upd(l.key, { taxRate: Number(v || 0) })} /><Button disabled>%</Button></Space.Compact>
             <div className="text-right font-medium">{fmtMoney(Number(l.quantity) * Number(l.unitPrice) * (1 + Number(l.taxRate) / 100))}</div>
             <Button type="text" danger icon={<DeleteOutlined />} onClick={() => setLines((p) => p.filter((x) => x.key !== l.key))} />
           </div>
@@ -163,6 +210,55 @@ function CreditNoteCreateDrawer({ open, initialInvoiceId, onClose, onCreated }: 
           <div className="flex justify-between w-56 font-bold text-[#003366]"><span>CREDIT TOTAL</span><span>{fmtMoney(totals.total)}</span></div>
         </div>
       </Form>
+    </Drawer>
+  );
+}
+
+function CreditNoteApplyDrawer({ cn, onClose, onApplied }: { cn: any; onClose: () => void; onApplied: () => void }) {
+  const { message } = App.useApp();
+  const [invoiceId, setInvoiceId] = useState<string | undefined>();
+  const [saving, setSaving] = useState(false);
+  const invoices = useQuery({
+    queryKey: ['/sales/invoices', 'apply-credit', cn?.customerId],
+    queryFn: () => api('/sales/invoices'),
+    enabled: !!cn,
+  });
+  const options = useMemo(() => {
+    const rows = Array.isArray(invoices.data) ? invoices.data : [];
+    return rows
+      .filter((i: any) => {
+        if (i.customerId !== cn?.customerId) return false;
+        const st = i.invoiceStatus || i.status;
+        return ['POSTED', 'PART_PAID', 'SENT', 'OVERDUE'].includes(st) || Number(i.balanceDue || 0) > 0;
+      })
+      .map((i: any) => ({ label: `${i.invoiceNo} · ${fmtMoney(i.total)}`, value: i.id }));
+  }, [invoices.data, cn?.customerId]);
+  useEffect(() => {
+    if (!cn) { setInvoiceId(undefined); return; }
+    setInvoiceId(cn.invoiceId || undefined);
+  }, [cn]);
+  async function apply() {
+    if (!cn?.id) return;
+    if (!invoiceId) { message.warning('Select an invoice'); return; }
+    try {
+      setSaving(true);
+      await api(`/sales/credit-notes/${cn.id}/apply`, { method: 'POST', body: JSON.stringify({ invoiceId }) });
+      message.success('Credit applied');
+      onApplied();
+    } catch (e: any) { message.error(e.message || 'Could not apply'); } finally { setSaving(false); }
+  }
+  return (
+    <Drawer open={!!cn} onClose={onClose} width={480} title={cn?.creditNoteNo ? `Apply ${cn.creditNoteNo}` : 'Apply Credit'} footer={<div className="flex justify-end gap-2"><Button onClick={onClose}>Cancel</Button><Button type="primary" loading={saving} onClick={apply}>Apply Credit</Button></div>}>
+      {cn && (
+        <div className="space-y-4">
+          <div className="text-[13px] text-[#64748b]">Customer: <span className="text-[#171a2e] font-medium">{cn.customer?.name || '—'}</span></div>
+          <div className="text-[13px] text-[#64748b]">Available: <span className="text-[#171a2e] font-semibold">{fmtMoney(Math.max(0, Number(cn.total || 0) - Number(cn.appliedAmount || 0)))}</span></div>
+          <div>
+            <div className="text-[12px] font-medium text-[#566069] mb-1">Invoice</div>
+            <Select showSearch optionFilterProp="label" className="w-full" placeholder="Select invoice" value={invoiceId} onChange={setInvoiceId} options={options} />
+          </div>
+        </div>
+      )}
     </Drawer>
   );
 }

@@ -274,11 +274,17 @@ export class CrmController {
   @Post('leads/:id/convert') async convertLead(@Req() req: any, @Param('id') id: string, @Body() dto: ConvertDto) {
     const lead = await this.lead(req, id);
     const companyId = companyIdOf(req.user);
+    if (lead.convertedCustomerId) {
+      const existing = await this.prisma.customer.findFirst({ where: { id: lead.convertedCustomerId, companyId } });
+      if (existing) throw new BadRequestException(`Lead already converted to customer ${existing.code || existing.name}`);
+    }
     const dupWhere: any = {};
     if (lead.email) dupWhere.email = lead.email;
     if (lead.phone) dupWhere.phone = lead.phone;
     if (lead.companyName) dupWhere.OR = [{ companyName: lead.companyName }, { name: lead.companyName }];
-    const dups = await this.prisma.customer.findMany({ where: { companyId, ...dupWhere } });
+    const dups = Object.keys(dupWhere).length
+      ? await this.prisma.customer.findMany({ where: { companyId, ...dupWhere } })
+      : [];
     if (dups.length && !dto.customerId && !dto.forceCreate) return { pending: true, duplicates: dups };
     let customer = dto.customerId ? await this.prisma.customer.findFirst({ where: { id: dto.customerId, companyId } }) : null;
     if (!customer) {

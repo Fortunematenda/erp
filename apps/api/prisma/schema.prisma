@@ -173,6 +173,7 @@ model Company {
   financialYears            FinancialYear[]
   fiscalPeriods             FiscalPeriod[]
   bankAccounts              BankAccount[]
+  bankReconciliations       BankReconciliation[]
   vendorCredits             VendorCredit[]
   checks                    Check[]
   checkSequences            CheckSequence[]
@@ -265,6 +266,8 @@ model Company {
   salesOrders               SalesOrder[]
   receipts                  Receipt[]
   creditNotes               CreditNote[]
+  customerReturns           CustomerReturn[]
+  supplierReturns           SupplierReturn[]
   requisitions              PurchaseRequisition[]
   goodsReceivedNotes        GoodsReceivedNote[]
   supplierInvoices          SupplierInvoice[]
@@ -628,6 +631,7 @@ model Customer {
   quotations     Quotation[]
   salesOrders    SalesOrder[]
   creditNotes    CreditNote[]
+  customerReturns CustomerReturn[]
   interactions   CustomerInteraction[]
   opportunities  Opportunity[]
   receipts       Receipt[]
@@ -683,6 +687,7 @@ model SalesInvoice {
   fiscalReceipt      FiscalReceipt?
   receipts           Receipt[]
   creditNotes        CreditNote[]
+  customerReturns    CustomerReturn[]
   debitNotes         DebitNote[]
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
@@ -773,6 +778,7 @@ model Supplier {
   supplierInvoices       SupplierInvoice[]
   supplierPayments       SupplierPayment[]
   vendorCredits          VendorCredit[]
+  supplierReturns        SupplierReturn[]
 
   @@unique([companyId, code])
 }
@@ -803,6 +809,7 @@ model PurchaseOrder {
   goodsReceivedNotes GoodsReceivedNote[]
   supplierInvoices   SupplierInvoice[]
   payments           SupplierPayment[]
+  supplierReturns    SupplierReturn[]
   createdAt          DateTime            @default(now())
 
   @@unique([companyId, poNo])
@@ -911,6 +918,8 @@ model Warehouse {
   goodsReceivedNotes GoodsReceivedNote[]
   batches            InventoryBatch[]
   serials            SerialNumber[]
+  customerReturns    CustomerReturn[]
+  supplierReturns    SupplierReturn[]
 
   @@unique([companyId, code])
 }
@@ -1976,6 +1985,7 @@ model CreditNote {
   taxTotal          Decimal          @default(0) @db.Decimal(18, 2)
   total             Decimal          @default(0) @db.Decimal(18, 2)
   lines             CreditNoteLine[]
+  customerReturn    CustomerReturn?
   createdAt         DateTime         @default(now())
 
   @@unique([companyId, creditNoteNo])
@@ -1986,11 +1996,90 @@ model CreditNoteLine {
   creditNoteId String
   creditNote   CreditNote @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
   description  String
+  itemId       String?
   quantity     Decimal    @default(1) @db.Decimal(18, 4)
   unitPrice    Decimal    @default(0) @db.Decimal(18, 2)
   taxRate      Decimal    @default(0) @db.Decimal(8, 4)
   taxAmount    Decimal    @default(0) @db.Decimal(18, 2)
   lineTotal    Decimal    @default(0) @db.Decimal(18, 2)
+}
+
+/// Physical customer goods return — stock RETURN_IN, then optional Credit Note.
+model CustomerReturn {
+  id           String               @id @default(uuid())
+  companyId    String
+  company      Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  returnNo     String
+  customerId   String
+  customer     Customer             @relation(fields: [customerId], references: [id])
+  invoiceId    String?
+  invoice      SalesInvoice?        @relation(fields: [invoiceId], references: [id])
+  warehouseId  String?
+  warehouse    Warehouse?           @relation(fields: [warehouseId], references: [id])
+  creditNoteId String?              @unique
+  creditNote   CreditNote?          @relation(fields: [creditNoteId], references: [id])
+  status       String               @default("DRAFT") // DRAFT | CONFIRMED | CANCELLED
+  reason       String?
+  returnedAt   DateTime             @default(now())
+  notes        String?
+  lines        CustomerReturnLine[]
+  createdAt    DateTime             @default(now())
+
+  @@unique([companyId, returnNo])
+  @@index([companyId, customerId])
+}
+
+model CustomerReturnLine {
+  id               String         @id @default(uuid())
+  customerReturnId String
+  customerReturn   CustomerReturn @relation(fields: [customerReturnId], references: [id], onDelete: Cascade)
+  description      String
+  itemId           String?
+  quantity         Decimal        @db.Decimal(18, 4)
+  unitPrice        Decimal        @default(0) @db.Decimal(18, 2)
+  taxRate          Decimal        @default(0) @db.Decimal(8, 4)
+  unitCost         Decimal        @default(0) @db.Decimal(18, 4)
+}
+
+/// Physical supplier goods return — stock RETURN_OUT, then optional Vendor Credit.
+model SupplierReturn {
+  id                String               @id @default(uuid())
+  companyId         String
+  company           Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  returnNo          String
+  supplierId        String
+  supplier          Supplier             @relation(fields: [supplierId], references: [id])
+  purchaseOrderId   String?
+  purchaseOrder     PurchaseOrder?       @relation(fields: [purchaseOrderId], references: [id])
+  grnId             String?
+  grn               GoodsReceivedNote?   @relation(fields: [grnId], references: [id])
+  supplierInvoiceId String?
+  supplierInvoice   SupplierInvoice?     @relation(fields: [supplierInvoiceId], references: [id])
+  warehouseId       String?
+  warehouse         Warehouse?           @relation(fields: [warehouseId], references: [id])
+  vendorCreditId    String?              @unique
+  vendorCredit      VendorCredit?        @relation(fields: [vendorCreditId], references: [id])
+  status            String               @default("DRAFT") // DRAFT | CONFIRMED | CANCELLED
+  reason            String?
+  returnedAt        DateTime             @default(now())
+  notes             String?
+  lines             SupplierReturnLine[]
+  createdAt         DateTime             @default(now())
+
+  @@unique([companyId, returnNo])
+  @@index([companyId, supplierId])
+}
+
+model SupplierReturnLine {
+  id               String         @id @default(uuid())
+  supplierReturnId String
+  supplierReturn   SupplierReturn @relation(fields: [supplierReturnId], references: [id], onDelete: Cascade)
+  description      String
+  itemId           String?
+  quantity         Decimal        @db.Decimal(18, 4)
+  unitPrice        Decimal        @default(0) @db.Decimal(18, 2)
+  taxRate          Decimal        @default(0) @db.Decimal(8, 4)
+  unitCost         Decimal        @default(0) @db.Decimal(18, 4)
 }
 
 model PurchaseRequisition {
@@ -2036,6 +2125,7 @@ model GoodsReceivedNote {
   reference       String?
   status          String                  @default("DRAFT")
   lines           GoodsReceivedNoteLine[]
+  supplierReturns SupplierReturn[]
   createdAt       DateTime                @default(now())
 
   @@unique([companyId, grnNo])
@@ -2082,6 +2172,7 @@ model SupplierInvoice {
   payments           SupplierPayment[]
   paymentAllocations SupplierPaymentAllocation[]
   attachments        SupplierInvoiceAttachment[]
+  supplierReturns    SupplierReturn[]
   createdAt          DateTime                    @default(now())
 
   @@unique([companyId, invoiceNo])
@@ -2665,8 +2756,31 @@ model BankAccount {
   checks              Check[]
   sequences           CheckSequence[]
   creditCardPayments  CreditCardPayment[]
+  reconciliations     BankReconciliation[]
 
   @@index([companyId])
+}
+
+/// Persisted bank reconciliation session (replaces browser localStorage as source of truth).
+model BankReconciliation {
+  id               String      @id @default(uuid())
+  companyId        String
+  company          Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  bankAccountId    String
+  bankAccount      BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+  statementDate    DateTime
+  statementBalance Decimal     @db.Decimal(18, 2)
+  bookBalance      Decimal     @default(0) @db.Decimal(18, 2)
+  difference       Decimal     @default(0) @db.Decimal(18, 2)
+  /// Journal line ids marked cleared in this session
+  clearedLineIds   Json        @default("[]")
+  status           String      @default("IN_PROGRESS") // IN_PROGRESS | COMPLETED
+  completedAt      DateTime?
+  completedBy      String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@index([companyId, bankAccountId, status])
 }
 
 model VendorCredit {
@@ -2702,6 +2816,7 @@ model VendorCredit {
   lines                 VendorCreditLine[]
   applications          VendorCreditApplication[]
   refunds               VendorCreditRefund[]
+  supplierReturn        SupplierReturn?
   createdAt             DateTime                  @default(now())
   updatedAt             DateTime                  @updatedAt
 

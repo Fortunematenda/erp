@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Input, Modal, Select, Skeleton, Spin, Tag, message } from 'antd';
+import { Button, Input, Modal, Select, Skeleton, Tag, message } from 'antd';
 import {
   CheckCircleOutlined, ClockCircleOutlined, CommentOutlined, DatabaseOutlined, EditOutlined,
   FileTextOutlined, MailOutlined, StopOutlined, SwapOutlined, WalletOutlined, WarningOutlined, PlusOutlined,
@@ -41,10 +41,7 @@ export function DocumentTrail({ type, id }: { type: 'invoice' | 'quotation' | 's
   const [filter, setFilter] = useState('All');
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState('');
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [events, setEvents] = useState<any[]>([]);
   const q = useQuery({ queryKey: ['/documents/trail', type, id], queryFn: () => api(`/documents/${type}/${id}/trail`), enabled: !!id });
-  if (q.data && events.length === 0 && q.isSuccess) setEvents(q.data.events || []);
 
   const addNote = useMutation({
     mutationFn: (text: string) => api(`/documents/${type}/${id}/notes`, { method: 'POST', body: JSON.stringify({ note: text }) }),
@@ -52,9 +49,7 @@ export function DocumentTrail({ type, id }: { type: 'invoice' | 'quotation' | 's
     onError: (e: any) => message.error(e.message),
   });
 
-  const visible = q.data?.events
-    ? q.data.events.filter((e: any) => (FILTERS[filter] || []).length ? FILTERS[filter].includes(e.eventType) : true)
-    : [];
+  const visible = (q.data?.events || []).filter((e: any) => (FILTERS[filter] || []).length ? FILTERS[filter].includes(e.eventType) : true);
 
   return (
     <div className="nex-card p-4">

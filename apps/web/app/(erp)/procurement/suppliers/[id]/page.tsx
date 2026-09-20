@@ -3,9 +3,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Button, Card, Checkbox, DatePicker, Descriptions, Drawer, Empty, Form, Input, InputNumber, message, Modal, Popconfirm, Select, Space, Table, Tabs, Tag, Tooltip, Upload } from 'antd';
+import { App, Button, Card, Checkbox, DatePicker, Descriptions, Drawer, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tabs, Tag, Tooltip, Upload } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { ArrowLeftOutlined, BankOutlined, CheckCircleOutlined, DeleteOutlined, DollarOutlined, DownloadOutlined, EditOutlined, EyeOutlined, FileDoneOutlined, FileTextOutlined, PayCircleOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, RollbackOutlined, SearchOutlined, ShoppingCartOutlined, SendOutlined, UserOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, BankOutlined, CheckCircleOutlined, DeleteOutlined, DollarOutlined, DownloadOutlined, EditOutlined, EyeOutlined, FileDoneOutlined, FileTextOutlined, PayCircleOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, RollbackOutlined, SearchOutlined, ShoppingCartOutlined, UserOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api } from '@/lib/api';
 import { AccountSelector } from '@/components/account-selector';
@@ -27,6 +27,7 @@ function dueFromTerms(invDate: any, terms?: string) {
 }
 
 export default function SupplierDetail() {
+  const { message } = App.useApp();
   const { id } = useParams();
   const router = useRouter();
   const qc = useQueryClient();
@@ -76,7 +77,7 @@ export default function SupplierDetail() {
     { title: 'Payment', dataIndex: 'paymentStatus', width: 130, render: (v: any, r: any) => <span><StatusTag value={v} />{isOverdue(r) && <Tag color="red" style={{ marginLeft: 4 }}>OVERDUE</Tag>}</span> },
     { title: 'Match', dataIndex: 'matchStatus', width: 130, render: (v: any) => <StatusTag value={v} /> },
     { title: 'Status', dataIndex: 'status', width: 100, render: (v: any) => <StatusTag value={v} /> },
-    { title: '', width: 170, fixed: 'right', render: (_: any, r: any) => <div className="flex gap-1">{r.status === 'DRAFT' ? <Button size="small" type="primary" icon={<CheckCircleOutlined />} onClick={() => { api(`/procurement/supplier-invoices/${r.id}/post`, { method: 'POST', body: '{}' }).then(() => { message.success('Bill posted'); refresh(); }).catch((e) => message.error(e.message)); }}>Post</Button> : <BillAction bill={r} onPay={() => openPay([r.id])} onOpen={() => setDetailPay({ type: 'bill', id: r.id })} />}{<Tooltip title="Print / PDF"><Link href={`/documents/supplier-invoice/${r.id}`} target="_blank"><Button size="small" icon={<PrinterOutlined />} /></Link></Tooltip>}</div> },
+    { title: '', width: 170, fixed: 'right', render: (_: any, r: any) => <div className="flex gap-1">{r.status === 'DRAFT' ? <Button size="small" type="primary" icon={<CheckCircleOutlined />} onClick={() => { api(`/procurement/supplier-invoices/${r.id}/finalize`, { method: 'POST', body: JSON.stringify({ action: 'POST' }) }).then(() => { message.success('Bill posted — awaiting payment'); refresh(); }).catch((e) => message.error(e.message)); }}>Save & Post</Button> : <BillAction bill={r} onPay={() => openPay([r.id])} onOpen={() => setDetailPay({ type: 'bill', id: r.id })} />}{<Tooltip title="Print / PDF"><Link href={`/documents/supplier-invoice/${r.id}`} target="_blank"><Button size="small" icon={<PrinterOutlined />} /></Link></Tooltip>}</div> },
   ];
   function isOverdue(b: any) { return b.status === 'POSTED' && b.dueDate && dayjs(b.dueDate).isBefore(dayjs(), 'day') && Number(b.balanceDue) > 0.005; }
 
@@ -109,16 +110,16 @@ export default function SupplierDetail() {
   }
   async function poAction(action: string, po: any) {
     try {
-      if (action === 'send') { await api(`/procurement/purchase-orders/${po.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'SENT' }) }); message.success('PO marked Sent'); }
-      else if (action === 'receive') { await api(`/procurement/purchase-orders/${po.id}/receive`, { method: 'POST', body: '{}' }); message.success('GRN created from PO'); }
-      else if (action === 'cancel') { await api(`/procurement/purchase-orders/${po.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'CANCELLED' }) }); message.success('PO cancelled'); }
+      if (action === 'approve') { await api(`/procurement/purchase-orders/${po.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'APPROVED' }) }); message.success('Purchase order approved'); }
+      else if (action === 'receive') { await api(`/procurement/purchase-orders/${po.id}/receive`, { method: 'POST', body: '{}' }); message.success('Receipt confirmed — stock updated'); }
+      else if (action === 'cancel') { await api(`/procurement/purchase-orders/${po.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'CANCELLED' }) }); message.success('Purchase order cancelled'); }
       else if (action === 'bill') { setPrefillBill({ purchaseOrderId: po.id, supplierId: supplier.id }); setBillDrawer(true); return; }
       refresh();
     } catch (e: any) { message.error(e.message); }
   }
   async function grnAction(action: string, g: any) {
     try {
-      if (action === 'post') { await api(`/procurement/grns/${g.id}/post`, { method: 'POST', body: '{}' }); message.success('GRN posted to inventory'); }
+      if (action === 'post') { await api(`/procurement/grns/${g.id}/confirm`, { method: 'POST', body: '{}' }); message.success('Receipt confirmed — stock updated'); }
       else if (action === 'bill') { setPrefillBill({ purchaseOrderId: g.purchaseOrderId, supplierId: g.supplierId }); setBillDrawer(true); return; }
       refresh();
     } catch (e: any) { message.error(e.message); }
@@ -231,6 +232,7 @@ function BillAction({ bill, onPay, onOpen }: { bill: any; onPay: () => void; onO
 }
 
 function PaySupplierDrawer({ open, onClose, supplier, initialBills, bills, onSaved }: { open: boolean; onClose: () => void; supplier: any; initialBills: string[]; bills: any[]; onSaved: () => void }) {
+  const { message } = App.useApp();
   const [method, setMethod] = useState('BANK');
   const [payFrom, setPayFrom] = useState<string>();
   const [date, setDate] = useState<any>(dayjs());
@@ -271,7 +273,7 @@ function PaySupplierDrawer({ open, onClose, supplier, initialBills, bills, onSav
   return (
     <Drawer open={open} onClose={onClose} width={680} title="Pay Supplier" destroyOnHidden
       extra={<Button onClick={onClose}>Cancel</Button>}
-      footer={<Space className="w-full justify-end"><Button onClick={onClose}>Cancel</Button><Button type="primary" onClick={post} loading={saving}>Post Payment</Button></Space>}>
+      footer={<Space className="w-full justify-end"><Button onClick={onClose}>Cancel</Button><Button type="primary" onClick={post} loading={saving}>Make Payment</Button></Space>}>
       <div className="nex-card mb-4 px-4 py-3 !rounded-xl"><div className="flex items-center gap-2"><span className="text-[12px] text-[#64748b]">Supplier</span><span className="font-semibold text-[14px] text-[#171a2e]">{supplier.name}</span><Tag style={{ borderRadius: 8 }}>{supplier.code}</Tag></div></div>
       <Form layout="vertical">
         <div className="grid grid-cols-2 gap-4">
@@ -357,11 +359,11 @@ function OrdersTab({ rows, onAction, onNew }: { rows: any[]; onAction: (a: strin
     { title: 'Total', dataIndex: 'total', align: 'right', render: (v: any) => fmtMoney(v) },
     { ...ACTIONS_COL, render: (_: any, r: any) => (
       <RowActionsMenu items={[
-        { key: 'send', label: 'Send', icon: <SendOutlined />, onClick: () => onAction('send', r) },
-        { key: 'receive', label: 'Receive Items', icon: <CheckCircleOutlined />, hidden: r.status !== 'APPROVED', onClick: () => onAction('receive', r) },
+        { key: 'approve', label: 'Approve', icon: <CheckCircleOutlined />, hidden: r.status !== 'DRAFT', onClick: () => onAction('approve', r) },
+        { key: 'receive', label: 'Receive Items', icon: <CheckCircleOutlined />, hidden: !['APPROVED', 'PART_RECEIVED'].includes(r.status), onClick: () => onAction('receive', r) },
         { key: 'bill', label: 'Create Bill', icon: <FileDoneOutlined />, onClick: () => onAction('bill', r) },
         { key: 'print', label: 'Print / PDF', icon: <PrinterOutlined />, onClick: () => window.open(`/documents/purchase-order/${r.id}`, '_blank') },
-        { key: 'cancel', label: 'Cancel', icon: <DeleteOutlined />, danger: true, hidden: !['DRAFT'].includes(r.status), onClick: () => onAction('cancel', r) },
+        { key: 'cancel', label: 'Cancel', icon: <DeleteOutlined />, danger: true, hidden: !['DRAFT', 'APPROVED'].includes(r.status), onClick: () => onAction('cancel', r) },
       ]} />
     ) },
   ];
@@ -377,13 +379,13 @@ function GrnsTab({ rows, onAction }: { rows: any[]; onAction: (a: string, r: any
   const cols: ColumnsType<any> = [
     { title: 'GRN', dataIndex: 'grnNo', width: 110, render: (v: any) => <span className="font-medium">{v}</span> },
     { title: 'Date', dataIndex: 'receivedAt', width: 110, render: fmtDate },
-    { title: 'PO', render: (_: any, r: any) => r.purchaseOrder?.orderNo || '—' },
+    { title: 'PO', render: (_: any, r: any) => r.purchaseOrder?.poNo || '—' },
     { title: 'Warehouse', render: (_: any, r: any) => r.warehouse?.name || '—' },
     { title: 'Status', dataIndex: 'status', width: 110, render: (v: any) => <StatusTag value={v} /> },
     { title: 'Lines', render: (_: any, r: any) => r.lines?.length || 0 },
     { ...ACTIONS_COL, render: (_: any, r: any) => (
       <RowActionsMenu items={[
-        { key: 'post', label: 'Post', icon: <CheckCircleOutlined />, hidden: r.status !== 'DRAFT', onClick: () => onAction('post', r) },
+        { key: 'confirm', label: 'Confirm Receipt', icon: <CheckCircleOutlined />, hidden: r.status !== 'DRAFT', onClick: () => onAction('post', r) },
         { key: 'bill', label: 'Create Bill', icon: <FileDoneOutlined />, hidden: !r.purchaseOrderId, onClick: () => onAction('bill', r) },
       ]} />
     ) },
@@ -392,6 +394,7 @@ function GrnsTab({ rows, onAction }: { rows: any[]; onAction: (a: string, r: any
 }
 
 function BillDrawer({ open, onClose, supplier, prefill, onSaved }: { open: boolean; onClose: () => void; supplier: any; prefill: any; onSaved: () => void }) {
+  const { message } = App.useApp();
   const qc = useQueryClient();
   const meta = useMeta();
   const projects = useQuery({ queryKey: ['/projects'], queryFn: () => api('/projects') });
@@ -407,30 +410,34 @@ function BillDrawer({ open, onClose, supplier, prefill, onSaved }: { open: boole
   const [projectId, setProjectId] = useState('');
   const [attachment, setAttachment] = useState<any>(null);
   useEffect(() => {
-    if (open) {
-      form.resetFields(); setSupplierInvNo(''); setInvoiceDate(dayjs()); setTerms(supplier.paymentTerms || 'Net 30'); setCurrency(supplier.currency || 'USD'); setMemo(''); setRef(''); setProjectId(''); setAttachment(null);
+    if (!open) return;
+    // Form mounts with the drawer; reset on next tick after connect.
+    const t = window.setTimeout(() => {
+      form.resetFields();
+      setSupplierInvNo(''); setInvoiceDate(dayjs()); setTerms(supplier.paymentTerms || 'Net 30'); setCurrency(supplier.currency || 'USD'); setMemo(''); setRef(''); setProjectId(''); setAttachment(null);
       if (!dueFromTerms(dayjs(), supplier.paymentTerms || 'Net 30')) setDueDate(undefined); else setDueDate(dueFromTerms(dayjs(), supplier.paymentTerms || 'Net 30'));
-    }
+    }, 0);
+    return () => window.clearTimeout(t);
   }, [open]); // eslint-disable-line
   useEffect(() => {
     if (terms === 'Custom') { setDueDate(undefined); return; }
     const nd = dueFromTerms(invoiceDate, terms); setDueDate(nd);
   }, [terms, invoiceDate]); // eslint-disable-line
-  const itemOptions = (meta.data?.items || []).map((i: any) => ({ label: `${i.sku} — ${i.name}`, value: i.id }));
+  const itemOptions = meta.data?.items || [];
   const projectOptions = (projects.data || []).map((p: any) => ({ label: `${p.projectCode || p.code || ''} ${p.name}`, value: p.id }));
   async function submit() {
     const v = await form.validateFields().catch(() => null);
-    if (!v?.lines || !v.lines.length) { message.error('Add at least one line'); return; }
+    if (!v?.lines?.length) { message.error('Add at least one line'); return; }
     setSaving(true);
     try {
-      const body = { supplierId: supplier.id, invoiceNo: supplierInvNo || undefined, invoiceDate: invoiceDate.format('YYYY-MM-DD'), dueDate: dueDate ? dueDate.format('YYYY-MM-DD') : undefined, terms, currency, ref, memo, projectId: projectId || undefined, purchaseOrderId: prefill?.purchaseOrderId, lines: v.lines.map((l: any) => ({ description: l.description, itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice, taxRate: l.taxRate || 0, accountId: l.accountId })) };
+      const body = { supplierId: supplier.id, invoiceNo: supplierInvNo || undefined, invoiceDate: invoiceDate.format('YYYY-MM-DD'), dueDate: dueDate ? dueDate.format('YYYY-MM-DD') : undefined, terms, currency, ref, memo, projectId: projectId || undefined, purchaseOrderId: prefill?.purchaseOrderId, lines: (v.lines || []).map((l: any) => ({ description: l.description, itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice, taxRate: l.taxRate || 0, accountId: l.accountId })) };
       const bill = await api('/procurement/supplier-invoices', { method: 'POST', body: JSON.stringify(body) });
       if (attachment) { await api(`/procurement/supplier-invoices/${bill.id}/attachments`, { method: 'POST', body: JSON.stringify({ name: attachment.name, mime: attachment.mime, size: attachment.size, dataUrl: attachment.dataUrl }) }); }
       message.success('Supplier bill created'); onSaved(); qc.invalidateQueries({ queryKey: ['/procurement/supplier-invoices'] });
     } catch (e: any) { message.error(e.message); } finally { setSaving(false); }
   }
   return (
-    <Drawer open={open} onClose={onClose} width={720} title="Enter Bill" destroyOnHidden extra={<Button onClick={onClose}>Cancel</Button>} footer={<Space className="w-full justify-end"><Button onClick={onClose}>Cancel</Button><Button type="primary" onClick={submit} loading={saving}>Save Bill</Button></Space>}>
+    <Drawer open={open} onClose={onClose} width={720} title="Enter Bill" forceRender destroyOnHidden={false} extra={<Button onClick={onClose}>Cancel</Button>} footer={<Space className="w-full justify-end"><Button onClick={onClose}>Cancel</Button><Button type="primary" onClick={submit} loading={saving}>Save Bill</Button></Space>}>
       <div className="nex-card mb-4 px-4 py-3 !rounded-xl"><span className="text-[12px] text-[#64748b]">Supplier</span><span className="font-semibold text-[14px] text-[#171a2e] ml-2">{supplier.name}</span>{prefill?.purchaseOrderId ? <span className="ml-2 text-[12px] text-[#8a90ad]">from PO</span> : null}</div>
       <Form form={form} layout="vertical">
         <div className="grid grid-cols-2 gap-4">
@@ -474,6 +481,7 @@ function BillDrawer({ open, onClose, supplier, prefill, onSaved }: { open: boole
 }
 
 function OrderDrawer({ open, onClose, supplier, onSaved }: { open: boolean; onClose: () => void; supplier: any; onSaved: () => void }) {
+  const { message } = App.useApp();
   const qc = useQueryClient();
   const meta = useMeta();
   const [form] = Form.useForm();
@@ -482,20 +490,27 @@ function OrderDrawer({ open, onClose, supplier, onSaved }: { open: boolean; onCl
   const [expectedDate, setExpectedDate] = useState<any>(dayjs().add(7, 'day'));
   const [currency, setCurrency] = useState(supplier.currency || 'USD');
   const [memo, setMemo] = useState('');
-  useEffect(() => { if (open) { form.resetFields(); setOrderDate(dayjs()); setExpectedDate(dayjs().add(7, 'day')); setCurrency(supplier.currency || 'USD'); setMemo(''); } }, [open]); // eslint-disable-line
-  const itemOptions = (meta.data?.items || []).map((i: any) => ({ label: `${i.sku} — ${i.name}`, value: i.id }));
+  useEffect(() => {
+    if (!open) return;
+    const t = window.setTimeout(() => {
+      form.resetFields();
+      setOrderDate(dayjs()); setExpectedDate(dayjs().add(7, 'day')); setCurrency(supplier.currency || 'USD'); setMemo('');
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [open]); // eslint-disable-line
+  const itemOptions = meta.data?.items || [];
   async function submit() {
     const v = await form.validateFields().catch(() => null);
-    if (!v?.lines || !v.lines.length) { message.error('Add at least one line'); return; }
+    if (!v?.lines?.length) { message.error('Add at least one line'); return; }
     setSaving(true);
     try {
-      const body = { supplierId: supplier.id, orderDate: orderDate.format('YYYY-MM-DD'), expectedDate: expectedDate ? expectedDate.format('YYYY-MM-DD') : undefined, currency, memo, lines: v.lines.map((l: any) => ({ description: l.description, itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice, taxRate: l.taxRate || 0 })) };
+      const body = { supplierId: supplier.id, orderDate: orderDate.format('YYYY-MM-DD'), expectedDate: expectedDate ? expectedDate.format('YYYY-MM-DD') : undefined, currency, memo, lines: (v.lines || []).map((l: any) => ({ description: l.description, itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice, taxRate: l.taxRate || 0 })) };
       await api('/procurement/purchase-orders', { method: 'POST', body: JSON.stringify(body) });
       message.success('Purchase order created'); onSaved(); qc.invalidateQueries({ queryKey: ['/procurement/purchase-orders'] });
     } catch (e: any) { message.error(e.message); } finally { setSaving(false); }
   }
   return (
-    <Drawer open={open} onClose={onClose} width={680} title="New Purchase Order" destroyOnHidden extra={<Button onClick={onClose}>Cancel</Button>} footer={<Space className="w-full justify-end"><Button onClick={onClose}>Cancel</Button><Button type="primary" onClick={submit} loading={saving}>Save Purchase Order</Button></Space>}>
+    <Drawer open={open} onClose={onClose} width={680} title="New Purchase Order" forceRender destroyOnHidden={false} extra={<Button onClick={onClose}>Cancel</Button>} footer={<Space className="w-full justify-end"><Button onClick={onClose}>Cancel</Button><Button type="primary" onClick={submit} loading={saving}>Save Purchase Order</Button></Space>}>
       <div className="nex-card mb-4 px-4 py-3 !rounded-xl"><span className="text-[12px] text-[#64748b]">Supplier</span><span className="font-semibold text-[14px] text-[#171a2e] ml-2">{supplier.name}</span></div>
       <Form form={form} layout="vertical">
         <div className="grid grid-cols-3 gap-4">

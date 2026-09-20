@@ -25,7 +25,7 @@ export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { cust
   const [sel, setSel] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
-  async function bulkPost() { setBusy(true); try { for (const id of sel) await api(`/sales/invoices/${id}/post`, { method: 'POST' }).catch(() => {}); message.success(`Posted ${sel.length}`); qc.invalidateQueries({ queryKey: ['/sales/invoices'] }); setSel([]); } catch (e: any) { message.error(e.message); } finally { setBusy(false); } }
+  async function bulkPost() { setBusy(true); try { for (const id of sel) await api(`/sales/invoices/${id}/finalize`, { method: 'POST', body: JSON.stringify({ action: 'POST' }) }).catch(() => {}); message.success(`Posted ${sel.length}`); qc.invalidateQueries({ queryKey: ['/sales/invoices'] }); setSel([]); } catch (e: any) { message.error(e.message); } finally { setBusy(false); } }
   async function bulkDel() { setBusy(true); try { for (const id of sel) await api(`/sales/invoices/${id}`, { method: 'DELETE' }); message.success(`Deleted ${sel.length}`); qc.invalidateQueries({ queryKey: ['/sales/invoices'] }); setSel([]); } catch (e: any) { message.error(e.message); } finally { setBusy(false); } }
   function exportSel() { const rowsSel = rows.filter((r: any) => sel.includes(r.id)); const csv = [['Invoice #', 'Customer', 'Date', 'Amount', 'Status'].join(','), ...rowsSel.map((i: any) => [i.invoiceNo, i.customer?.name || '', dayjs(i.invoiceDate).format('YYYY-MM-DD'), Number(i.total || 0), i.status].map((x) => `"${x ?? ''}"`).join(','))].join('\n'); const blob = new Blob([csv], { type: 'text/csv' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'invoices.csv'; a.click(); URL.revokeObjectURL(url); message.success('Exported'); }
 
@@ -42,7 +42,7 @@ export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { cust
 
   const totals = useMemo(() => { let total = 0, paid = 0, unpaid = 0, overdue = 0; for (const i of rows) { total += Number(i.total || 0); paid += Number(i.amountPaid || 0); const bal = Number(i.balanceDue != null ? i.balanceDue : (Number(i.total || 0) - Number(i.amountPaid || 0))); unpaid += bal; if (i.invoiceStatus === 'POSTED' && bal > 0 && i.dueDate && dayjs(i.dueDate).isBefore(dayjs(), 'day')) overdue += bal; } return { total, paid, unpaid, overdue, count: rows.length, paidCount: rows.filter((i: any) => i.paymentStatus === 'PAID').length }; }, [rows]);
 
-  async function post(r: any) { try { await api(`/sales/invoices/${r.id}/post`, { method: 'POST' }); message.success('Invoice posted'); qc.invalidateQueries({ queryKey: ['/sales/invoices'] }); qc.invalidateQueries({ queryKey: ['sales-register'] }); } catch (e: any) { message.error(e.message); } }
+  async function post(r: any) { try { await api(`/sales/invoices/${r.id}/finalize`, { method: 'POST', body: JSON.stringify({ action: 'POST' }) }); message.success('Invoice posted — awaiting payment'); qc.invalidateQueries({ queryKey: ['/sales/invoices'] }); qc.invalidateQueries({ queryKey: ['sales-register'] }); } catch (e: any) { message.error(e.message); } }
   async function del(r: any) { try { await api(`/sales/invoices/${r.id}`, { method: 'DELETE' }); message.success('Invoice deleted'); qc.invalidateQueries({ queryKey: ['/sales/invoices'] }); qc.invalidateQueries({ queryKey: ['sales-register'] }); } catch (e: any) { message.error(e.message); } }
   async function fiscal(r: any) { const dev = (devices.data || []).find((d: any) => d.status === 'ACTIVE' && d.dayStatus === 'OPEN'); if (!dev) { message.warning('No open fiscal day on an active device'); return; } try { await api(`/fiscalisation/devices/${dev.id}/fiscalise`, { method: 'POST', body: JSON.stringify({ invoiceId: r.id }) }); message.success('Fiscalised'); qc.invalidateQueries({ queryKey: ['/sales/invoices'] }); } catch (e: any) { message.error(e.message); } }
   const canFiscal = (r: any) => { const recv = (r.receipts || []).reduce((s: number, x: any) => s + Number(x.amount), 0); return recv >= Number(r.total) - 0.001 && r.fiscalStatus !== 'FISCALISED'; };
@@ -58,7 +58,7 @@ export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { cust
     { ...ACTIONS_COL, render: (_, r: any) => (
       <RowActionsMenu items={[
         { key: 'view', label: r.invoiceStatus === 'DRAFT' ? 'Edit' : 'View', icon: <EyeOutlined />, onClick: () => router.push(`/sales/invoices/${r.id}/edit`) },
-        { key: 'post', label: 'Post', icon: <FileDoneOutlined />, hidden: r.invoiceStatus !== 'DRAFT', onClick: () => post(r) },
+        { key: 'post', label: 'Save & Post', icon: <FileDoneOutlined />, hidden: r.invoiceStatus !== 'DRAFT', onClick: () => post(r) },
         { key: 'fiscal', label: 'Fiscalise', icon: <RobotOutlined />, hidden: !canFiscal(r), onClick: () => fiscal(r) },
         { key: 'delete', label: 'Delete', icon: <DeleteOutlined />, danger: true, hidden: r.invoiceStatus !== 'DRAFT', confirm: 'Delete invoice?', onClick: () => del(r) },
       ]} />
@@ -91,7 +91,7 @@ export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { cust
       </FilterBar>
       <div className="nex-card">
         {rows.length === 0 ? <EmptyState title="No invoices yet" description="Create your first invoice to start billing customers." action={<Button type="primary" icon={<PlusOutlined />} onClick={() => router.push('/sales/invoices/new')}>New Invoice</Button>} /> : (<>
-          {sel.length > 0 && (<div className="px-4 py-3 flex items-center gap-3 flex-wrap bg-[#f8faff] border-b border-[#eef0f6]"><span className="text-[13px] font-medium text-[#344054]">{sel.length} selected</span><Button type="primary" icon={<FileDoneOutlined />} loading={busy} onClick={bulkPost}>Post</Button><Button icon={<ExportOutlined />} onClick={exportSel}>Export</Button><Popconfirm title={`Delete ${sel.length} selected invoices?`} onConfirm={bulkDel}><Button danger icon={<DeleteOutlined />} loading={busy}>Delete</Button></Popconfirm><div className="ml-auto"><Button size="small" onClick={() => setSel([])}>Clear</Button></div></div>)}
+          {sel.length > 0 && (<div className="px-4 py-3 flex items-center gap-3 flex-wrap bg-[#f8faff] border-b border-[#eef0f6]"><span className="text-[13px] font-medium text-[#344054]">{sel.length} selected</span><Button type="primary" icon={<FileDoneOutlined />} loading={busy} onClick={bulkPost}>Save & Post</Button><Button icon={<ExportOutlined />} onClick={exportSel}>Export</Button><Popconfirm title={`Delete ${sel.length} selected invoices?`} onConfirm={bulkDel}><Button danger icon={<DeleteOutlined />} loading={busy}>Delete</Button></Popconfirm><div className="ml-auto"><Button size="small" onClick={() => setSel([])}>Clear</Button></div></div>)}
           <Table rowKey="id" loading={list.isLoading} dataSource={rows} columns={columns} scroll={{ x: true }} rowSelection={{ selectedRowKeys: sel, onChange: (keys) => setSel(keys as string[]) }} pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (t) => `${t} invoices` }} />
         </>)}
       </div>

@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { App, Button, DatePicker, Input, InputNumber, Select, Space, Tooltip } from 'antd';
-import { DeleteOutlined, PlusOutlined, UploadOutlined, EyeOutlined } from '@ant-design/icons';
+import { App, Button, DatePicker, Dropdown, Input, InputNumber, Select, Space, Tooltip } from 'antd';
+import { DeleteOutlined, DownOutlined, PlusOutlined, UploadOutlined, EyeOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api } from '@/lib/api';
 import { AccountSelector } from '@/components/account-selector';
@@ -67,16 +67,23 @@ export function EnterBillForm({ onSaved, variant = 'tab', initialSupplierId, onC
     return true;
   }
 
-  async function save(post: boolean) {
+  async function save(mode: 'draft' | 'post' | 'submit') {
     if (!validate()) return;
-    if (post && !dueDate) { message.error('Due Date is required.'); return; }
-    setSaving(post ? false : true); setPosting(post);
+    if (mode !== 'draft' && !dueDate) { message.error('Due Date is required.'); return; }
+    setSaving(mode === 'draft'); setPosting(mode !== 'draft');
     try {
       const body = { supplierId, invoiceNo: supplierInvNo.trim(), invoiceDate: invoiceDate.format('YYYY-MM-DD'), dueDate: dueDate ? dueDate.format('YYYY-MM-DD') : undefined, terms, currency, projectId: projectId || undefined, ref: reference, memo, lines: lines.map((l) => ({ description: l.description, quantity: 1, unitPrice: Number(l.amount), taxRate: 0, accountId: l.accountId })) };
       const bill = await api('/procurement/supplier-invoices', { method: 'POST', body: JSON.stringify(body) });
       if (attachment) await api(`/procurement/supplier-invoices/${bill.id}/attachments`, { method: 'POST', body: JSON.stringify({ name: attachment.name, mime: attachment.mime, size: attachment.size, dataUrl: attachment.dataUrl }) });
-      if (post) await api(`/procurement/supplier-invoices/${bill.id}/post`, { method: 'POST', body: '{}' });
-      message.success(post ? 'Bill posted to Accounts Payable' : 'Draft saved');
+      if (mode === 'post') {
+        await api(`/procurement/supplier-invoices/${bill.id}/finalize`, { method: 'POST', body: JSON.stringify({ action: 'POST' }) });
+        message.success('Bill posted — awaiting payment');
+      } else if (mode === 'submit') {
+        await api(`/procurement/supplier-invoices/${bill.id}/finalize`, { method: 'POST', body: JSON.stringify({ action: 'SUBMIT' }) });
+        message.success('Bill submitted for approval');
+      } else {
+        message.success('Draft saved');
+      }
       qc.invalidateQueries({ queryKey: ['/procurement/bills'] }); qc.invalidateQueries({ queryKey: ['/procurement/dashboard'] }); qc.invalidateQueries({ queryKey: ['/procurement/supplier-invoices'] });
       onSaved?.();
     } catch (e: any) {
@@ -142,14 +149,36 @@ export function EnterBillForm({ onSaved, variant = 'tab', initialSupplierId, onC
           <div className="flex items-center gap-6 text-[13px] text-[#475060]"><span>Subtotal</span><span className="min-w-[120px] text-right font-medium text-[#171a2e]">{fmtMoney(subtotal)}</span></div>
           <div className="flex items-center gap-6 text-[13px] text-[#475060]"><span>Tax</span><span className="min-w-[120px] text-right font-medium text-[#171a2e]">{fmtMoney(0)}</span></div>
           <div className="flex items-center gap-6 text-[16px] font-bold text-[#171a2e] border-t border-[#eef0f6] pt-2"><span>Total</span><span className="min-w-[120px] text-right text-[#003366]">{fmtMoney(grand)}</span></div>
-          <div className="text-[12px] text-[#8a90ad] mt-1">Unpaid — creates Accounts Payable when posted</div>
+          <div className="text-[12px] text-[#8a90ad] mt-1">Save Draft keeps the bill editable. Save & Post creates Accounts Payable.</div>
         </div>
 
         {variant === 'page' && (
           <div className="sticky bottom-0 mt-6 pt-4 border-t border-[#eef0f6] bg-white flex items-center justify-end gap-2">
             <Button onClick={() => onCancel?.()}>Cancel</Button>
-            <Button onClick={() => save(false)} disabled={saving || posting}>Save Draft</Button>
-            <Button type="primary" onClick={() => save(true)} loading={posting}>Post Bill</Button>
+            <Button onClick={() => save('draft')} disabled={saving || posting}>Save Draft</Button>
+            <Dropdown.Button type="primary" icon={<DownOutlined />} loading={posting}
+              onClick={() => save('post')}
+              menu={{ items: [
+                { key: 'post', label: 'Save & Post', onClick: () => save('post') },
+                { key: 'draft', label: 'Save Draft', onClick: () => save('draft') },
+                { key: 'submit', label: 'Submit for Approval', onClick: () => save('submit') },
+              ] }}>
+              Save & Post
+            </Dropdown.Button>
+          </div>
+        )}
+        {variant === 'tab' && (
+          <div className="mt-6 flex items-center justify-end gap-2">
+            <Button onClick={() => save('draft')} disabled={saving || posting}>Save Draft</Button>
+            <Dropdown.Button type="primary" icon={<DownOutlined />} loading={posting}
+              onClick={() => save('post')}
+              menu={{ items: [
+                { key: 'post', label: 'Save & Post', onClick: () => save('post') },
+                { key: 'draft', label: 'Save Draft', onClick: () => save('draft') },
+                { key: 'submit', label: 'Submit for Approval', onClick: () => save('submit') },
+              ] }}>
+              Save & Post
+            </Dropdown.Button>
           </div>
         )}
       </div>

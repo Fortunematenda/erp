@@ -113,17 +113,44 @@ function RowActions({ credit, onApply, onRefund, onView, onRefresh }: any) {
 function NewCreditDrawer({ open, onClose, onSaved }: any) {
   const meta = useMeta();
   const bills = useQuery({ queryKey: ['/procurement/supplier-invoices'], queryFn: () => api('/procurement/supplier-invoices') });
-  const [supplierId, setSupplierId] = useState(''); const [creditNo, setCreditNo] = useState(''); const [date, setDate] = useState<any>(dayjs()); const [currency, setCurrency] = useState('USD'); const [reason, setReason] = useState(''); const [sourceInvoiceId, setSourceInvoiceId] = useState(''); const [reference, setReference] = useState(''); const [memo, setMemo] = useState(''); const [attachment, setAttachment] = useState<any>(null); const [lines, setLines] = useState<any[]>([{ key: 1, accountId: '', description: '', quantity: 1, unitPrice: 0, taxRate: 0 }]); const [saving, setSaving] = useState(false);
+  const [supplierId, setSupplierId] = useState(''); const [creditNo, setCreditNo] = useState(''); const [date, setDate] = useState<any>(dayjs()); const [currency, setCurrency] = useState('USD'); const [reason, setReason] = useState(''); const [sourceInvoiceId, setSourceInvoiceId] = useState(''); const [reference, setReference] = useState(''); const [memo, setMemo] = useState(''); const [attachment, setAttachment] = useState<any>(null); const [lines, setLines] = useState<any[]>([{ key: 1, accountId: '', itemId: '', description: '', quantity: 1, unitPrice: 0, taxRate: 0 }]); const [saving, setSaving] = useState(false); const [goodsReturn, setGoodsReturn] = useState(false); const [warehouseId, setWarehouseId] = useState('');
+  const itemOpts = (meta.data?.items || []).map((i: any) => ({ label: `${i.sku} — ${i.name}`, value: i.id, name: i.name, cost: Number(i.purchaseCost || 0) }));
   const subtotal = lines.reduce((s: number, l: any) => s + Number(l.quantity || 0) * Number(l.unitPrice || 0), 0);
   const tax = lines.reduce((s: number, l: any) => s + (Number(l.quantity || 0) * Number(l.unitPrice || 0) * Number(l.taxRate || 0) / 100), 0);
-  function addLine() { setLines((p) => [...p, { key: p.length + 1, accountId: '', description: '', quantity: 1, unitPrice: 0, taxRate: 0 }]); }
+  function addLine() { setLines((p) => [...p, { key: p.length + 1, accountId: '', itemId: '', description: '', quantity: 1, unitPrice: 0, taxRate: 0 }]); }
   function updLine(k: number, p: any) { setLines((p) => p.map((l) => (l.key === k ? { ...l, ...p } : l))); }
   function remLine(k: number) { setLines((p) => p.filter((l) => l.key !== k)); }
   async function save(post: boolean) {
     if (!supplierId) { message.error('Supplier is required'); return; }
     if (!lines.some((l) => Number(l.unitPrice || 0) > 0)) { message.error('Add credit line amounts'); return; }
     setSaving(true);
-    try { const body = { supplierId, supplierCreditNo: creditNo || undefined, creditDate: date.format('YYYY-MM-DD'), currency, reason, sourceInvoiceId: sourceInvoiceId || undefined, reference, memo, fileName: attachment?.name, mime: attachment?.mime, dataUrl: attachment?.dataUrl, status: post ? 'POSTED' : 'DRAFT', lines: lines.map((l) => ({ description: l.description, accountId: l.accountId, quantity: Number(l.quantity || 1), unitPrice: Number(l.unitPrice || 0), taxRate: Number(l.taxRate || 0) })) }; await api('/finance/vendor-credits', { method: 'POST', body: JSON.stringify(body) }); message.success(post ? 'Vendor credit posted' : 'Draft saved'); onClose(); onSaved(); } catch (e: any) { message.error(e.message); } finally { setSaving(false); }
+    try {
+      if (goodsReturn) {
+        if (!warehouseId) { message.error('Warehouse is required for goods return'); return; }
+        if (lines.some((l) => !l.itemId)) { message.error('Each goods-return line needs an inventory item'); return; }
+        await api('/procurement/supplier-returns', {
+          method: 'POST',
+          body: JSON.stringify({
+            supplierId,
+            warehouseId,
+            supplierInvoiceId: sourceInvoiceId || undefined,
+            reason: reason || 'Damaged / Defective Goods',
+            returnedAt: date.format('YYYY-MM-DD'),
+            notes: memo,
+            confirm: true,
+            issueCredit: true,
+            postCredit: post,
+            lines: lines.map((l) => ({ description: l.description, itemId: l.itemId, quantity: Number(l.quantity || 1), unitPrice: Number(l.unitPrice || 0), taxRate: Number(l.taxRate || 0) })),
+          }),
+        });
+        message.success(post ? 'Goods returned, stock issued, vendor credit posted' : 'Goods returned, stock issued, vendor credit draft created');
+      } else {
+        const body = { supplierId, supplierCreditNo: creditNo || undefined, creditDate: date.format('YYYY-MM-DD'), currency, reason, sourceInvoiceId: sourceInvoiceId || undefined, reference, memo, fileName: attachment?.name, mime: attachment?.mime, dataUrl: attachment?.dataUrl, status: post ? 'POSTED' : 'DRAFT', lines: lines.map((l) => ({ description: l.description, accountId: l.accountId, itemId: l.itemId, quantity: Number(l.quantity || 1), unitPrice: Number(l.unitPrice || 0), taxRate: Number(l.taxRate || 0) })) };
+        await api('/finance/vendor-credits', { method: 'POST', body: JSON.stringify(body) });
+        message.success(post ? 'Vendor credit posted' : 'Draft saved');
+      }
+      onClose(); onSaved();
+    } catch (e: any) { message.error(e.message); } finally { setSaving(false); }
   }
   return (
     <Drawer open onClose={onClose} title="New Vendor Credit" width={680} extra={<Button onClick={onClose}>Cancel</Button>} footer={<Space className="w-full justify-end"><Button onClick={onClose}>Cancel</Button><Button onClick={() => save(false)} disabled={saving}>Save Draft</Button><Button type="primary" onClick={() => save(true)} loading={saving}>Post Credit</Button></Space>}>
@@ -136,11 +163,21 @@ function NewCreditDrawer({ open, onClose, onSaved }: any) {
           <Form.Item label="Reason *" required><Select className="w-full" value={reason || undefined} onChange={setReason} options={REASONS.map((r) => ({ label: r, value: r }))} placeholder="Select reason" /></Form.Item>
           <Form.Item label="Source Bill"><Select allowClear showSearch optionFilterProp="label" className="w-full" value={sourceInvoiceId || undefined} onChange={setSourceInvoiceId} options={arr(bills.data).filter((b: any) => !supplierId || b.supplierId === supplierId).map((b: any) => ({ label: `${b.invoiceNo} — ${b.supplier?.name}`, value: b.id }))} /></Form.Item>
         </div>
+        <Form.Item label="Physical goods return">
+          <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={goodsReturn} onChange={(e) => { setGoodsReturn(e.target.checked); if (e.target.checked && !reason) setReason('Damaged / Defective Goods'); }} /> Issue stock (RETURN_OUT) and create vendor credit</label>
+        </Form.Item>
+        {goodsReturn && (
+          <Form.Item label="Warehouse *" required>
+            <Select showSearch optionFilterProp="label" className="w-full" value={warehouseId || undefined} onChange={setWarehouseId} options={(meta.data?.warehouses || []).map((w: any) => ({ label: w.name || w.code, value: w.id }))} />
+          </Form.Item>
+        )}
         <Form.Item label="Reference"><Input value={reference} onChange={(e) => setReference(e.target.value)} /></Form.Item>
-        <div className="mb-1 text-[12px] font-medium text-[#566069]">Credit Lines (Account / Description / Qty / Rate / Tax)</div>
+        <div className="mb-1 text-[12px] font-medium text-[#566069]">{goodsReturn ? 'Return Lines (Item / Description / Qty / Rate / Tax)' : 'Credit Lines (Account / Description / Qty / Rate / Tax)'}</div>
         {lines.map((l) => (
-          <div key={l.key} className="grid grid-cols-[2fr_1.6fr_0.7fr_1fr_0.7fr_30px] gap-2 items-center py-1.5 border-t border-[#f0f1f6]">
-            <div><AccountSelector allowedTypes={['EXPENSE', 'ASSET']} postingOnly value={l.accountId} onChange={(v) => updLine(l.key, { accountId: v })} placeholder="Account" /></div>
+          <div key={l.key} className={`grid gap-2 items-center py-1.5 border-t border-[#f0f1f6] ${goodsReturn ? 'grid-cols-[1.6fr_1.4fr_0.7fr_1fr_0.7fr_30px]' : 'grid-cols-[2fr_1.6fr_0.7fr_1fr_0.7fr_30px]'}`}>
+            {goodsReturn
+              ? <Select showSearch optionFilterProp="label" value={l.itemId || undefined} options={itemOpts} placeholder="Item" onChange={(v) => { const o = itemOpts.find((x: any) => x.value === v); updLine(l.key, { itemId: v, description: l.description || o?.name || '', unitPrice: l.unitPrice || o?.cost || 0 }); }} />
+              : <div><AccountSelector allowedTypes={['EXPENSE', 'ASSET']} postingOnly value={l.accountId} onChange={(v) => updLine(l.key, { accountId: v })} placeholder="Account" /></div>}
             <div><Input value={l.description} onChange={(e) => updLine(l.key, { description: e.target.value })} placeholder="Description" /></div>
             <div><InputNumber className="w-full" min={1} value={l.quantity} onChange={(v) => updLine(l.key, { quantity: Number(v || 1) })} /></div>
             <div><InputNumber className="w-full" prefix="$" min={0} value={l.unitPrice} onChange={(v) => updLine(l.key, { unitPrice: Number(v || 0) })} /></div>
