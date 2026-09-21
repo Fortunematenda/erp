@@ -175,7 +175,12 @@ export function SalesOrderForm({ record, onSaved, initial }: { record?: any; onS
             <div className="grid grid-cols-[1.2fr_1.7fr_0.6fr_0.9fr_0.8fr_0.9fr_40px] gap-3 px-3 py-2 text-[12px] font-semibold text-[#64748b] uppercase tracking-wide"><span>Product</span><span>Description</span><span>Qty</span><span>Rate</span><span>Discount</span><span>Amount</span><span /></div>
             {lines.map((l) => (
               <div key={l.key} className="grid grid-cols-[1.2fr_1.7fr_0.6fr_0.9fr_0.8fr_0.9fr_40px] gap-3 items-center py-2 border-t border-[#f0f1f6]">
-                <Select className="w-full" showSearch optionFilterProp="label" placeholder="Product" options={orderItemOptions} value={l.itemId} onChange={(v) => onOrderProductChange(l.key, v)} />
+                <Select className="w-full" showSearch optionFilterProp="searchLabel" placeholder="Item" options={orderItemOptions} value={l.itemId} onChange={(v) => onOrderProductChange(l.key, v)} optionRender={(ori) => (
+                  <div className="flex items-center justify-between gap-2 w-full">
+                    <span className="truncate">{ori.data.label}</span>
+                    {ori.data.typeBadge && <span className="text-[10px] uppercase tracking-wide text-[#64748b] shrink-0">{ori.data.typeBadge}</span>}
+                  </div>
+                )} />
                 <Input value={l.description} onChange={(e) => updateLine(l.key, { description: e.target.value })} placeholder="Description" />
                 <InputNumber className="w-full" min={0} value={l.quantity} onChange={(v) => updateLine(l.key, { quantity: Number(v || 0) })} />
                 <Tooltip title="Automatically populated from the customer's price list or the product's default sales price. You may edit it if you have permission."><InputNumber className="w-full" min={0} prefix="$" value={l.unitPrice} onChange={(v) => updateLine(l.key, { unitPrice: Number(v || 0) })} /></Tooltip>

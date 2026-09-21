@@ -4,6 +4,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { NumberingService } from '../../core/common/numbering.service';
 import { InvoiceStatusService } from './invoice-status.service';
 import { AuditService } from '../../core/common/audit.service';
+import { normalizeItemType, ITEM_TYPE } from '../inventory/item-type';
 
 type JournalLine = { code: string; debit: number; credit: number; description?: string };
 type Db = Prisma.TransactionClient | PrismaService;
@@ -31,6 +32,41 @@ export class PostingService {
     return { debit: Number(debit.toFixed(2)), credit: Number(credit.toFixed(2)) };
   }
 
+  /** Purchase/expense posting code from item type + configured accounts. */
+  private async resolvePurchaseLineCode(companyId: string, line: { itemId?: string | null; accountId?: string | null; accountCode?: string | null }) {
+    if (line.accountCode) return line.accountCode;
+    if (line.accountId) {
+      const acc = await this.prisma.ledgerAccount.findFirst({ where: { id: line.accountId, companyId } });
+      if (acc?.code) return acc.code;
+    }
+    if (!line.itemId) return '6000';
+    const item = await this.prisma.inventoryItem.findFirst({ where: { id: line.itemId, companyId } });
+    if (!item) return '6000';
+    const type = normalizeItemType(item.type);
+    if (type === ITEM_TYPE.INVENTORY_PRODUCT) {
+      if (item.inventoryAssetAccountId) {
+        const a = await this.prisma.ledgerAccount.findFirst({ where: { id: item.inventoryAssetAccountId, companyId } });
+        if (a?.code) return a.code;
+      }
+      return '1200';
+    }
+    if (item.expenseAccountId) {
+      const a = await this.prisma.ledgerAccount.findFirst({ where: { id: item.expenseAccountId, companyId } });
+      if (a?.code) return a.code;
+    }
+    return '6000';
+  }
+
+  private async resolveSalesLineCode(companyId: string, itemId?: string | null) {
+    if (!itemId) return '4000';
+    const item = await this.prisma.inventoryItem.findFirst({ where: { id: itemId, companyId } });
+    if (item?.incomeAccountId) {
+      const a = await this.prisma.ledgerAccount.findFirst({ where: { id: item.incomeAccountId, companyId } });
+      if (a?.code) return a.code;
+    }
+    return '4000';
+  }
+
   async postJournal(companyId: string, opts: { date: Date; description: string; reference?: string; sourceType: string; sourceId?: string; lines: JournalLine[]; userId?: string }, db?: Prisma.TransactionClient) {
     const client: Db = db || this.prisma;
     this.assertBalanced(opts.lines);
@@ -44,19 +80,31 @@ export class PostingService {
       const existing = await client.journalEntry.findFirst({ where: { companyId, sourceType: opts.sourceType, sourceId: opts.sourceId } });
       if (existing) return client.journalEntry.findFirst({ where: { id: existing.id }, include: { lines: true } });
     }
-    const number = await this.numbering.next(companyId, 'JE');
-    const journal = await client.journalEntry.create({
-      data: {
-        companyId, number, date: opts.date, description: opts.description, reference: opts.reference,
-        sourceType: opts.sourceType, sourceId: opts.sourceId, status: 'POSTED',
-        lines: { create: opts.lines.map((l) => ({ accountId: byCode[l.code].id, debit: l.debit, credit: l.credit, description: l.description })) },
-      },
-      include: { lines: true },
-    });
+    let journal: any = null;
+    let lastErr: any;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const number = await this.numbering.next(companyId, 'JE');
+        journal = await client.journalEntry.create({
+          data: {
+            companyId, number, date: opts.date, description: opts.description, reference: opts.reference,
+            sourceType: opts.sourceType, sourceId: opts.sourceId, status: 'POSTED',
+            lines: { create: opts.lines.map((l) => ({ accountId: byCode[l.code].id, debit: l.debit, credit: l.credit, description: l.description })) },
+          },
+          include: { lines: true },
+        });
+        lastErr = null;
+        break;
+      } catch (e: any) {
+        lastErr = e;
+        if (e?.code !== 'P2002') throw e;
+      }
+    }
+    if (!journal) throw lastErr;
     await this.audit.log(companyId, opts.userId, 'JOURNAL_POSTED', 'JournalEntry', journal.id, {
       module: 'finance',
       result: 'SUCCESS',
-      metadata: { number, sourceType: opts.sourceType, sourceId: opts.sourceId, reference: opts.reference },
+      metadata: { number: journal.number, sourceType: opts.sourceType, sourceId: opts.sourceId, reference: opts.reference },
     });
     return journal;
   }
@@ -73,9 +121,20 @@ export class PostingService {
     if (Math.abs(ar - (revenue + tax)) > 0.02) {
       throw new BadRequestException(`Invoice ${invoice.invoiceNo} does not reconcile (total ${ar.toFixed(2)} vs subtotal+tax ${(revenue + tax).toFixed(2)})`);
     }
+    // Line-level revenue: each product/service can post to its own income account.
+    const byRevenue: Record<string, number> = {};
+    for (const l of invoice.lines) {
+      const net = Number(l.lineTotal) - Number(l.taxAmount || 0);
+      const code = await this.resolveSalesLineCode(companyId, l.itemId);
+      byRevenue[code] = (byRevenue[code] || 0) + net;
+    }
+    const revenueLines: JournalLine[] = Object.entries(byRevenue).map(([code, amt]) => ({
+      code, debit: 0, credit: Number(amt.toFixed(2)), description: code === '4000' ? 'Sales revenue' : `Sales revenue (${code})`,
+    }));
+    if (!revenueLines.length) revenueLines.push({ code: '4000', debit: 0, credit: revenue, description: 'Sales revenue' });
     const lines: JournalLine[] = [
       { code: '1100', debit: ar, credit: 0, description: 'Accounts receivable' },
-      { code: '4000', debit: 0, credit: revenue, description: 'Sales revenue' },
+      ...revenueLines,
       ...(tax > 0 ? [{ code: '2100', debit: 0, credit: tax, description: 'VAT payable' }] : []),
     ];
     this.assertBalanced(lines);
@@ -203,12 +262,7 @@ export class PostingService {
     const byCode = await this.accountsByCode(companyId);
     const drLines: { code: string; debit: number; credit: number; description: string }[] = [];
     for (const l of si.lines) {
-      let code = l.accountCode;
-      if (!code && l.accountId) {
-        const acc = await this.prisma.ledgerAccount.findFirst({ where: { id: l.accountId, companyId } });
-        code = acc?.code || '';
-      }
-      if (!code) code = l.itemId ? '1200' : '6000';
+      const code = await this.resolvePurchaseLineCode(companyId, l);
       if (!byCode[code]) throw new BadRequestException(`Line account ${code} not found for "${l.description}". Add an account to every bill line.`);
       const net = Number(l.lineTotal) - Number(l.taxAmount || 0);
       drLines.push({ code, debit: Number(net.toFixed(2)), credit: 0, description: l.description });

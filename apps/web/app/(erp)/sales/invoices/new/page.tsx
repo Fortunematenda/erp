@@ -8,7 +8,7 @@ export default function NewInvoicePage() {
   const customerId = sp.get('customer') || undefined;
   const projectId = sp.get('project') || undefined;
   return (
-    <div className="nex-fade max-w-[1024px] mx-auto">
+    <div className="nex-fade">
       <InvoiceForm initial={customerId || projectId ? { customerId, projectId } : undefined} onSaved={(id) => router.replace(id ? `/sales/invoices/${id}/edit` : '/sales/invoices')} />
     </div>
   );

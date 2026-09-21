@@ -4,6 +4,7 @@ import { companyIdOf } from '../../core/context';
 import { AuditService } from '../../core/common/audit.service';
 import { PermissionService } from '../auth/permission.service';
 import { round2, sumMoney } from '../performance/performance.constants';
+import { isStockTracked, normalizeItemType } from '../inventory/item-type';
 
 type AnyReq = any;
 
@@ -375,12 +376,13 @@ export class ReportService {
     let totalValue = 0; let reorderAlerts = 0; let itemsInStock = 0;
     const perItem: any[] = [];
     for (const i of items) {
+      if (!isStockTracked(i.type)) continue;
       const b = this.wac(i.movements);
       totalValue += b.value;
       if (b.onHand > 0) itemsInStock += 1;
       if (Number(i.reorderLevel) > 0 && b.onHand <= Number(i.reorderLevel)) reorderAlerts += 1;
       const whNames = [...new Set(i.movements.map((m: any) => m.warehouse?.name).filter(Boolean))];
-      perItem.push({ id: i.id, sku: i.sku, name: i.name, category: i.category?.name || null, warehouse: whNames[0] || null, onHand: b.onHand, avgCost: b.avgCost, value: b.value, reorderQty: Number(i.reorderLevel || 0), reorderAlert: Number(i.reorderLevel) > 0 && b.onHand <= Number(i.reorderLevel) });
+      perItem.push({ id: i.id, sku: i.sku, name: i.name, type: normalizeItemType(i.type), category: i.category?.name || null, warehouse: whNames[0] || null, onHand: b.onHand, avgCost: b.avgCost, value: b.value, reorderQty: Number(i.reorderLevel || 0), reorderAlert: Number(i.reorderLevel) > 0 && b.onHand <= Number(i.reorderLevel) });
     }
     return { totalValue: round(totalValue), reorderAlerts, itemsInStock, perItem };
   }

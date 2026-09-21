@@ -180,7 +180,12 @@ export function InvoiceFormDrawer({ open, onClose, presetCustomerId }: { open: b
           </div>
           {lines.map((l) => (
             <div key={l.key} className="grid grid-cols-[1.4fr_2fr_0.7fr_1fr_1fr_40px] gap-3 items-center py-2 border-t border-[#f0f1f6]">
-              <Select className="w-full" showSearch optionFilterProp="label" placeholder="Product" options={productOptions(meta.data?.items)} value={l.itemId} onChange={(v) => onProduct(l.key, v)} popupRender={(menu) => (<><div className="p-1">{menu}</div><Divider style={{ margin: '6px 0' }} /><Button type="text" size="small" block icon={<PlusOutlined />} onClick={() => setItemModalKey(l.key)}>Add item</Button></>)} />
+              <Select className="w-full" showSearch optionFilterProp="searchLabel" placeholder="Item" options={productOptions(meta.data?.items)} value={l.itemId} onChange={(v) => onProduct(l.key, v)} optionRender={(ori) => (
+                <div className="flex items-center justify-between gap-2 w-full">
+                  <span className="truncate">{ori.data.label}</span>
+                  {ori.data.typeBadge && <span className="text-[10px] uppercase tracking-wide text-[#64748b] shrink-0">{ori.data.typeBadge}</span>}
+                </div>
+              )} popupRender={(menu) => (<><div className="p-1">{menu}</div><Divider style={{ margin: '6px 0' }} /><Button type="text" size="small" block icon={<PlusOutlined />} onClick={() => setItemModalKey(l.key)}>Add item</Button></>)} />
               <Input value={l.description} onChange={(e) => updateLine(l.key, { description: e.target.value })} placeholder="Description" />
               <InputNumber className="w-full" min={0} value={l.quantity} onChange={(v) => updateLine(l.key, { quantity: Number(v || 0) })} />
               <Tooltip title="Automatically populated from the customer's price list or the product's default sales price. You may edit it if you have permission."><InputNumber className="w-full" min={0} prefix="$" value={l.unitPrice} onChange={(v) => updateLine(l.key, { unitPrice: Number(v || 0) })} /></Tooltip>

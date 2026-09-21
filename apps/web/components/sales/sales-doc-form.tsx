@@ -270,7 +270,12 @@ export function InvoiceForm({ record, onSaved, initial }: { record?: any; onSave
             <div className="grid grid-cols-[1.3fr_1.8fr_0.7fr_1fr_1fr_40px] gap-3 px-3 py-2 text-[12px] font-semibold text-[#64748b] uppercase tracking-wide"><span>Product</span><span>Description</span><span>Qty</span><span>Rate</span><span>Amount</span><span /></div>
             {lines.map((l) => (
               <div key={l.key} className="grid grid-cols-[1.3fr_1.8fr_0.7fr_1fr_1fr_40px] gap-3 items-center py-2 border-t border-[#f0f1f6]">
-                <Select disabled={locked} className="w-full" showSearch optionFilterProp="label" placeholder="Product" options={itemOptions} value={l.itemId} onChange={(v) => onProductChange(l.key, v)} popupRender={(menu) => (<><div className="p-1">{menu}</div><Divider style={{ margin: '6px 0' }} /><Button type="text" size="small" block icon={<PlusOutlined />} onClick={() => setItemModalKey(l.key)}>Add new item</Button></>)} />
+                <Select disabled={locked} className="w-full" showSearch optionFilterProp="searchLabel" placeholder="Item" options={itemOptions} value={l.itemId} onChange={(v) => onProductChange(l.key, v)} optionRender={(ori) => (
+                  <div className="flex items-center justify-between gap-2 w-full">
+                    <span className="truncate">{ori.data.label}</span>
+                    {ori.data.typeBadge && <span className="text-[10px] uppercase tracking-wide text-[#64748b] shrink-0">{ori.data.typeBadge}</span>}
+                  </div>
+                )} popupRender={(menu) => (<><div className="p-1">{menu}</div><Divider style={{ margin: '6px 0' }} /><Button type="text" size="small" block icon={<PlusOutlined />} onClick={() => setItemModalKey(l.key)}>Add new item</Button></>)} />
                 <Input disabled={locked} value={l.description} onChange={(e) => updateLine(l.key, { description: e.target.value })} placeholder="Description" />
                 <InputNumber disabled={locked} className="w-full" min={0.0001} value={l.quantity} onChange={(v) => updateLine(l.key, { quantity: Number(v || 0) })} />
                 <Tooltip title="Automatically populated from the customer's price list or the product's default sales price. You may edit it if you have permission."><InputNumber disabled={locked} className="w-full" min={0} prefix="$" value={l.unitPrice} onChange={(v) => updateLine(l.key, { unitPrice: Number(v || 0) })} /></Tooltip>
@@ -434,7 +439,12 @@ export function QuoteForm({ record, onSaved, initial }: { record?: any; onSaved:
             <div className="grid grid-cols-[1.3fr_1.6fr_0.7fr_1fr_1fr_40px] gap-3 px-3 py-2 text-[12px] font-semibold text-[#64748b] uppercase tracking-wide"><span>Product</span><span>Description</span><span>Qty</span><span>Rate</span><span>Amount</span><span /></div>
             {lines.map((l) => (
               <div key={l.key} className="grid grid-cols-[1.3fr_1.6fr_0.7fr_1fr_1fr_40px] gap-3 items-center py-2 border-t border-[#f0f1f6]">
-                <Select className="w-full" showSearch optionFilterProp="label" placeholder="Select product" options={quoteItemOptions} value={l.itemId} onChange={(v) => onQuoteProductChange(l.key, v)} popupRender={(menu) => (<><div className="p-1">{menu}</div><Divider style={{ margin: '6px 0' }} /><Button type="text" size="small" block icon={<PlusOutlined />} onClick={() => setItemModalKey(l.key)}>Add new item</Button></>)} />
+                <Select className="w-full" showSearch optionFilterProp="searchLabel" placeholder="Select item" options={quoteItemOptions} value={l.itemId} onChange={(v) => onQuoteProductChange(l.key, v)} optionRender={(ori) => (
+                  <div className="flex items-center justify-between gap-2 w-full">
+                    <span className="truncate">{ori.data.label}</span>
+                    {ori.data.typeBadge && <span className="text-[10px] uppercase tracking-wide text-[#64748b] shrink-0">{ori.data.typeBadge}</span>}
+                  </div>
+                )} popupRender={(menu) => (<><div className="p-1">{menu}</div><Divider style={{ margin: '6px 0' }} /><Button type="text" size="small" block icon={<PlusOutlined />} onClick={() => setItemModalKey(l.key)}>Add new item</Button></>)} />
                 <Input value={l.description} onChange={(e) => updateLine(l.key, { description: e.target.value })} placeholder="Description" />
                 <InputNumber className="w-full" min={0.0001} value={l.quantity} onChange={(v) => updateLine(l.key, { quantity: Number(v || 0) })} placeholder="Qty" />
                 <Tooltip title="Automatically populated from the customer's price list or the product's default sales price. You may edit it if you have permission."><InputNumber className="w-full" min={0} prefix="$" value={l.unitPrice} onChange={(v) => updateLine(l.key, { unitPrice: Number(v || 0) })} placeholder="Rate" /></Tooltip>
@@ -520,7 +530,13 @@ function QuickAddItem({ open, onClose, onCreated }: { open: boolean; onClose: ()
     try {
       const v = await form.validateFields();
       setSaving(true);
-      const res = await api('/inventory/items', { method: 'POST', body: JSON.stringify({ name: v.name, unit: v.unit || 'EA', reorderLevel: Number(v.reorderLevel || 0), sellingPrice: Number(v.sellingPrice || 0) }) });
+      const res = await api('/inventory/items', { method: 'POST', body: JSON.stringify({
+        name: v.name,
+        type: v.type || 'INVENTORY_PRODUCT',
+        unit: v.unit || (v.type === 'SERVICE' ? 'Hour' : 'EA'),
+        reorderLevel: Number(v.reorderLevel || 0),
+        sellingPrice: Number(v.sellingPrice || 0),
+      }) });
       qc.invalidateQueries({ queryKey: ['meta'] });
       message.success('Item created');
       form.resetFields();
@@ -529,12 +545,23 @@ function QuickAddItem({ open, onClose, onCreated }: { open: boolean; onClose: ()
     finally { setSaving(false); }
   }
   return (
-    <Modal open={open} title="Add New Item" onCancel={onClose} onOk={save} confirmLoading={saving} width={480} destroyOnHidden>
+    <Modal open={open} title="Add New Item" onCancel={onClose} onOk={save} confirmLoading={saving} width={480} destroyOnHidden afterOpenChange={(v) => { if (v) form.setFieldsValue({ type: 'INVENTORY_PRODUCT', unit: 'EA' }); }}>
       <Form form={form} layout="vertical">
+        <Form.Item label="Item Type" name="type" rules={[{ required: true }]}>
+          <Select options={[
+            { label: 'Inventory Product', value: 'INVENTORY_PRODUCT' },
+            { label: 'Non-Inventory Product', value: 'NON_INVENTORY_PRODUCT' },
+            { label: 'Service', value: 'SERVICE' },
+          ]} />
+        </Form.Item>
         <Form.Item label="Name" name="name" rules={[{ required: true, message: 'Name is required' }]}><Input placeholder="Item name" /></Form.Item>
-        <Form.Item label="Unit" name="unit"><Input placeholder="EA, KG, BOX…" /></Form.Item>
-        <Form.Item label="Selling Price" name="sellingPrice" extra="Used to auto-populate the Rate on quotes, orders and invoices."><InputNumber className="w-full" min={0} prefix="$" /></Form.Item>
-        <Form.Item label="Reorder Level" name="reorderLevel"><InputNumber className="w-full" min={0} /></Form.Item>
+        <Form.Item label="Unit" name="unit"><Input placeholder="EA, Hour, Job…" /></Form.Item>
+        <Form.Item label="Selling Price / Rate" name="sellingPrice" extra="Used to auto-populate the Rate on quotes, orders and invoices."><InputNumber className="w-full" min={0} prefix="$" /></Form.Item>
+        <Form.Item noStyle shouldUpdate={(p, c) => p.type !== c.type}>
+          {({ getFieldValue }) => getFieldValue('type') === 'INVENTORY_PRODUCT' ? (
+            <Form.Item label="Reorder Level" name="reorderLevel"><InputNumber className="w-full" min={0} /></Form.Item>
+          ) : null}
+        </Form.Item>
       </Form>
     </Modal>
   );

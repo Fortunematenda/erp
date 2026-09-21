@@ -18,6 +18,7 @@ import { QuotationStatusService } from './quotation-status.service';
 import { POSTED_INVOICE_EDIT_MESSAGE, SalesIntegrityService } from './sales-integrity.service';
 import { InventoryMovementService } from '../inventory/inventory-movement.service';
 import { getTransactionPostingMode } from '../finance/transaction-mode';
+import { isStockTracked } from '../inventory/item-type';
 
 @ApiTags('Sales') @ApiBearerAuth() @UseGuards(JwtAuthGuard, PermissionsGuard) @Controller('sales')
 export class SalesController {
@@ -961,6 +962,8 @@ export class SalesController {
       let cogsTotal = 0;
       for (const line of ret.lines) {
         if (!line.itemId) continue;
+        const item = items.find((i) => i.id === line.itemId);
+        if (!item || !isStockTracked(item.type)) continue;
         const cost = Number(line.unitCost) > 0 ? Number(line.unitCost) : avgCost(line.itemId);
         cogsTotal += cost * Number(line.quantity);
         await this.stock.create(companyId, {
@@ -1319,7 +1322,7 @@ export class SalesController {
       for (const line of inv.lines) {
         if (!line.itemId) continue;
         const item = items.find((i) => i.id === line.itemId);
-        if (!item || item.type === 'SERVICE') continue;
+        if (!item || !isStockTracked(item.type)) continue;
         await this.stock.create(companyId, {
           warehouseId: warehouse.id,
           itemId: line.itemId,
@@ -1429,14 +1432,17 @@ export class SalesController {
       let cogsTotal = 0;
       for (const line of dn.lines) {
         if (!line.itemId) continue;
-        const cost = avgCostFor(line.itemId) * Number(line.quantity);
+        const item = byItem.find((i: any) => i.id === line.itemId);
+        if (!item || !isStockTracked(item.type)) continue;
+        const unitCost = avgCostFor(line.itemId);
+        const cost = unitCost * Number(line.quantity);
         cogsTotal += cost;
         await this.stock.create(companyId, {
           warehouseId: dn.warehouseId!,
           itemId: line.itemId,
           type: 'ISSUE',
           quantity: Number(line.quantity),
-          unitCost: avgCostFor(line.itemId),
+          unitCost,
           reference: dn.deliveryNo,
           occurredAt: dn.date,
         }, req.user.sub, tx);

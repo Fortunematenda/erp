@@ -12,6 +12,7 @@ import { StatusDto } from '../sales/sales.dto';
 import { getTransactionPostingMode } from '../finance/transaction-mode';
 import { ApprovalService } from '../approvals/approval.service';
 import { InventoryMovementService } from '../inventory/inventory-movement.service';
+import { isStockTracked, normalizeItemType, ITEM_TYPE } from '../inventory/item-type';
 
 @ApiTags('Procurement') @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Controller('procurement')
 export class ProcurementController {
@@ -257,7 +258,19 @@ export class ProcurementController {
     await this.prisma.$transaction(async (tx) => {
       for (const line of grn.lines) {
         if (!line.itemId) continue;
-        await tx.stockMovement.create({ data: { warehouseId: grn.warehouseId!, itemId: line.itemId, type: 'RECEIPT', quantity: line.quantity, signedQuantity: Number(line.quantity), unitCost: line.unitCost, reference: grn.grnNo, occurredAt: grn.receivedAt } });
+        const item = await tx.inventoryItem.findFirst({ where: { id: line.itemId, companyId } });
+        // Only Inventory Products create stock receipts; services / non-inventory update PO received qty only.
+        if (item && isStockTracked(item.type)) {
+          await this.stock.create(companyId, {
+            warehouseId: grn.warehouseId!,
+            itemId: line.itemId,
+            type: 'RECEIPT',
+            quantity: Number(line.quantity),
+            unitCost: Number(line.unitCost),
+            reference: grn.grnNo,
+            occurredAt: grn.receivedAt,
+          }, userId, tx);
+        }
         const poi = grn.purchaseOrder?.lines.find((l: any) => l.itemId === line.itemId);
         if (poi) {
           const newRecv = Number(poi.receivedQty || 0) + Number(line.quantity);
@@ -699,6 +712,8 @@ export class ProcurementController {
     await this.prisma.$transaction(async (tx) => {
       for (const line of ret.lines) {
         if (!line.itemId) continue;
+        const item = await tx.inventoryItem.findFirst({ where: { id: line.itemId, companyId } });
+        if (!item || !isStockTracked(item.type)) continue;
         await this.stock.create(companyId, {
           warehouseId: ret.warehouseId!,
           itemId: line.itemId,

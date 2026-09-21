@@ -19,15 +19,15 @@ export default function EditInvoicePage() {
   const [payOpen, setPayOpen] = useState(false);
   const list = useQuery({ queryKey: ['/sales/invoices'], queryFn: () => api('/sales/invoices') });
   const preview = useQuery({ queryKey: ['/documents/invoice', id], queryFn: () => api(`/documents/invoice/${id}`), enabled: !!id });
-  if (list.isLoading) return <div className="nex-fade max-w-[1024px] mx-auto pt-6"><Skeleton active paragraph={{ rows: 8 }} /></div>;
-  if (list.error) return <div className="nex-fade max-w-[1024px] mx-auto pt-6"><Alert type="error" message={(list.error as Error).message} /></div>;
+  if (list.isLoading) return <div className="nex-fade pt-6"><Skeleton active paragraph={{ rows: 8 }} /></div>;
+  if (list.error) return <div className="nex-fade pt-6"><Alert type="error" message={(list.error as Error).message} /></div>;
   const record = (list.data || []).find((i: any) => i.id === id);
-  if (!record) return <div className="nex-fade max-w-[1024px] mx-auto pt-6"><Alert type="warning" message="Invoice not found" /></div>;
+  if (!record) return <div className="nex-fade pt-6"><Alert type="warning" message="Invoice not found" /></div>;
 
   const eligiblePay = record.invoiceStatus === 'POSTED' && ['UNPAID', 'PARTIALLY_PAID', 'OVERDUE'].includes(record.paymentStatus) && Number(record.balanceDue) > 0.001;
 
   return (
-    <div className="nex-fade max-w-[1024px] mx-auto">
+    <div className="nex-fade">
       {eligiblePay && (
         <div className="mb-4 flex items-center gap-2 flex-wrap">
           <Button type="primary" icon={<DollarOutlined />} onClick={() => setPayOpen(true)}>Receive Payment</Button>

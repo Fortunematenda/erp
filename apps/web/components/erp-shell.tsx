@@ -45,7 +45,7 @@ const nav = [
       },
       { key: '/crm', label: 'Customers & CRM', icon: <ContactsOutlined /> },
         { key: '/procurement', label: 'Procurement', icon: <ShopOutlined /> },
-        { key: '/inventory', label: 'Inventory', icon: <AppstoreOutlined /> },
+        { key: '/inventory', label: 'Products & Services', icon: <AppstoreOutlined /> },
         {
           key: '/expenses', label: 'Expenses', icon: <WalletOutlined />, color: '#f59e0b', children: [
             { key: '/expenses/bills', label: 'Bill Management' },
@@ -131,7 +131,7 @@ const PAGE_TITLES: Record<string, [string, string]> = {
   '/sales/reports': ['Sales Reports', 'Analyse revenue, customers, products, tax and sales performance'],
   '/crm': ['Customers & CRM', 'Leads, opportunities and customer interactions'],
   '/procurement': ['Procurement', 'Suppliers, requisitions, purchase orders and payables'],
-  '/inventory': ['Inventory', 'Items, warehouses, stock and movements'],
+  '/inventory': ['Products & Services', 'Items, stock, warehouses and movements'],
   '/expenses/bills': ['Bill Management', 'Supplier bills and payables'],
   '/expenses/enter-bill': ['Enter Bill', 'Record a supplier bill'],
   '/expenses/pay-bill': ['Pay Bill', 'Make payments against supplier bills'],
@@ -204,7 +204,7 @@ const QUICK_MODULES = [
   { key: '/sales', label: 'Sales', icon: <ShoppingCartOutlined />, color: '#0ea5e9' },
   { key: '/crm', label: 'Customers & CRM', icon: <ContactsOutlined />, color: '#0b4a8f' },
   { key: '/procurement', label: 'Procurement', icon: <ShopOutlined />, color: '#f59e0b' },
-  { key: '/inventory', label: 'Inventory', icon: <AppstoreOutlined />, color: '#10b981' },
+  { key: '/inventory', label: 'Products & Services', icon: <AppstoreOutlined />, color: '#10b981' },
   { key: '/finance', label: 'Finance', icon: <DollarOutlined />, color: '#003366' },
   { key: '/hr', label: 'HR & Payroll', icon: <TeamOutlined />, color: '#f43f5e' },
   { key: '/assets', label: 'Assets', icon: <ToolOutlined />, color: '#14b8a6' },
@@ -648,7 +648,7 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
         </Header>
 
         <Content className="min-h-[calc(100vh-68px)]">
-          <div className="p-3 sm:p-6 sm:px-8 max-w-[1440px] mx-auto overflow-x-auto">{children}</div>
+          <div className="p-3 sm:p-6 sm:px-8 w-full overflow-x-auto">{children}</div>
         </Content>
       </Layout>
     </Layout>

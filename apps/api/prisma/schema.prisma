@@ -841,7 +841,8 @@ model InventoryItem {
   description             String?
   salesDescription        String?
   purchaseDescription     String?
-  type                    String             @default("INVENTORY")
+  /// INVENTORY_PRODUCT | NON_INVENTORY_PRODUCT | SERVICE
+  type                    String             @default("INVENTORY_PRODUCT")
   itemCategory            String?
   categoryId              String?
   category                InventoryCategory? @relation(fields: [categoryId], references: [id])
@@ -937,6 +938,7 @@ model StockMovement {
   signedQuantity Decimal           @default(0) @db.Decimal(18, 4)
   unitCost       Decimal           @default(0) @db.Decimal(18, 4)
   reference      String?
+  notes          String?
   batchNo        String?
   serialNo       String?
   occurredAt     DateTime          @default(now())

@@ -11,7 +11,8 @@ export class ItemDto {
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsString() salesDescription?: string;
   @IsOptional() @IsString() purchaseDescription?: string;
-  @IsOptional() @IsString() type?: string;
+  @IsOptional() @IsIn(['INVENTORY_PRODUCT', 'NON_INVENTORY_PRODUCT', 'SERVICE', 'INVENTORY', 'NON_INVENTORY'])
+  type?: string;
   @IsOptional() @IsString() itemCategory?: string;
   @IsOptional() @IsString() categoryId?: string;
   @IsOptional() @IsString() imageUrl?: string;
@@ -78,6 +79,7 @@ export class CreateMovementDto {
   @Type(() => Number) @IsNumber() @Min(0.0001) quantity!: number;
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) unitCost?: number;
   @IsOptional() @IsString() reference?: string;
+  @IsOptional() @IsString() notes?: string;
 }
 
 export class TransferDto {
@@ -86,6 +88,25 @@ export class TransferDto {
   @IsString() itemId!: string;
   @Type(() => Number) @IsNumber() quantity!: number;
   @IsOptional() @IsString() reference?: string;
+  @IsOptional() @IsString() notes?: string;
+  @IsOptional() @IsString() date?: string;
+}
+
+export class CreateAdjustmentDto {
+  @IsString() warehouseId!: string;
+  @IsString() itemId!: string;
+  /** set = physical count; delta = signed quantity change */
+  @IsIn(['set', 'delta']) mode!: 'set' | 'delta';
+  @IsOptional() @Type(() => Number) @IsNumber() countedQty?: number;
+  @IsOptional() @Type(() => Number) @IsNumber() quantity?: number;
+  @IsIn(['OPENING_BALANCE', 'QUANTITY_INCREASE', 'QUANTITY_DECREASE', 'STOCK_COUNT', 'DAMAGED', 'LOST', 'EXPIRED', 'FOUND', 'OTHER'])
+  reason!: string;
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) unitCost?: number;
+  @IsOptional() @IsString() reference?: string;
+  @IsOptional() @IsString() notes?: string;
+  @IsOptional() @IsString() date?: string;
+  /** When false, only stock movement is written (rare; default posts GL). */
+  @IsOptional() @IsBoolean() postJournal?: boolean;
 }
 
 export class CountLineDto {

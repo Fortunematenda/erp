@@ -48,6 +48,10 @@ export class PermissionService implements OnModuleInit {
   async getPermissions(user: any): Promise<string[]> {
     const m = await this.getMembership(user);
     if (!m) return [];
+    // Legacy membership.role ADMIN/OWNER = full company access (seed / older tenants).
+    if (['ADMIN', 'OWNER'].includes(String(m.role || '').toUpperCase())) {
+      return PERMISSIONS.map((p) => p.code);
+    }
     const set = new Set<string>();
     for (const mr of m.roles) for (const rp of mr.role.rolePermissions) set.add(rp.permission.code);
     return [...set];

@@ -1,5 +1,6 @@
 'use client';
 import { api } from '@/lib/api';
+import { itemSelectorSubtitle, itemTypeLabel } from '@/lib/item-type';
 
 /**
  * Shared customer → document hydration used by Quote, Sales Order and Invoice forms
@@ -118,13 +119,20 @@ export function productLineDefaults(item: any): { description: string; unit?: st
   };
 }
 
-/** Improved product dropdown option: product name only (clean labels on quote/order/invoice lines). */
-export function productOptions(items: any[] | undefined, currency = 'USD') {
-  return (items || []).map((i: any) => ({
-    label: i.name,
-    value: i.id,
-    item: i,
-  }));
+/** Product/service dropdown: SKU — Name; subtitle shows type · tracking. */
+export function productOptions(items: any[] | undefined, _currency = 'USD') {
+  return (items || []).map((i: any) => {
+    const skuPart = i.sku ? `${i.sku} — ` : '';
+    const subtitle = itemSelectorSubtitle(i.type);
+    return {
+      label: `${skuPart}${i.name || 'Item'}`,
+      value: i.id,
+      item: i,
+      searchLabel: `${skuPart}${i.name || ''} ${subtitle}`,
+      typeBadge: subtitle,
+      typeLabel: itemTypeLabel(i.type),
+    };
+  });
 }
 
 /**

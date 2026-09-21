@@ -12,13 +12,13 @@ export default function EditSalesOrderPage() {
   const { id } = useParams();
   const list = useQuery({ queryKey: ['/sales/sales-orders'], queryFn: () => api('/sales/sales-orders') });
   const preview = useQuery({ queryKey: ['/documents/sales-order', id], queryFn: () => api(`/documents/sales-order/${id}`), enabled: !!id });
-  if (list.isLoading) return <div className="nex-fade max-w-[1024px] mx-auto pt-6"><Skeleton active paragraph={{ rows: 8 }} /></div>;
-  if (list.error) return <div className="nex-fade max-w-[1024px] mx-auto pt-6"><Alert type="error" message={(list.error as Error).message} /></div>;
+  if (list.isLoading) return <div className="nex-fade pt-6"><Skeleton active paragraph={{ rows: 8 }} /></div>;
+  if (list.error) return <div className="nex-fade pt-6"><Alert type="error" message={(list.error as Error).message} /></div>;
   const record = (list.data || []).find((o: any) => o.id === id);
-  if (!record) return <div className="nex-fade max-w-[1024px] mx-auto pt-6"><Alert type="warning" message="Sales order not found" /></div>;
+  if (!record) return <div className="nex-fade pt-6"><Alert type="warning" message="Sales order not found" /></div>;
 
   return (
-    <div className="nex-fade max-w-[1024px] mx-auto">
+    <div className="nex-fade">
       <Tabs items={[
         { key: 'edit', label: 'Edit Sales Order', children: <SalesOrderForm record={record} onSaved={() => {}} /> },
         {
