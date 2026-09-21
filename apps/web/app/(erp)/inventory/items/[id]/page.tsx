@@ -12,6 +12,7 @@ import { ItemFormDrawer } from '@/components/inventory/item-form-drawer';
 import { StockAdjustmentDrawer } from '@/components/inventory/stock-adjustment-drawer';
 import { TransferDrawer } from '@/components/inventory/transfer-drawer';
 import { ITEM_TYPE_BADGE, ITEM_TYPE_TONE, TRACKING_TONE, isStockTracked, itemTypeLabel, normalizeItemType, trackingLabel, trackingStatus } from '@/lib/item-type';
+import { MetricStrip } from '@/components/metric-strip';
 
 export default function ItemDetail() {
   const { id } = useParams();
@@ -97,16 +98,16 @@ export default function ItemDetail() {
   ];
 
   const kpis = [
-    { l: 'Sales Price', v: fmtMoney(item.sellingPrice), c: '#2563eb' },
-    { l: 'Qty Sold 30d', v: fmtNumber(perf.qty), c: '#003366' },
-    { l: 'Net Sales 30d', v: fmtMoney(perf.net), c: '#16a34a' },
-    { l: 'Last Sale', v: perf.lastSale ? fmtDate(perf.lastSale) : 'Never', c: '#f59e0b' },
-    { l: tracked ? 'Purchase Cost' : 'Cost / Rate', v: fmtMoney(item.purchaseCost), c: '#f97316' },
+    { label: 'Sales Price', value: fmtMoney(item.sellingPrice), color: '#2563eb' },
+    { label: 'Qty Sold 30d', value: fmtNumber(perf.qty), color: '#003366' },
+    { label: 'Net Sales 30d', value: fmtMoney(perf.net), color: '#16a34a' },
+    { label: 'Last Sale', value: perf.lastSale ? fmtDate(perf.lastSale) : 'Never', color: '#f59e0b' },
+    { label: tracked ? 'Purchase Cost' : 'Cost / Rate', value: fmtMoney(item.purchaseCost), color: '#f97316' },
     ...(tracked ? [
-      { l: 'Avg Cost', v: fmtMoney(total.avgCost), c: '#8b5cf6' },
-      { l: 'On Hand', v: fmtNumber(total.onHand), c: '#003366' },
-      { l: 'Available', v: fmtNumber(total.available), c: '#16a34a' },
-      { l: 'Stock Value', v: fmtMoney(total.value), c: '#f59e0b' },
+      { label: 'Avg Cost', value: fmtMoney(total.avgCost), color: '#8b5cf6' },
+      { label: 'On Hand', value: fmtNumber(total.onHand), color: '#003366' },
+      { label: 'Available', value: fmtNumber(total.available), color: '#16a34a' },
+      { label: 'Stock Value', value: fmtMoney(total.value), color: '#f59e0b' },
     ] : []),
   ];
 
@@ -135,9 +136,7 @@ export default function ItemDetail() {
           )}
         </Space>
       </div>
-      <div className="nex-card mb-5 px-5 py-4 flex flex-wrap gap-8 !rounded-xl">
-        {kpis.map((k) => (<div key={k.l}><div className="text-[12px] text-[#64748b]">{k.l}</div><div className="text-[18px] font-bold" style={{ color: k.c }}>{k.v}</div></div>))}
-      </div>
+      <MetricStrip items={kpis} className="mb-5" />
       <Card className="nex-card" styles={{ body: { padding: '14px 20px' } }}><Tabs items={tabs} activeKey={tab} onChange={setTab} destroyOnHidden /></Card>
 
       <ItemFormDrawer open={editOpen} itemId={item.id} initial={{ ...item, typeLocked }} onClose={() => setEditOpen(false)} onSaved={() => refresh()} />

@@ -136,7 +136,9 @@ export class InventoryMovementService {
     const current = await this.balance(companyId, item.id, warehouse.id, db);
     if (signedQuantity < 0 && !(await this.allowNegativeStock(companyId))) {
       if (current.onHand + signedQuantity < -0.0001) {
-        throw new BadRequestException(`Insufficient stock for ${item.sku || item.name}: on hand ${current.onHand}, requested ${qty}`);
+        throw new BadRequestException(
+          `Not enough stock — You only have ${Number(current.onHand)} of “${item.name || item.sku}” available, but ${qty} ${qty === 1 ? 'is' : 'are'} needed. Add stock or reduce the quantity, then try again.`,
+        );
       }
     }
 

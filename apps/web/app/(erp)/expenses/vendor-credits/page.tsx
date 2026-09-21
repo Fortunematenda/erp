@@ -12,6 +12,7 @@ import { useMeta } from '@/lib/meta';
 import { StatCard } from '@/components/stat-card';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
+import { MetricStrip } from '@/components/metric-strip';
 
 const REASONS = ['Returned Goods', 'Pricing Error', 'Overbilling', 'Damaged Goods', 'Quantity Shortage', 'Duplicate Billing', 'Discount / Rebate', 'Service Adjustment', 'Tax Correction', 'Other'];
 const arr = (v: any) => (Array.isArray(v) ? v : []);
@@ -208,7 +209,14 @@ function ApplyDrawer({ credit, onClose, onSaved }: any) {
   }
   return (
     <Drawer open onClose={onClose} title="Apply Vendor Credit" width={680} extra={<Button onClick={onClose}>Cancel</Button>} footer={<Space className="w-full justify-end"><Button onClick={onClose}>Cancel</Button><Button type="primary" onClick={submit} loading={saving}>Apply Credit</Button></Space>}>
-      <div className="nex-card !rounded-xl px-4 py-3 mb-4 flex items-center gap-6"><div><div className="text-[12px] text-[#64748b]">Credit {credit.vendorCreditNo} · {credit.supplier?.name}</div><div className="text-[18px] font-bold text-[#171a2e]">{fmtMoney(credit.total)}</div></div><div><div className="text-[12px] text-[#64748b]">Already Applied</div><div className="text-[15px] font-semibold text-[#16a34a]">{fmtMoney(credit.appliedAmount)}</div></div><div><div className="text-[12px] text-[#64748b]">Available</div><div className="text-[18px] font-bold text-[#f59e0b]">{fmtMoney(credit.available)}</div></div></div>
+      <MetricStrip
+        className="mb-4"
+        items={[
+          { label: `Credit ${credit.vendorCreditNo} · ${credit.supplier?.name || ''}`, value: fmtMoney(credit.total), color: '#171a2e' },
+          { label: 'Already Applied', value: fmtMoney(credit.appliedAmount), color: '#16a34a' },
+          { label: 'Available', value: fmtMoney(credit.available), color: '#f59e0b' },
+        ]}
+      />
       <div className="flex items-center justify-between mb-2"><span className="text-[13px] font-bold">Outstanding Bills</span><Button size="small" onClick={autoApply}>Auto Apply</Button></div>
       {outstanding.length === 0 && <div className="text-[13px] text-[#8a90ad]">No outstanding bills for this supplier</div>}
       {outstanding.map((b: any) => { const checked = (applyMap[b.id] || 0) > 0; return (
@@ -233,7 +241,7 @@ function RefundDrawer({ credit, onClose, onSaved }: any) {
   }
   return (
     <Drawer open onClose={onClose} title="Record Supplier Refund" width={520} extra={<Button onClick={onClose}>Cancel</Button>} footer={<Space className="w-full justify-end"><Button onClick={onClose}>Cancel</Button><Button type="primary" onClick={submit} loading={saving}>Record Refund</Button></Space>}>
-      <div className="nex-card !rounded-xl px-4 py-3 mb-4"><span className="text-[12px] text-[#64748b]">{credit.vendorCreditNo} · Available</span><span className="text-[18px] font-bold text-[#f59e0b] ml-2">{fmtMoney(credit.available)}</span></div>
+      <div className="nex-card !rounded-xl px-4 py-3 mb-4 text-center"><div className="text-[11px] text-[#64748b]">{credit.vendorCreditNo} · Available</div><div className="text-[13px] font-semibold text-[#f59e0b] tabular-nums mt-0.5">{fmtMoney(credit.available)}</div></div>
       <Form layout="vertical">
         <Form.Item label="Refund Date *" required><DatePicker className="w-full" value={date} onChange={setDate} allowClear={false} /></Form.Item>
         <Form.Item label="Deposit To *" required><Select className="w-full" value={bankId || undefined} onChange={setBankId} options={arr(banks.data).map((b: any) => ({ label: `${b.name} (${b.ledgerAccount?.code || ''})`, value: b.id }))} /></Form.Item>
@@ -254,7 +262,7 @@ function CreditDetailDrawer({ credit, onClose }: any) {
     { key: 'apps', label: 'Applications', children: <Table rowKey="id" size="small" dataSource={arr(v.applications)} pagination={false} columns={[{ title: 'Bill #', render: (_: any, r: any) => r.billNo }, { title: 'Date', dataIndex: 'createdAt', render: fmtDate }, { title: 'Amount', dataIndex: 'amount', align: 'right', render: (x: any) => fmtMoney(x) }, { title: 'Status', dataIndex: 'status', render: (x: any) => <StatusTag value={x} /> }]} /> },
     { key: 'attachments', label: 'Attachments', children: v.dataUrl ? <div className="flex items-center gap-3 rounded-xl border p-3"><FileTextOutlined /><div className="flex-1 truncate">{v.fileName}</div><Button size="small" onClick={() => window.open(v.dataUrl, '_blank')}>Preview</Button></div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No attachment" /> },
   ];
-  return <Drawer open onClose={onClose} width={640} title={<span>Vendor Credit <b>{v.vendorCreditNo}</b></span>} extra={<Button onClick={onClose}>Close</Button>}><div className="mb-3 flex flex-wrap gap-6">{[{ l: 'Total Credit', v: fmtMoney(v.total), c: '#171a2e' }, { l: 'Applied', v: fmtMoney(v.appliedAmount), c: '#16a34a' }, { l: 'Available', v: fmtMoney(v.available), c: '#f59e0b' }].map((k) => <div key={k.l}><div className="text-[12px] text-[#64748b]">{k.l}</div><div className="text-[18px] font-bold" style={{ color: k.c }}>{k.v}</div></div>)}<div className="flex items-center gap-2 ml-auto"><StatusTag value={v.status} colorMap={DOC_TONE} /><StatusTag value={v.applicationStatus} colorMap={APP_TONE} /></div></div><Tabs items={tabs} /></Drawer>;
+  return <Drawer open onClose={onClose} width={640} title={<span>Vendor Credit <b>{v.vendorCreditNo}</b></span>} extra={<Button onClick={onClose}>Close</Button>}><div className="mb-3 flex flex-wrap items-center gap-3"><MetricStrip className="flex-1 mb-0" items={[{ label: 'Total Credit', value: fmtMoney(v.total), color: '#171a2e' }, { label: 'Applied', value: fmtMoney(v.appliedAmount), color: '#16a34a' }, { label: 'Available', value: fmtMoney(v.available), color: '#f59e0b' }]} /><div className="flex items-center gap-2"><StatusTag value={v.status} colorMap={DOC_TONE} /><StatusTag value={v.applicationStatus} colorMap={APP_TONE} /></div></div><Tabs items={tabs} /></Drawer>;
 }
 
 function ReportsModal({ kind, onClose }: any) {

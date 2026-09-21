@@ -99,7 +99,6 @@ export function TemplateDesigner({ type }: { type: 'invoice' | 'quote' }) {
     </div> },
     { key: 'notes', label: 'Notes', body: <div>
       <Cols label={isQuote ? 'Show quote notes' : 'Show notes'}><Switch checked={t.showNotes !== false} onChange={(v) => set('showNotes', v)} /></Cols>
-      {!isQuote && <Cols label="Show statement memo"><Switch checked={t.showStatementMemo !== false} onChange={(v) => set('showStatementMemo', v)} /></Cols>}
       {isQuote ? <Cols label="Show acceptance section"><Switch checked={t.showAcceptanceSection !== false} onChange={(v) => set('showAcceptanceSection', v)} /></Cols> : null}
     </div> },
     ...(isQuote ? [] : [{ key: 'status', label: 'Invoice Status', body: <div>

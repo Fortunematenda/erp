@@ -64,7 +64,7 @@ function ItemCostDrawer({ open, itemId, onClose, onRefresh }: { open: boolean; i
   );
 }
 
-function MiniStat({ label, value }: { label: string; value: string }) { return <div className="nex-card rounded-lg p-3.5" style={{ border: '1px solid #e9edf2' }}><div className="text-[12px] text-[#667085]">{label}</div><div className="text-[19px] font-semibold text-[#1f2937] mt-1 tabular-nums">{value}</div></div>; }
+function MiniStat({ label, value }: { label: string; value: string }) { return <div className="nex-card rounded-lg p-3.5 text-center" style={{ border: '1px solid #e9edf2' }}><div className="text-[11px] text-[#667085]">{label}</div><div className="text-[13px] font-semibold text-[#1f2937] mt-0.5 tabular-nums">{value}</div></div>; }
 
 export default function CostingPage() {
   const qc = useQueryClient();

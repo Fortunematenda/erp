@@ -76,6 +76,10 @@ export function validateTemplateInput(body: any, type: string) {
 
   ['footerMessage', 'quoteFooterMessage', 'invoiceTerms', 'quoteTerms', 'statementMemo', 'validityMessage', 'invoiceTitle', 'quoteTitle', 'preparedForLabel'].forEach((k) => tf(k, LENGTH_MAX[k] ?? 4000));
 
-  if (body.logoUrl !== undefined) out.logoUrl = sanitizeText(String(body.logoUrl)).slice(0, 400);
+  if (body.logoUrl !== undefined) {
+    // Allow data-URL uploads from Template Designer (was truncated at 400 and silently broke letterhead).
+    const raw = String(body.logoUrl);
+    out.logoUrl = raw.startsWith('data:') ? raw.slice(0, 1_500_000) : sanitizeText(raw).slice(0, 2000);
+  }
   return out;
 }

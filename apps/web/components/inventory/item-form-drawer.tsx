@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import { useMeta } from '@/lib/meta';
 import { fmtNumber } from '@/lib/format';
 import { ITEM_TYPE, ITEM_TYPE_LABELS, TRACKING_HINTS, TRACKING_LABELS, isStockTracked, itemTypeOptions, normalizeItemType, trackingStatus, type ItemType } from '@/lib/item-type';
+import { MetricStrip } from '@/components/metric-strip';
 
 const SERVICE_UNITS = ['Each', 'Hour', 'Day', 'Job', 'Month', 'Project'];
 
@@ -125,15 +126,14 @@ export function ItemFormDrawer({ open, itemId, initial, onClose, onSaved }: Prop
         />
 
         {item?.id && stock && (
-          <div className="nex-card mb-4 px-4 py-3 !rounded-xl flex flex-wrap items-center gap-6">
-            <div>
-              <div className="text-[12px] text-[#64748b]">Quantity on Hand</div>
-              <div className="text-[18px] font-bold text-[#171a2e]">{fmtNumber(total.onHand)}</div>
-            </div>
-            <div>
-              <div className="text-[12px] text-[#64748b]">Available</div>
-              <div className="text-[18px] font-bold text-[#16a34a]">{fmtNumber(total.available)}</div>
-            </div>
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <MetricStrip
+              className="flex-1 mb-0"
+              items={[
+                { label: 'Quantity on Hand', value: fmtNumber(total.onHand), color: '#171a2e' },
+                { label: 'Available', value: fmtNumber(total.available), color: '#16a34a' },
+              ]}
+            />
             <div className="text-[12px] text-[#64748b] max-w-xs">Quantity cannot be edited here. Use Adjust Stock to create an accounting movement.</div>
           </div>
         )}

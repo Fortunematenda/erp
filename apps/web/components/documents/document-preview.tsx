@@ -1,5 +1,6 @@
 'use client';
 import { fmtMoney, fmtDate } from '@/lib/format';
+import { DocumentLetterhead } from '@/components/documents/document-letterhead';
 
 export type Tpl = Record<string, any>;
 export type PreviewVm = {
@@ -24,6 +25,7 @@ export type PreviewVm = {
   total?: number;
   paid?: number;
   balance?: number;
+  paymentTerms?: string | null;
   notes?: string | null;
   fiscalInfo?: Record<string, any> | null;
   statementMemo?: string | null;
@@ -99,7 +101,6 @@ export function DocumentPreview({ vm }: { vm: PreviewVm }) {
   // Never render a line table with only the row-number column — fall back to safe defaults.
   if (!visible.length) visible = defaultCols.filter((c: any) => c.visible);
   const balance = vm.balance ?? (vm.total == null ? 0 : (vm.paid == null ? vm.total : vm.total - vm.paid));
-  const showCompany = (k: string) => (t.showCompanyFields ? (t.showCompanyFields as any)[k] !== false : true);
   const showCustomer = (k: string) => (t.showCustomerFields ? (t.showCustomerFields as any)[k] !== false : true);
 
   const tokData: Record<string, any> = { companyName: company.name, invoiceNumber: vm.number, quoteNumber: vm.number, dueDate: vm.dueDate ? fmtDate(vm.dueDate) : '', validUntil: vm.validUntil ? fmtDate(vm.validUntil) : '', validityDays: t.validityDays, customerName: party.name, balanceDue: fmtMoney(balance) };
@@ -108,7 +109,13 @@ export function DocumentPreview({ vm }: { vm: PreviewVm }) {
     if (key === 'description') return row.desc || row.name || row.productName || '—';
     if (key === 'qty') return Number(row.qty ?? 0);
     if (key === 'unit') return fmtMoney(row.unit ?? row.rate ?? 0);
-    if (key === 'tax') return row.tax != null ? `${Number(row.tax) * 100}%` : '—';
+    if (key === 'tax') {
+      if (row.tax == null || row.tax === '') return '—';
+      const n = Number(row.tax);
+      if (Number.isNaN(n)) return '—';
+      const pct = n > 0 && n <= 1 ? n * 100 : n;
+      return `${pct % 1 ? pct.toFixed(1) : pct}%`;
+    }
     if (key === 'amount') return fmtMoney(row.total ?? row.amount ?? 0);
     if (key === 'sku') return row.sku || row.hsCode || '—';
     return '';
@@ -124,13 +131,8 @@ export function DocumentPreview({ vm }: { vm: PreviewVm }) {
         )}
         {/* HEADER */}
         <div className="flex justify-between gap-6 mb-5">
-          <div className={`flex-1 ${t.logoPosition === 'center' ? 'text-center' : t.logoPosition === 'right' ? 'text-right' : ''}`} style={{ order: t.logoPosition === 'right' ? 1 : 0 }}>
-            {t.logoUrl && <div className="mb-2"><img src={t.logoUrl} alt="logo" style={{ height: t.logoSize === 'large' ? 64 : t.logoSize === 'small' ? 32 : 48, objectFit: 'contain' }} /></div>}
-            <div className="text-xl font-bold" style={{ color: primary }}>{company.name}</div>
-            {showCompany('address') && company.address && <div className="text-[12px]" style={{ color: muted }}>{company.address}</div>}
-            <div className="text-[12px] text-slate-500">{[company.phone, company.email].filter(Boolean).join(' • ')}</div>
-            {showCompany('tax') && (company.tin || company.vatNumber) && <div className="text-[11px]" style={{ color: muted }}>TIN {company.tin}{company.vatNumber ? ` · VAT ${company.vatNumber}` : ''}</div>}
-            {showCompany('website') && company.website && <div className="text-[11px]" style={{ color: muted }}>{company.website}</div>}
+          <div className="flex-1" style={{ order: t.logoPosition === 'right' ? 1 : 0 }}>
+            <DocumentLetterhead company={company} template={t} />
           </div>
           <div className="text-right">
             <div className="text-2xl font-bold" style={{ color: primary }}>{title}</div>
@@ -209,8 +211,11 @@ export function DocumentPreview({ vm }: { vm: PreviewVm }) {
             <div className="whitespace-pre-line" style={{ fontSize: base - 1 }}>{isQuote ? applyTokens(t.validityMessage || '', tokData) : vm.notes}</div>
           </div>
         )}
-        {!isQuote && t.showStatementMemo !== false && vm.statementMemo && (
-          <div className="mb-3"><div className="text-[11px] uppercase tracking-wide mb-1" style={{ color: muted }}>STATEMENT MEMO</div><div className="whitespace-pre-line" style={{ fontSize: base - 1 }}>{vm.statementMemo}</div></div>
+        {!isQuote && vm.paymentTerms && (
+          <div className="mb-3">
+            <div className="text-[11px] uppercase tracking-wide mb-1" style={{ color: muted }}>PAYMENT TERMS</div>
+            <div className="whitespace-pre-line" style={{ fontSize: base - 1 }}>{vm.paymentTerms}</div>
+          </div>
         )}
         {(isQuote ? t.quoteTerms : t.invoiceTerms) && (
           <div className="mb-3"><div className="text-[11px] uppercase tracking-wide mb-1" style={{ color: muted }}>TERMS & CONDITIONS</div><div className="whitespace-pre-line" style={{ fontSize: base - 1 }}>{isQuote ? applyTokens(t.quoteTerms, tokData) : applyTokens(t.invoiceTerms, tokData)}</div></div>

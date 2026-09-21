@@ -309,10 +309,10 @@ export default function Hr() {
           { key: 'attendance', label: 'Attendance', children: (
             <div className="p-4">
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-                <div className="nex-card border rounded-lg p-4 text-center"><div className="text-[12px] font-semibold text-[#64748b]">Records</div><div className="text-[22px] font-bold text-[#171a2e]">{attSummary.data?.totals?.records ?? 0}</div></div>
-                <div className="nex-card border rounded-lg p-4 text-center"><div className="text-[12px] font-semibold text-[#64748b]">Worked hours</div><div className="text-[22px] font-bold text-[#171a2e]">{Number(attSummary.data?.totals?.workedHours || 0)}h</div></div>
-                <div className="nex-card border rounded-lg p-4 text-center"><div className="text-[12px] font-semibold text-[#64748b]">Overtime</div><div className="text-[22px] font-bold text-[#e11d48]">{Number(attSummary.data?.totals?.overtimeHours || 0)}h</div></div>
-                <div className="nex-card border rounded-lg p-4 text-center"><div className="text-[12px] font-semibold text-[#64748b]">Exceptions</div><div className="text-[22px] font-bold text-[#b45309]">{attExceptions.data?.length ?? 0}</div></div>
+                <div className="nex-card border rounded-lg p-4 text-center"><div className="text-[11px] font-semibold text-[#64748b]">Records</div><div className="text-[13px] font-semibold text-[#171a2e] tabular-nums">{attSummary.data?.totals?.records ?? 0}</div></div>
+                <div className="nex-card border rounded-lg p-4 text-center"><div className="text-[11px] font-semibold text-[#64748b]">Worked hours</div><div className="text-[13px] font-semibold text-[#171a2e] tabular-nums">{Number(attSummary.data?.totals?.workedHours || 0)}h</div></div>
+                <div className="nex-card border rounded-lg p-4 text-center"><div className="text-[11px] font-semibold text-[#64748b]">Overtime</div><div className="text-[13px] font-semibold text-[#e11d48] tabular-nums">{Number(attSummary.data?.totals?.overtimeHours || 0)}h</div></div>
+                <div className="nex-card border rounded-lg p-4 text-center"><div className="text-[11px] font-semibold text-[#64748b]">Exceptions</div><div className="text-[13px] font-semibold text-[#b45309] tabular-nums">{attExceptions.data?.length ?? 0}</div></div>
               </div>
               <div className="mb-4">
                 <div className="text-[13px] font-semibold text-[#171a2e] mb-2">Exceptions</div>
@@ -416,7 +416,7 @@ export default function Hr() {
                 <div className="flex justify-between text-[13px] py-2"><span className="text-[#344054]">Total deductions</span><span className="font-medium">{fmtMoney(Number(previewPay.payeTax || 0) + Number(previewPay.nssaDeduction || 0) + Number(previewPay.otherDeductions || 0))}</span></div>
                 <div className="flex justify-between items-center mt-4 pt-3 border-t border-[#e6e9f2]">
                   <span className="text-[15px] font-semibold text-[#171a2e]">NET PAY</span>
-                  <span className="text-[22px] font-bold text-[#0b2a4a]">{fmtMoney(previewPay.netPay)}</span>
+                  <span className="text-[13px] font-semibold text-[#0b2a4a] tabular-nums">{fmtMoney(previewPay.netPay)}</span>
                 </div>
                 <div className="flex justify-between text-[12px] text-[#64748b] mt-3 pt-2 border-t border-[#f0f1f6]"><span>Employer NSSA</span><span>{fmtMoney(previewPay.employerNssa)}</span></div>
                 <div className="flex justify-between text-[12px] text-[#64748b] py-1"><span>Status</span><span><StatusPill status={previewPay.status} /></span></div>

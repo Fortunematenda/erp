@@ -130,8 +130,18 @@ export function ReceiveCustomerPaymentDrawer({ open, onClose, onCreated, initial
 
   const eligible = useMemo(() => allInvoices.filter((i: any) => i.customerId === customerId && isEligible(i)).sort((a: any, b: any) => (a.dueDate || a.invoiceDate || '') < (b.dueDate || b.invoiceDate || '') ? -1 : 1), [allInvoices, customerId]);
 
-  // Preselect customer + invoice when opened directly from an Invoice.
-  useEffect(() => { if (open && initialCustomerId) setCustomerId(initialCustomerId); }, [open, initialCustomerId]);
+  // Preselect customer when opened from an invoice (keep form + state in sync).
+  useEffect(() => {
+    if (!open) return;
+    const seeded = initialCustomerId
+      || (initialInvoiceId ? allInvoices.find((i: any) => i.id === initialInvoiceId)?.customerId : undefined)
+      || '';
+    if (!seeded) return;
+    setCustomerId((prev) => (prev === seeded ? prev : seeded));
+    if (form.getFieldValue('customerId') !== seeded) {
+      form.setFieldValue('customerId', seeded);
+    }
+  }, [open, initialCustomerId, initialInvoiceId, allInvoices]); // eslint-disable-line react-hooks/exhaustive-deps -- form instance is stable
   useEffect(() => {
     if (open && initialInvoiceId && customerId && allInvoices.length) {
       const inv = allInvoices.find((i: any) => i.id === initialInvoiceId && isEligible(i));
@@ -162,12 +172,25 @@ export function ReceiveCustomerPaymentDrawer({ open, onClose, onCreated, initial
     setAmount(Number(v || 0));
   }
   function autoApply() {
-    let remaining = Math.max(0, Number(amount || 0));
+    if (!eligible.length) return;
     const next: Record<string, { balance: number; apply: number }> = {};
+    let remaining = Math.max(0, Number(amount || 0));
+    // No receipt amount yet → select every outstanding invoice at full balance
+    // (amount syncs from allocations via the effect below).
+    if (remaining <= 0.001) {
+      eligible.forEach((inv: any) => {
+        const bal = balanceOf(inv);
+        if (bal > 0.001) next[inv.id] = { balance: bal, apply: bal };
+      });
+      setAlloc(next);
+      return;
+    }
+    // Otherwise distribute the entered receipt amount FIFO across open invoices.
     eligible.forEach((inv: any) => {
-      if (remaining <= 0) return;
-      const apply = Math.min(remaining, balanceOf(inv));
-      if (apply > 0.001) next[inv.id] = { balance: balanceOf(inv), apply };
+      if (remaining <= 0.001) return;
+      const bal = balanceOf(inv);
+      const apply = Math.min(remaining, bal);
+      if (apply > 0.001) next[inv.id] = { balance: bal, apply };
       remaining -= apply;
     });
     setAlloc(next);
@@ -180,11 +203,12 @@ export function ReceiveCustomerPaymentDrawer({ open, onClose, onCreated, initial
     try {
       setSaving(true);
       const v = await form.validateFields();
-      if (!v.customerId) { message.warning('Select a customer'); return; }
+      const custId = v.customerId || customerId || initialCustomerId;
+      if (!custId) { message.warning('Select a customer'); return; }
       if (!(Number(amount) > 0)) { message.warning('Enter a receipt amount'); return; }
       const allocations = Object.entries(alloc).filter(([, a]) => Number(a.apply) > 0.001).map(([invoiceId, a]) => ({ invoiceId, amount: Number(a.apply) }));
       if (Number(amount) - applied > 0.5 && allocations.length === 0 && !v.noInvoice) { /* allow unapplied-only */ }
-      const payload = { customerId: v.customerId, receiptDate: v.receiptDate?.format('YYYY-MM-DD') || dayjs().format('YYYY-MM-DD'), amount: Number(amount), method, referenceNo: v.referenceNo || v.checkNo || v.txnRef || v.cardRef, depositAccountId: v.depositAccountId, note: v.note, allocations };
+      const payload = { customerId: custId, receiptDate: v.receiptDate?.format('YYYY-MM-DD') || dayjs().format('YYYY-MM-DD'), amount: Number(amount), method, referenceNo: v.referenceNo || v.checkNo || v.txnRef || v.cardRef, depositAccountId: v.depositAccountId, note: v.note, allocations };
       await api('/sales/receipts', { method: 'POST', body: JSON.stringify(payload) });
       message.success('Receipt posted');
       onCreated();
@@ -213,9 +237,22 @@ export function ReceiveCustomerPaymentDrawer({ open, onClose, onCreated, initial
           <Form.Item label="Deposit To" name="depositAccountId" className="!mb-3" rules={[{ required: true, message: 'Select a deposit account' }]}><AccountSelector allowedTypes={['BANK', 'CASH', 'UNDEPOSITED_FUNDS']} placeholder="Select bank / cash account" /></Form.Item>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4">
-          {check ? <><Form.Item label="Check Number" name="checkNo" className="!mb-3"><Input /></Form.Item><Form.Item label="Bank" name="checkBank" className="!mb-3"><Input /></Form.Item></> : bankTransfer ? <Form.Item label="Transaction Reference" name="txnRef" className="!mb-3"><Input /></Form.Item> : card ? <Form.Item label="Processor Reference" name="cardRef" className="!mb-3"><Input /></Form.Item> : <Form.Item label="Reference" name="referenceNo" className="!mb-3"><Input placeholder="Optional reference" /></Form.Item>}
-          <Form.Item label="Memo" name="note" className="!mb-3"><Input.TextArea rows={2} /></Form.Item>
+          {check ? (
+            <>
+              <Form.Item label="Check Number" name="checkNo" className="!mb-3"><Input placeholder="Check #" /></Form.Item>
+              <Form.Item label="Bank" name="checkBank" className="!mb-3"><Input placeholder="Issuing bank" /></Form.Item>
+            </>
+          ) : bankTransfer ? (
+            <Form.Item label="Transaction Reference" name="txnRef" className="!mb-3 md:col-span-1"><Input placeholder="Bank / transfer reference" /></Form.Item>
+          ) : card ? (
+            <Form.Item label="Processor Reference" name="cardRef" className="!mb-3 md:col-span-1"><Input placeholder="Card processor reference" /></Form.Item>
+          ) : (
+            <Form.Item label="Reference" name="referenceNo" className="!mb-3 md:col-span-1"><Input placeholder="Optional payment reference" /></Form.Item>
+          )}
         </div>
+        <Form.Item label="Notes" name="note" className="!mb-4">
+          <Input.TextArea rows={3} placeholder="Optional notes about this payment" className="!resize-none" />
+        </Form.Item>
 
         <div className="mt-2">
           <div className="flex items-center gap-2 mb-2">
@@ -240,8 +277,8 @@ export function ReceiveCustomerPaymentDrawer({ open, onClose, onCreated, initial
           <div className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[#64748b] mb-3">Payment Summary</div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div><div className="text-[12px] text-[#64748b]">Receipt Amount</div><InputNumber className="w-full !rounded-xl" prefix="$" min={0} value={amount} onChange={(v) => onAmountChange(Number(v || 0))} /></div>
-            <div><div className="text-[12px] text-[#64748b]">Total Applied</div><div className="text-[19px] font-semibold text-[#16a34a] mt-1">{fmtMoney(applied)}</div></div>
-            <div><div className="text-[12px] text-[#64748b]">Unapplied</div><div className={`text-[19px] font-semibold mt-1 ${unapplied > 0.001 ? 'text-[#f59e0b]' : 'text-[#171a2e]'}`}>{fmtMoney(unapplied)}</div></div>
+            <div className="text-center"><div className="text-[11px] text-[#64748b]">Total Applied</div><div className="text-[13px] font-semibold text-[#16a34a] mt-0.5 tabular-nums">{fmtMoney(applied)}</div></div>
+            <div className="text-center"><div className="text-[11px] text-[#64748b]">Unapplied</div><div className={`text-[13px] font-semibold mt-0.5 tabular-nums ${unapplied > 0.001 ? 'text-[#f59e0b]' : 'text-[#171a2e]'}`}>{fmtMoney(unapplied)}</div></div>
           </div>
         </div>
       </Form>
@@ -264,7 +301,7 @@ function ReceiptViewDrawer({ receipt, onClose, onAction, onRefresh }: { receipt:
       )}
       {r && (
         <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-[13px] mb-4">
-          {[['Date', r.receiptDate ? dayjs(r.receiptDate).format('DD MMM YY') : '—'], ['Amount', fmtMoney(r.amount)], ['Method', r.method], ['Reference', r.referenceNo], ['Applied', fmtMoney(r.applied)], ['Unapplied', fmtMoney(r.unapplied)], ['Deposit To', r.depositAccountId ? 'Account' : '—'], ['Memo', r.note]].map(([l, v]) => <div key={String(l)}><div className="text-[11px] text-[#94a3b8]">{l}</div><div className="text-[13px] text-[#171a2e]">{v || '—'}</div></div>)}
+          {[['Date', r.receiptDate ? dayjs(r.receiptDate).format('DD MMM YY') : '—'], ['Amount', fmtMoney(r.amount)], ['Method', r.method], ['Reference', r.referenceNo], ['Applied', fmtMoney(r.applied)], ['Unapplied', fmtMoney(r.unapplied)], ['Deposit To', r.depositAccountId ? 'Account' : '—'], ['Notes', r.note]].map(([l, v]) => <div key={String(l)}><div className="text-[11px] text-[#94a3b8]">{l}</div><div className="text-[13px] text-[#171a2e]">{v || '—'}</div></div>)}
         </div>
       )}
       {r?.allocations?.length > 0 && (

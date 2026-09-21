@@ -82,7 +82,7 @@ function AccountCard({ item, data, loading, onOpen }: { item: (typeof categoryCa
         {loading ? (
           <div className="h-[22px] w-24 rounded bg-[#f2f3f9] animate-pulse" />
         ) : (
-          <div className={`text-[19px] font-semibold leading-[1.2] tracking-[-0.01em] ${value < 0 ? 'text-[#d64545]' : 'text-[#475467]'}`}>{money(d?.value)}</div>
+          <div className={`text-[13px] font-semibold leading-tight tracking-[-0.01em] tabular-nums ${value < 0 ? 'text-[#d64545]' : 'text-[#475467]'}`}>{money(d?.value)}</div>
         )}
         <div className="text-[11.5px] text-[#98A2B3] mt-1">{loading ? '...' : supportText(item.key, d)}</div>
       </div>

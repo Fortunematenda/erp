@@ -101,10 +101,10 @@ export default function EmployeeDetailPage() {
               </div>
             </div>
             <div className="grid grid-cols-2 gap-5">
-              <div className="nex-card p-4"><div className="text-[12px] font-semibold text-[#64748b]">Leave balance</div><div className="text-[22px] font-bold text-[#171a2e] mt-1">{(balances.data || []).reduce((s: number, b: any) => s + Number(b.available), 0) || 0}d</div></div>
-              <div className="nex-card p-4"><div className="text-[12px] font-semibold text-[#64748b]">Performance</div><div className="text-[22px] font-bold text-[#171a2e] mt-1">{perf?.currentCycle?.name || 'No active cycle'}</div></div>
-              <div className="nex-card p-4"><div className="text-[12px] font-semibold text-[#64748b]">QA result</div><div className="text-[22px] font-bold text-[#171a2e] mt-1">{reviewRows.length ? '—' : 'No QA'}</div></div>
-              <div className="nex-card p-4"><div className="text-[12px] font-semibold text-[#64748b]">Leave requests</div><div className="text-[22px] font-bold text-[#171a2e] mt-1">{myLeaves.length}</div></div>
+              <div className="nex-card p-4 text-center"><div className="text-[11px] font-semibold text-[#64748b]">Leave balance</div><div className="text-[13px] font-semibold text-[#171a2e] mt-1 tabular-nums">{(balances.data || []).reduce((s: number, b: any) => s + Number(b.available), 0) || 0}d</div></div>
+              <div className="nex-card p-4 text-center"><div className="text-[11px] font-semibold text-[#64748b]">Performance</div><div className="text-[13px] font-semibold text-[#171a2e] mt-1">{perf?.currentCycle?.name || 'No active cycle'}</div></div>
+              <div className="nex-card p-4 text-center"><div className="text-[11px] font-semibold text-[#64748b]">QA result</div><div className="text-[13px] font-semibold text-[#171a2e] mt-1">{reviewRows.length ? '—' : 'No QA'}</div></div>
+              <div className="nex-card p-4 text-center"><div className="text-[11px] font-semibold text-[#64748b]">Leave requests</div><div className="text-[13px] font-semibold text-[#171a2e] mt-1 tabular-nums">{myLeaves.length}</div></div>
             </div>
           </div>
         ) },

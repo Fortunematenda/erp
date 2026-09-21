@@ -521,6 +521,8 @@ export class SalesController {
   }
   @Post('invoices') @RequirePermissions('sales.invoices.create') async create(@Req() req: any, @Body() dto: CreateInvoiceDto) {
     const companyId = companyIdOf(req.user);
+    const branchId = dto.branchId || (await this.prisma.branch.findFirst({ where: { companyId } }))?.id;
+    if (!branchId) throw new BadRequestException('Create a branch first');
     await this.integrity.assertCustomer(companyId, dto.customerId);
     await this.integrity.assertProducts(companyId, dto.lines);
     await this.integrity.assertCurrency(companyId, dto.currency || 'USD');
@@ -528,7 +530,7 @@ export class SalesController {
     const { mapped, subtotal, taxTotal, total } = this.computeLines(dto.lines);
     const invoiceNo = dto.invoiceNo || await this.numbering.next(companyId, 'INV');
     const invoice = await this.prisma.salesInvoice.create({
-      data: { companyId, branchId: dto.branchId, customerId: dto.customerId, projectId: dto.projectId, invoiceNo, currency: dto.currency || 'USD', invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : undefined, terms: dto.terms, billingAddress: dto.billingAddress, notes: dto.notes, statementMemo: dto.statementMemo, email: dto.email, customerReference: dto.customerReference, poReference: dto.poReference, salesperson: dto.salesperson, dueDate: dto.dueDate ? new Date(dto.dueDate) : this.dueDateFromTerms(dto.terms, dto.invoiceDate), subtotal, taxTotal, total, fiscalRequired: dto.fiscalRequired ?? true, fiscalStatus: (dto.fiscalRequired ?? true) ? 'READY' : 'NOT_REQUIRED', lines: { create: mapped.map((l) => ({ description: l.description, itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice, taxRate: l.taxRate, taxAmount: l.taxAmount, lineTotal: l.lineTotal, hsCode: l.hsCode })) } },
+      data: { companyId, branchId, customerId: dto.customerId, projectId: dto.projectId, invoiceNo, currency: dto.currency || 'USD', invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : undefined, terms: dto.terms, billingAddress: dto.billingAddress, notes: dto.notes, statementMemo: dto.statementMemo, email: dto.email, customerReference: dto.customerReference, poReference: dto.poReference, salesperson: dto.salesperson, dueDate: dto.dueDate ? new Date(dto.dueDate) : this.dueDateFromTerms(dto.terms, dto.invoiceDate), subtotal, taxTotal, total, status: 'DRAFT', invoiceStatus: 'DRAFT', fiscalRequired: dto.fiscalRequired ?? true, fiscalStatus: (dto.fiscalRequired ?? true) ? 'READY' : 'NOT_REQUIRED', lines: { create: mapped.map((l) => ({ description: l.description, itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice, taxRate: l.taxRate, taxAmount: l.taxAmount, lineTotal: l.lineTotal, hsCode: l.hsCode })) } },
       include: { lines: true },
     });
     await this.audit.log(companyId, req.user.sub, 'CREATE', 'SalesInvoice', invoice.id, { invoiceNo });
@@ -569,9 +571,17 @@ export class SalesController {
     if (!before) throw new BadRequestException('Invoice not found');
     const wasDraft = String(before.invoiceStatus || before.status || '').toUpperCase() === 'DRAFT';
 
+    // Xero/QB: block (or allow via settings) BEFORE AR posts — never leave a posted invoice with failed stock.
+    if (wasDraft) await this.assertDirectInvoiceStock(companyId, id);
+
     const res = await this.posting.postSalesInvoice(companyId, id, req.user.sub);
     if (wasDraft) {
-      await this.issueDirectInvoiceStock(companyId, id, req.user.sub);
+      try {
+        await this.issueDirectInvoiceStock(companyId, id, req.user.sub);
+      } catch (e) {
+        await this.revertInvoicePostAfterStockFailure(companyId, id, req.user.sub, e);
+        throw e;
+      }
       await this.trail.create(companyId, { documentType: 'INVOICE', documentId: id, eventType: 'POSTED', title: 'Invoice Posted', description: 'Invoice posted to Accounts Receivable (automatic business action).', userId: req.user.sub }).catch(() => {});
       await this.audit.log(companyId, req.user.sub, 'POSTED_AUTOMATICALLY', 'SalesInvoice', id, { module: 'sales', result: 'SUCCESS', metadata: { action } });
     }
@@ -1301,34 +1311,125 @@ export class SalesController {
       .then(async (existing) => existing || this.prisma.ledgerAccount.create({ data: { companyId, code: '5000', name: 'Cost of Sales', type: 'EXPENSE' } }));
   }
 
-  /** Direct invoices (no prior dispatched delivery) issue stock exactly once on post. */
-  private async issueDirectInvoiceStock(companyId: string, invoiceId: string, userId: string) {
+  private async allowInvoiceOversell(companyId: string): Promise<boolean> {
+    if (await this.stock.allowNegativeStock(companyId)) return true;
+    const cfg = await this.prisma.systemConfig.findFirst({ where: { companyId, key: 'cfg.sales.allowOversell' } });
+    const v = (cfg?.value as any)?.value ?? cfg?.value;
+    return v === true || v === 'true';
+  }
+
+  private fmtStockQty(n: number) {
+    const x = Number(n || 0);
+    return Number.isInteger(x) ? String(x) : x.toFixed(2).replace(/\.?0+$/, '');
+  }
+
+  /**
+   * Resolve warehouse + stock-tracked lines for a direct invoice (no prior delivery dispatch).
+   * Returns null when stock issue does not apply.
+   */
+  private async directInvoiceStockPlan(companyId: string, invoiceId: string) {
     const inv = await this.prisma.salesInvoice.findFirst({
       where: { id: invoiceId, companyId },
       include: { lines: true, deliveryNotes: true, sourceSalesOrder: { include: { deliveryNotes: true } } },
     });
-    if (!inv || inv.stockIssuedAt) return;
+    if (!inv || inv.stockIssuedAt) return null;
     const fromDelivery = (inv.deliveryNotes || []).some((d) => ['DISPATCHED', 'DELIVERED'].includes(d.status))
       || (inv.sourceSalesOrder?.deliveryNotes || []).some((d) => ['DISPATCHED', 'DELIVERED'].includes(d.status));
-    if (fromDelivery) return;
+    if (fromDelivery) return null;
     const warehouse = await this.prisma.warehouse.findFirst({ where: { companyId } });
-    if (!warehouse) return;
+    if (!warehouse) return null;
     const itemIds = inv.lines.map((l) => l.itemId).filter(Boolean) as string[];
-    if (!itemIds.length) return;
+    if (!itemIds.length) return null;
     const items = await this.prisma.inventoryItem.findMany({ where: { id: { in: itemIds }, companyId } });
+    const needed = new Map<string, { item: any; qty: number }>();
+    for (const line of inv.lines) {
+      if (!line.itemId) continue;
+      const item = items.find((i) => i.id === line.itemId);
+      if (!item || !isStockTracked(item.type)) continue;
+      const prev = needed.get(line.itemId);
+      const qty = Number(line.quantity || 0) + (prev?.qty || 0);
+      needed.set(line.itemId, { item, qty });
+    }
+    if (!needed.size) return null;
+    return { inv, warehouse, needed };
+  }
+
+  /** Fail before AR post when inventory would go negative (unless oversell/negative stock is enabled). */
+  private async assertDirectInvoiceStock(companyId: string, invoiceId: string) {
+    if (await this.allowInvoiceOversell(companyId)) return;
+    const plan = await this.directInvoiceStockPlan(companyId, invoiceId);
+    if (!plan) return;
+    const shortages: { name: string; onHand: number; needed: number }[] = [];
+    for (const { item, qty } of plan.needed.values()) {
+      const bal = await this.stock.balance(companyId, item.id, plan.warehouse.id);
+      if (bal.onHand - qty < -0.0001) {
+        shortages.push({ name: String(item.name || item.sku || 'Item'), onHand: bal.onHand, needed: qty });
+      }
+    }
+    if (!shortages.length) return;
+    // Xero/QB-style copy: plain language, product names, what to do next — no settings jargon.
+    if (shortages.length === 1) {
+      const s = shortages[0];
+      throw new BadRequestException(
+        `Not enough stock — You only have ${this.fmtStockQty(s.onHand)} of “${s.name}” available, but this invoice needs ${this.fmtStockQty(s.needed)}. Add stock or reduce the quantity, then try again.`,
+      );
+    }
+    const preview = shortages.slice(0, 3).map((s) => `“${s.name}” (need ${this.fmtStockQty(s.needed)}, have ${this.fmtStockQty(s.onHand)})`).join('; ');
+    const more = shortages.length > 3 ? ` and ${shortages.length - 3} more` : '';
+    throw new BadRequestException(
+      `Not enough stock — ${shortages.length} items don’t have enough quantity: ${preview}${more}. Add stock or change the lines, then try again.`,
+    );
+  }
+
+  /** If stock issue fails after AR posted, roll invoice back to DRAFT and remove the AR journal so books stay consistent. */
+  private async revertInvoicePostAfterStockFailure(companyId: string, invoiceId: string, userId: string, cause: any) {
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        const inv = await tx.salesInvoice.findFirst({ where: { id: invoiceId, companyId } });
+        if (!inv || String(inv.invoiceStatus || inv.status || '').toUpperCase() !== 'POSTED') return;
+        const je = await tx.journalEntry.findFirst({ where: { companyId, sourceType: 'SALES_INVOICE', sourceId: invoiceId } });
+        if (je) {
+          await tx.journalLine.deleteMany({ where: { journalId: je.id } });
+          await tx.journalEntry.delete({ where: { id: je.id } });
+        }
+        await tx.salesInvoice.update({
+          where: { id: invoiceId },
+          data: { status: 'DRAFT', invoiceStatus: 'DRAFT', stockIssuedAt: null, paymentStatus: 'UNPAID' },
+        });
+      });
+      await this.invoiceStatus.recalc(companyId, invoiceId).catch(() => {});
+      await this.audit.log(companyId, userId, 'INVOICE_POST_REVERTED', 'SalesInvoice', invoiceId, {
+        module: 'sales',
+        result: 'FAILURE',
+        metadata: { reason: 'stock_issue_failed', error: cause?.message || String(cause) },
+      });
+    } catch (revertErr: any) {
+      await this.audit.log(companyId, userId, 'INVOICE_POST_REVERT_FAILED', 'SalesInvoice', invoiceId, {
+        module: 'sales',
+        result: 'FAILURE',
+        metadata: { stockError: cause?.message, revertError: revertErr?.message },
+      }).catch(() => {});
+    }
+  }
+
+  /** Direct invoices (no prior dispatched delivery) issue stock exactly once on post. */
+  private async issueDirectInvoiceStock(companyId: string, invoiceId: string, userId: string) {
+    const plan = await this.directInvoiceStockPlan(companyId, invoiceId);
+    if (!plan) return;
+    const { inv, warehouse, needed } = plan;
     await this.prisma.$transaction(async (tx) => {
       const fresh = await tx.salesInvoice.findFirst({ where: { id: invoiceId, stockIssuedAt: null } });
       if (!fresh) return;
       for (const line of inv.lines) {
         if (!line.itemId) continue;
-        const item = items.find((i) => i.id === line.itemId);
-        if (!item || !isStockTracked(item.type)) continue;
+        const row = needed.get(line.itemId);
+        if (!row) continue;
         await this.stock.create(companyId, {
           warehouseId: warehouse.id,
           itemId: line.itemId,
           type: 'ISSUE',
           quantity: Number(line.quantity),
-          unitCost: Number(item.purchaseCost || 0),
+          unitCost: Number(row.item.purchaseCost || 0),
           reference: inv.invoiceNo,
           occurredAt: inv.invoiceDate,
         }, userId, tx);

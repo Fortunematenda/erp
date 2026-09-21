@@ -759,8 +759,9 @@ const GROUPS: CfgGroup[] = [
       { key: 'vatDefault', label: 'Default VAT %', type: 'number', default: 15 },
       { key: 'invoiceDueDays', label: 'Invoice Due Days', type: 'number', default: 30 },
       { key: 'fiscalRequiredByDefault', label: 'Fiscalise by default', type: 'toggle', default: true, hint: 'Whether new invoices default to requiring ZIMRA fiscalisation.' },
-      { key: 'pdfHeader', label: 'PDF Header', type: 'text' },
+      { key: 'pdfHeader', label: 'PDF Header / Letterhead line', type: 'text', hint: 'Shown under the company name on printed invoices and PDFs.' },
       { key: 'pdfFooter', label: 'PDF Footer', type: 'text' },
+      { key: 'logo', label: 'Letterhead logo URL', type: 'text', hint: 'Fallback logo when the document template has no logo. Prefer uploading a logo in Invoice Template Designer.' },
     ],
   },
   {

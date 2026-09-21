@@ -18,6 +18,7 @@ import { PayBillsWorkspace } from '@/components/pay-bills-workspace';
 import { BillManagementList } from '@/components/bill-management-list';
 import { fmtDate, fmtMoney, fmtNumber } from '@/lib/format';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
+import { MetricStrip } from '@/components/metric-strip';
 
 const TERMS = ['Due on Receipt', 'Net 7', 'Net 14', 'Net 30', 'Net 45', 'Net 60', 'Net 90', 'Custom'];
 const METHODS = ['BANK', 'CHEQUE', 'CASH', 'CARD', 'MOBILE', 'OTHER'];
@@ -311,9 +312,17 @@ function BillDetailModal({ billId, onClose, onPay }: { billId: string; onClose: 
   return (
     <Drawer open onClose={onClose} width={980} title={<span>Supplier Bill <b>{bill.invoiceNo}</b></span>}
       extra={<Space wrap>{payable && <Button type="primary" icon={<PayCircleOutlined />} onClick={() => onPay(bill.id)}>{Number(bill.amountPaid) > 0.005 ? 'Pay Balance' : 'Make Payment'}</Button>}<Tooltip title="Print"><a href={`/documents/supplier-invoice/${bill.id}`} target="_blank"><Button icon={<PrinterOutlined />} /></a></Tooltip>{bill.status === 'DRAFT' && <Button icon={<CheckCircleOutlined />} onClick={() => { api(`/procurement/supplier-invoices/${bill.id}/finalize`, { method: 'POST', body: JSON.stringify({ action: 'POST' }) }).then(() => { message.success('Bill posted — awaiting payment'); onClose(); }).catch((e) => message.error(e.message)); }}>Save & Post</Button>}</Space>}>
-      <div className="mb-4 flex flex-wrap gap-8 rounded-xl bg-[#f8f9ff] px-5 py-3">
-        {[{ l: 'Bill Total', v: fmtMoney(bill.total), c: '#171a2e' }, { l: 'Paid', v: fmtMoney(bill.amountPaid), c: '#16a34a' }, { l: 'Balance Due', v: fmtMoney(bill.remaining), c: '#F97316' }, { l: 'Due Date', v: bill.dueDate ? fmtDate(bill.dueDate) : '—', c: '#64748b' }].map((k) => <div key={k.l}><div className="text-[12px] text-[#64748b]">{k.l}</div><div className="text-[18px] font-bold" style={{ color: k.c }}>{k.v}</div></div>)}
-        <div className="flex items-center gap-2 ml-auto"><StatusTag value={bill.status} /><StatusTag value={bill.paymentStatus} /></div>
+      <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-[#f8f9ff] px-4 py-3">
+        <MetricStrip
+          className="flex-1 mb-0 !bg-transparent !shadow-none !border-0"
+          items={[
+            { label: 'Bill Total', value: fmtMoney(bill.total), color: '#171a2e' },
+            { label: 'Paid', value: fmtMoney(bill.amountPaid), color: '#16a34a' },
+            { label: 'Balance Due', value: fmtMoney(bill.remaining), color: '#F97316' },
+            { label: 'Due Date', value: bill.dueDate ? fmtDate(bill.dueDate) : '—', color: '#64748b' },
+          ]}
+        />
+        <div className="flex items-center gap-2"><StatusTag value={bill.status} /><StatusTag value={bill.paymentStatus} /></div>
       </div>
       <Tabs items={tabs} activeKey={tab} onChange={setTab} destroyOnHidden />
     </Drawer>
@@ -367,7 +376,7 @@ function PaySupplierDrawer({ open, onClose, initialBills, onSaved }: { open: boo
         </div>
       ); })}
       <div className="nex-card mt-4 px-4 py-3 !rounded-xl">
-        <div className="flex items-center justify-between py-1"><span className="text-[12px] text-[#64748b]">Payment Amount</span><span className="text-[18px] font-bold">{fmtMoney(amount)}</span></div>
+        <div className="flex items-center justify-between py-1"><span className="text-[12px] text-[#64748b]">Payment Amount</span><span className="text-[13px] font-semibold tabular-nums">{fmtMoney(amount)}</span></div>
         <div className="flex items-center justify-between py-1"><span className="text-[12px] text-[#64748b]">Total Applied</span><span className="text-[14px] font-semibold text-[#16a34a]">{fmtMoney(applied)}</span></div>
         <div className="flex items-center justify-between py-1"><span className="text-[12px] text-[#64748b]">Unapplied / Advance</span><span className="text-[14px] font-semibold text-[#8b5cf6]">{fmtMoney(Number(advance))}</span></div>
         <div className="flex items-center justify-between py-1 pt-2 border-t"><span className="text-[12px] text-[#64748b]">Add to Advance</span><InputNumber className="!w-32" prefix="$" min={0} value={advance} onChange={(v) => setAdvance(v || 0)} /></div>

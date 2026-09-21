@@ -6,8 +6,6 @@ import { Alert, Button, Skeleton, Tabs } from 'antd';
 import { DollarOutlined, MinusCircleOutlined, PlusCircleOutlined } from '@ant-design/icons';
 import { api } from '@/lib/api';
 import { InvoiceForm } from '@/components/sales/sales-doc-form';
-import { DocumentActions } from '@/components/documents/document-actions';
-import { DocumentPreview, type PreviewVm } from '@/components/documents/document-preview';
 import { DocumentTrail } from '@/components/documents/document-trail';
 import { SalesDocumentFlow } from '@/components/sales/related-transactions';
 import { ReceiveCustomerPaymentDrawer } from '@/components/receipts-workspace';
@@ -18,13 +16,20 @@ export default function EditInvoicePage() {
   const qc = useQueryClient();
   const [payOpen, setPayOpen] = useState(false);
   const list = useQuery({ queryKey: ['/sales/invoices'], queryFn: () => api('/sales/invoices') });
-  const preview = useQuery({ queryKey: ['/documents/invoice', id], queryFn: () => api(`/documents/invoice/${id}`), enabled: !!id });
   if (list.isLoading) return <div className="nex-fade pt-6"><Skeleton active paragraph={{ rows: 8 }} /></div>;
   if (list.error) return <div className="nex-fade pt-6"><Alert type="error" message={(list.error as Error).message} /></div>;
   const record = (list.data || []).find((i: any) => i.id === id);
   if (!record) return <div className="nex-fade pt-6"><Alert type="warning" message="Invoice not found" /></div>;
 
   const eligiblePay = record.invoiceStatus === 'POSTED' && ['UNPAID', 'PARTIALLY_PAID', 'OVERDUE'].includes(record.paymentStatus) && Number(record.balanceDue) > 0.001;
+  const docId = id as string;
+
+  const invalidateDocs = () => {
+    qc.invalidateQueries({ queryKey: ['/sales/invoices'] });
+    qc.invalidateQueries({ queryKey: ['/documents', 'invoice', docId] });
+    qc.invalidateQueries({ queryKey: ['/documents/invoice', docId] });
+    qc.invalidateQueries({ queryKey: ['/documents', 'invoice', docId, 'pdf'] });
+  };
 
   return (
     <div className="nex-fade">
@@ -37,20 +42,20 @@ export default function EditInvoicePage() {
         </div>
       )}
       <Tabs items={[
-        { key: 'edit', label: 'Edit Invoice', children: <InvoiceForm record={record} onSaved={() => {}} /> },
-        {
-          key: 'preview', label: 'Document Preview',
-          children: preview.isLoading ? <Skeleton active paragraph={{ rows: 6 }} /> : preview.error ? <Alert type="error" message={(preview.error as Error).message} /> : <DocumentPreview vm={preview.data as PreviewVm} />,
-        },
-        { key: 'trail', label: 'Invoice Trail', children: <DocumentTrail type="invoice" id={id as string} /> },
-        { key: 'flow', label: 'Document Flow', children: <SalesDocumentFlow kind="invoice" record={record} /> },
+        { key: 'invoice', label: 'Invoice', children: <InvoiceForm record={record} onSaved={invalidateDocs} /> },
+        { key: 'activity', label: 'Activity', children: <DocumentTrail type="invoice" id={docId} /> },
+        { key: 'related', label: 'Related', children: <SalesDocumentFlow kind="invoice" record={record} /> },
       ]} />
       <ReceiveCustomerPaymentDrawer
         open={payOpen}
-        initialCustomerId={record.customerId}
+        initialCustomerId={record.customerId || record.customer?.id}
         initialInvoiceId={record.id}
         onClose={() => setPayOpen(false)}
-        onCreated={() => { qc.invalidateQueries({ queryKey: ['/sales/invoices'] }); qc.invalidateQueries({ queryKey: ['/sales/receipts'] }); setPayOpen(false); }}
+        onCreated={() => {
+          invalidateDocs();
+          qc.invalidateQueries({ queryKey: ['/sales/receipts'] });
+          setPayOpen(false);
+        }}
       />
     </div>
   );

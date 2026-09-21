@@ -14,6 +14,7 @@ import { LineItems } from '@/components/line-items';
 import { useMeta } from '@/lib/meta';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
+import { MetricStrip } from '@/components/metric-strip';
 
 const METHODS = ['BANK', 'CHEQUE', 'CASH', 'CARD', 'MOBILE', 'OTHER'];
 const TERMS = ['Due on Receipt', 'Net 7', 'Net 14', 'Net 30', 'Net 45', 'Net 60', 'Net 90', 'Custom'];
@@ -203,12 +204,15 @@ export default function SupplierDetail() {
         </Space>
       </div>
 
-      <div className="nex-card mb-5 px-5 py-4 flex flex-wrap gap-8 !rounded-xl">
-        <button className="text-left" onClick={() => jumpToBills(['UNPAID', 'PARTIALLY_PAID', 'OVERDUE'])}><div className="text-[12px] text-[#64748b] flex items-center gap-1"><PayCircleOutlined className="text-[#a1a6c0]" />Outstanding AP</div><div className="text-[20px] font-bold text-[#F97316]">{fmtMoney(outstanding)}</div></button>
-        <button className="text-left" onClick={() => { setInvFilter(''); setInvPayStatus(''); setTab('invoices'); }}><div className="text-[12px] text-[#64748b] flex items-center gap-1"><FileDoneOutlined className="text-[#a1a6c0]" />Open Bills</div><div className="text-[20px] font-bold text-[#2563eb]">{unpaid.length}</div></button>
-        <button className="text-left" onClick={() => setTab('orders')}><div className="text-[12px] text-[#64748b] flex items-center gap-1"><ShoppingCartOutlined className="text-[#a1a6c0]" />Purchase Orders</div><div className="text-[20px] font-bold text-[#003366]">{purchaseOrders.length}</div></button>
-        <button className="text-left" onClick={() => setTab('payments')}><div className="text-[12px] text-[#64748b] flex items-center gap-1"><DollarOutlined className="text-[#a1a6c0]" />Total Payments</div><div className="text-[20px] font-bold text-[#10b981]">{fmtMoney(payments.reduce((s: number, p: any) => s + Number(p.amount), 0))}</div></button>
-      </div>
+      <MetricStrip
+        className="mb-5"
+        items={[
+          { label: 'Outstanding AP', value: fmtMoney(outstanding), color: '#F97316', onClick: () => jumpToBills(['UNPAID', 'PARTIALLY_PAID', 'OVERDUE']) },
+          { label: 'Open Bills', value: unpaid.length, color: '#2563eb', onClick: () => { setInvFilter(''); setInvPayStatus(''); setTab('invoices'); } },
+          { label: 'Purchase Orders', value: purchaseOrders.length, color: '#003366', onClick: () => setTab('orders') },
+          { label: 'Total Payments', value: fmtMoney(payments.reduce((s: number, p: any) => s + Number(p.amount), 0)), color: '#10b981', onClick: () => setTab('payments') },
+        ]}
+      />
 
       <Card className="nex-card" styles={{ body: { padding: '14px 20px' } }}><Tabs items={tabItems} activeKey={tab} onChange={setTab} destroyOnHidden /></Card>
 
@@ -302,7 +306,7 @@ function PaySupplierDrawer({ open, onClose, supplier, initialBills, bills, onSav
         );
       })}
       <div className="nex-card mt-4 px-4 py-3 !rounded-xl">
-        <div className="flex items-center justify-between py-1"><span className="text-[12px] text-[#64748b]">Payment Amount</span><span className="text-[18px] font-bold text-[#171a2e]">{fmtMoney(amount)}</span></div>
+        <div className="flex items-center justify-between py-1"><span className="text-[12px] text-[#64748b]">Payment Amount</span><span className="text-[13px] font-semibold text-[#171a2e] tabular-nums">{fmtMoney(amount)}</span></div>
         <div className="flex items-center justify-between py-1"><span className="text-[12px] text-[#64748b]">Total Applied</span><span className="text-[14px] font-semibold text-[#16a34a]">{fmtMoney(applied)}</span></div>
         <div className="flex items-center justify-between py-1"><span className="text-[12px] text-[#64748b]">Unapplied / Advance</span><span className="text-[14px] font-semibold text-[#8b5cf6]">{fmtMoney(Number(advance))}</span></div>
         <div className="flex items-center justify-between py-1 pt-2 border-t border-[#eef0f6]"><span className="text-[12px] text-[#64748b]">Add to Advance</span><InputNumber className="!w-32" prefix="$" min={0} value={advance} onChange={(v) => setAdvance(v || 0)} /></div>

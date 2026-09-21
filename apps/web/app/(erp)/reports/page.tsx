@@ -27,8 +27,8 @@ function KpiCard({ icon, label, value, hint, compare, comparePct, onClick, iconB
       <div className="flex items-center gap-3.5 h-full">
         <div className="flex items-center justify-center rounded-lg text-white text-[17px]" style={{ width: 40, height: 40, background: iconBg }}>{icon}</div>
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-medium text-[#64748b] truncate">{label}</div>
-          <div className="text-[20px] font-semibold text-[#171a2e] leading-tight truncate">{value}</div>
+          <div className="text-[11px] font-medium text-[#64748b] truncate">{label}</div>
+          <div className="text-[13px] font-semibold text-[#171a2e] leading-tight truncate tabular-nums">{value}</div>
           <div className="text-[12px] text-[#94a3b8] truncate flex items-center gap-1.5">
             <span className="truncate">{hint}</span>
             <CompareHint compare={compare || 'none'} pct={comparePct ?? null} />

@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ------------------------------------------------------------------ */
-/* Login — keep browser-autofilled fields light (never a blue box)     */
+/* Login â€” keep browser-autofilled fields light (never a blue box)     */
 /* ------------------------------------------------------------------ */
 .nex-login input:-webkit-autofill,
 .nex-login .ant-input-affix-wrapper input:-webkit-autofill {
@@ -10,7 +10,7 @@
   transition: background-color 5000s ease-in-out 0s;
   caret-color: #101828;
 }
-/* Login — subtle brand-blue focus ring (thinner than the global token) */
+/* Login â€” subtle brand-blue focus ring (thinner than the global token) */
 .nex-login .ant-input,
 .nex-login .ant-input-affix-wrapper {
   border-color: #d0d5dd;
@@ -28,7 +28,7 @@
   border-color: #b3bac3;
 }
 
-/* Chart of Accounts filter toolbar — uniform 44px controls */
+/* Chart of Accounts filter toolbar â€” uniform 44px controls */
 .nex-coa-toolbar .ant-input-affix-wrapper,
 .nex-coa-toolbar .ant-select,
 .nex-coa-toolbar .ant-select-selector {
@@ -37,6 +37,54 @@
 .nex-coa-toolbar .ant-select .ant-select-selection-item,
 .nex-coa-toolbar .ant-select .ant-select-selection-placeholder {
   line-height: 42px !important;
+}
+
+/* List filter bars â€” stronger borders/placeholders so controls don't look washed out */
+.nex-filter-bar {
+  border-color: #d0d5dd !important;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.nex-filter-bar .ant-input,
+.nex-filter-bar .ant-input-affix-wrapper,
+.nex-filter-bar .ant-input-number,
+.nex-filter-bar .ant-picker,
+.nex-filter-bar .ant-select .ant-select-selector {
+  border-color: #c5cbd6 !important;
+  background: #ffffff !important;
+  color: #1e293b !important;
+}
+.nex-filter-bar .ant-input::placeholder,
+.nex-filter-bar .ant-input-affix-wrapper input::placeholder {
+  color: #64748b !important;
+  opacity: 1;
+}
+.nex-filter-bar .ant-select-selection-placeholder,
+.nex-filter-bar .ant-picker-input > input::placeholder {
+  color: #64748b !important;
+}
+.nex-filter-bar .ant-select-arrow,
+.nex-filter-bar .ant-picker-suffix,
+.nex-filter-bar .ant-input-prefix,
+.nex-filter-bar .anticon {
+  color: #475569 !important;
+}
+.nex-filter-bar .ant-input-affix-wrapper:hover,
+.nex-filter-bar .ant-picker:hover,
+.nex-filter-bar .ant-select:not(.ant-select-disabled):hover .ant-select-selector {
+  border-color: #94a3b8 !important;
+}
+.nex-filter-bar .ant-btn {
+  border-color: #c5cbd6 !important;
+  color: #334155 !important;
+  font-weight: 500;
+}
+.nex-filter-bar .ant-btn .anticon {
+  color: #334155 !important;
+}
+.nex-filter-bar .ant-btn:hover {
+  border-color: #94a3b8 !important;
+  color: #0f172a !important;
 }
 
 :root {
@@ -350,7 +398,7 @@ body {
   .customer-detail-tabs .ant-tabs-nav { padding-left: 28px; }
 }
 
-/* ---------- Top header controls (scoped — Quick Access, Company, Avatar, Notification) ---------- */
+/* ---------- Top header controls (scoped â€” Quick Access, Company, Avatar, Notification) ---------- */
 .nex-quick-access-btn.ant-btn {
   background: #ffffff;
   color: #003366;
@@ -478,7 +526,7 @@ body {
 
 
 /* ------------------------------------------------------------------ */
-/* Print — hide app chrome, keep only the payslip document             */
+/* Print â€” hide app chrome, keep only the payslip document             */
 /* ------------------------------------------------------------------ */
 @media print {
   body * { visibility: hidden; }
@@ -489,7 +537,7 @@ body {
 }
 
 /* ------------------------------------------------------------------ */
-/* Print — Reports & BI printable report sheet                         */
+/* Print â€” Reports & BI printable report sheet                         */
 /* ------------------------------------------------------------------ */
 @media print {
   body.report-print * { visibility: hidden; }
@@ -503,3 +551,36 @@ body {
 
 /* Report drill-down drawer table tuning */
 .report-drill .ant-table-thead > tr > th { background: #f8fafc; font-size: 12px; }
+
+/* Sonner toasts - NexusERP professional notifications */
+[data-sonner-toaster] {
+  --normal-bg: #ffffff;
+  --normal-border: #e2e8f0;
+  --normal-text: #0f172a;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif !important;
+}
+[data-sonner-toast].nex-toast {
+  border-radius: 12px !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 10px 36px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06) !important;
+  padding: 14px 16px !important;
+  gap: 6px !important;
+  max-width: 420px !important;
+}
+.nex-toast-title {
+  font-size: 13.5px !important;
+  font-weight: 650 !important;
+  color: #0f172a !important;
+  line-height: 1.35 !important;
+}
+.nex-toast-desc {
+  font-size: 12.5px !important;
+  color: #475569 !important;
+  line-height: 1.45 !important;
+  margin-top: 2px !important;
+}
+.nex-toast-close {
+  background: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+  color: #64748b !important;
+}

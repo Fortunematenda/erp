@@ -11,6 +11,7 @@ import { api } from '@/lib/api';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { CRM_STAGES, LEAD_PRIORITY, LEAD_SOURCES, LOST_REASONS, stageDef } from '@/lib/crm';
 import { EmployeeSelector } from '@/components/employee-selector';
+import { MetricStrip } from '@/components/metric-strip';
 
 const d = (v: any) => (v ? dayjs(v) : null);
 
@@ -249,9 +250,17 @@ export default function LeadDetail() {
       </div>
 
       {fin && (
-        <div className="nex-card mb-5 px-5 py-4 flex flex-wrap gap-6 !rounded-xl">
-          {[{ l: 'Total Invoiced', v: fin.totalInvoiced }, { l: 'Total Paid', v: fin.totalPaid }, { l: 'Remaining', v: fin.remainingBalance }, { l: 'Unapplied Credit', v: fin.unappliedCredits }].map((k) => (<div key={k.l}><div className="text-[12px] text-[#64748b]">{k.l}</div><div className="text-[18px] font-bold text-[#171a2e]">{fmtMoney(k.v)}</div></div>))}
-          <Button size="small" className="ml-auto self-center" icon={<RightOutlined />} onClick={() => lead.convertedCustomerId && router.push(`/sales/customers/${lead.convertedCustomerId}`)}>Customer 360</Button>
+        <div className="mb-5 flex flex-wrap items-center gap-3">
+          <MetricStrip
+            className="flex-1 mb-0"
+            items={[
+              { label: 'Total Invoiced', value: fmtMoney(fin.totalInvoiced) },
+              { label: 'Total Paid', value: fmtMoney(fin.totalPaid) },
+              { label: 'Remaining', value: fmtMoney(fin.remainingBalance) },
+              { label: 'Unapplied Credit', value: fmtMoney(fin.unappliedCredits) },
+            ]}
+          />
+          <Button size="small" icon={<RightOutlined />} onClick={() => lead.convertedCustomerId && router.push(`/sales/customers/${lead.convertedCustomerId}`)}>Customer 360</Button>
         </div>
       )}
 

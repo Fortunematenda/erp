@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, DatePicker, Divider, Form, Input, InputNumber, Modal, Popconfirm, Select, Tag, Tooltip, message } from 'antd';
-import { ArrowLeftOutlined, CheckOutlined, DeleteOutlined, EyeOutlined, MailOutlined, PlusOutlined, PrinterOutlined, DownloadOutlined, SwapOutlined, LinkOutlined, StopOutlined, CloseOutlined, TruckOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, CheckOutlined, DeleteOutlined, EyeOutlined, MailOutlined, PlusOutlined, SwapOutlined, LinkOutlined, StopOutlined, CloseOutlined, TruckOutlined } from '@ant-design/icons';
 import Link from 'next/link';
 import dayjs from 'dayjs';
 import { api } from '@/lib/api';
@@ -31,7 +31,9 @@ function BackBar({ to, title, actions }: { to: string; title: string; actions?: 
 function employeeOptions(employees: any[] | undefined) {
   return (employees || []).map((e: any) => ({ label: `${e.firstName || ''} ${e.lastName || ''}`.trim() || e.email || e.employeeNo || e.id, value: e.id }));
 }
-import { hydrateCustomerDocumentDefaults, resolveProductLinePatch, productOptions, dueDateFromTerms } from '@/components/sales/customer-defaults';
+import { hydrateCustomerDocumentDefaults, resolveProductLinePatch, mergeDuplicateProductLine, dueDateFromTerms } from '@/components/sales/customer-defaults';
+import { ProductSelect } from '@/components/sales/product-select';
+import { notify } from '@/lib/notify';
 /** Shared hydration path — same service as Quote/Invoice (billing + shipping + terms + tax). */
 function applyCustomerDefaults(id: string, form: any, customers: any[]) {
   void hydrateCustomerDocumentDefaults(id, form, customers, { shipping: true });
@@ -45,7 +47,7 @@ export function SalesOrderForm({ record, onSaved, initial }: { record?: any; onS
   const [lines, setLines] = useState<Line[]>([]);
   const [saving, setSaving] = useState(false);
   const [defaultTax, setDefaultTax] = useState(0);
-  const [viewer, setViewer] = useState<null | { autoPrint: boolean }>(null);
+  const [viewer, setViewer] = useState<null | { autoPrint?: boolean; autoDownload?: boolean }>(null);
   const [converting, setConverting] = useState(false);
   const [custOpen, setCustOpen] = useState(false);
   const [custForm] = Form.useForm();
@@ -106,19 +108,33 @@ export function SalesOrderForm({ record, onSaved, initial }: { record?: any; onS
     try { await api(path, { method }); message.success('Done'); qc.invalidateQueries({ queryKey: ['/sales/sales-orders'] }); qc.invalidateQueries({ queryKey: ['/sales/quotations'] }); qc.invalidateQueries({ queryKey: ['/sales/invoices'] }); } catch (e: any) { message.error(e.message); }
   };
 
-  const docActions = (<>
-    <Button icon={<EyeOutlined />} onClick={() => setViewer({ autoPrint: false })}>Preview</Button>
-    <Button icon={<MailOutlined />} onClick={() => message.info('Email Sales Order')}>Send Email</Button>
-    <Button icon={<PrinterOutlined />} onClick={() => setViewer({ autoPrint: true })}>Print</Button>
-    <Button icon={<DownloadOutlined />} onClick={() => setViewer({ autoPrint: false })}>PDF</Button>
-  </>);
+  const docActions = record ? (
+    <>
+      <Button type="primary" icon={<MailOutlined />} onClick={() => message.info('Email Sales Order')}>Send</Button>
+      <Button icon={<EyeOutlined />} onClick={() => setViewer({})}>Preview</Button>
+    </>
+  ) : undefined;
 
   const customers = meta.data?.customers || [];
   const taxOptions = (meta.data?.taxRates || []).map((t: any) => ({ label: `${t.name} (${Number(t.rate)}%)`, value: Number(t.rate) }));
-  const orderItemOptions = productOptions(meta.data?.items);
 
-  /** Product selected/changed → re-resolve Rate from PricingService (respects document currency). */
+  /** Product selected/changed → merge qty if already on another line; else resolve Rate. */
   async function onOrderProductChange(key: number, itemId: string) {
+    let didMerge = false;
+    let newQty = 0;
+    setLines((prev) => {
+      const merged = mergeDuplicateProductLine(prev, key, itemId, () => ({ key: 1, description: '', quantity: 1, unitPrice: 0, discount: 0, taxRate: 0 }));
+      if (merged.merged) {
+        didMerge = true;
+        newQty = merged.newQty;
+        return merged.lines;
+      }
+      return prev;
+    });
+    if (didMerge) {
+      notify.info(`Quantity updated to ${newQty} — same product kept on one line`);
+      return;
+    }
     const customerId = form.getFieldValue('customerId');
     const currency = form.getFieldValue('currency') || 'USD';
     const { patch, warning } = await resolveProductLinePatch(itemId, meta.data?.items, customerId, currency);
@@ -128,7 +144,7 @@ export function SalesOrderForm({ record, onSaved, initial }: { record?: any; onS
 
   return (
     <>
-      <BackBar to="/sales/orders" title={record ? `Sales Order ${record.orderNo}` : 'Create Sales Order'} actions={record ? docActions : undefined} />
+      <BackBar to="/sales/orders" title={record ? `Sales Order ${record.orderNo}` : 'Create Sales Order'} actions={docActions} />
       <div className="nex-card p-6">
         <Form form={form} layout="vertical">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-x-4">
@@ -172,15 +188,10 @@ export function SalesOrderForm({ record, onSaved, initial }: { record?: any; onS
         <FormSection title="Line Items" />
         <div className="overflow-x-auto">
           <div className="min-w-[760px]">
-            <div className="grid grid-cols-[1.2fr_1.7fr_0.6fr_0.9fr_0.8fr_0.9fr_40px] gap-3 px-3 py-2 text-[12px] font-semibold text-[#64748b] uppercase tracking-wide"><span>Product</span><span>Description</span><span>Qty</span><span>Rate</span><span>Discount</span><span>Amount</span><span /></div>
+            <div className="grid grid-cols-[minmax(200px,1.3fr)_minmax(160px,1.5fr)_0.6fr_0.9fr_0.8fr_0.9fr_40px] gap-3 px-3 py-2 text-[12px] font-semibold text-[#64748b] uppercase tracking-wide"><span>Product</span><span>Description</span><span>Qty</span><span>Rate</span><span>Discount</span><span>Amount</span><span /></div>
             {lines.map((l) => (
-              <div key={l.key} className="grid grid-cols-[1.2fr_1.7fr_0.6fr_0.9fr_0.8fr_0.9fr_40px] gap-3 items-center py-2 border-t border-[#f0f1f6]">
-                <Select className="w-full" showSearch optionFilterProp="searchLabel" placeholder="Item" options={orderItemOptions} value={l.itemId} onChange={(v) => onOrderProductChange(l.key, v)} optionRender={(ori) => (
-                  <div className="flex items-center justify-between gap-2 w-full">
-                    <span className="truncate">{ori.data.label}</span>
-                    {ori.data.typeBadge && <span className="text-[10px] uppercase tracking-wide text-[#64748b] shrink-0">{ori.data.typeBadge}</span>}
-                  </div>
-                )} />
+              <div key={l.key} className="grid grid-cols-[minmax(200px,1.3fr)_minmax(160px,1.5fr)_0.6fr_0.9fr_0.8fr_0.9fr_40px] gap-3 items-center py-2 border-t border-[#f0f1f6]">
+                <ProductSelect items={meta.data?.items} value={l.itemId} onChange={(v) => onOrderProductChange(l.key, v)} />
                 <Input value={l.description} onChange={(e) => updateLine(l.key, { description: e.target.value })} placeholder="Description" />
                 <InputNumber className="w-full" min={0} value={l.quantity} onChange={(v) => updateLine(l.key, { quantity: Number(v || 0) })} />
                 <Tooltip title="Automatically populated from the customer's price list or the product's default sales price. You may edit it if you have permission."><InputNumber className="w-full" min={0} prefix="$" value={l.unitPrice} onChange={(v) => updateLine(l.key, { unitPrice: Number(v || 0) })} /></Tooltip>
@@ -227,7 +238,7 @@ export function SalesOrderForm({ record, onSaved, initial }: { record?: any; onS
         <Button type="primary" loading={saving} onClick={save}>{record ? 'Save Order' : 'Save Draft'}</Button>
       </div>
 
-      <DocViewer open={!!viewer} onClose={() => setViewer(null)} type="sales-order" id={record?.id} autoPrint={viewer?.autoPrint} />
+      <DocViewer open={!!viewer} onClose={() => setViewer(null)} type="sales-order" id={record?.id} autoPrint={viewer?.autoPrint} autoDownload={viewer?.autoDownload} />
 
       <Modal title="Add Customer" open={custOpen} onCancel={() => setCustOpen(false)} onOk={createCustomer} okText="Create">
         <Form form={custForm} layout="vertical" className="mt-2">

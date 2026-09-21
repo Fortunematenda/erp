@@ -295,7 +295,7 @@ export default function Dashboard() {
                 </ResponsiveContainer>
                 <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                   <div className="text-[11px] text-[#64748b]">Total</div>
-                  <div className="text-[20px] font-bold text-[#171a2e]">{fmtMoney(agingTotal)}</div>
+                  <div className="text-[13px] font-semibold text-[#171a2e] tabular-nums">{fmtMoney(agingTotal)}</div>
                 </div>
               </div>
               <div className="flex-1 w-full space-y-3">

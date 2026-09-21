@@ -57,7 +57,7 @@ export function AccountDetailDrawer({ open, accountId, onClose, onEdit, onChange
               { key: 'overview', label: 'Overview', children: (
                 <div>
                   <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-                    <Field label="Current Balance" value={<span className={`text-[20px] font-semibold ${d.balance < 0 ? 'text-[#d64545]' : 'text-[#475467]'}`}>{fmtMoney(d.balance)}</span>} />
+                    <Field label="Current Balance" value={<span className={`text-[13px] font-semibold tabular-nums ${d.balance < 0 ? 'text-[#d64545]' : 'text-[#475467]'}`}>{fmtMoney(d.balance)}</span>} />
                     <Field label="Normal Balance" value={normal} />
                     <Field label="Account Code" value={<span className="font-mono text-[13px] text-[#003366]">{d.code}</span>} />
                     <Field label="Account Type" value={d.type} />

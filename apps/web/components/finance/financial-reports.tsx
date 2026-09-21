@@ -51,7 +51,7 @@ function PnlReport({ from, to, showZero, showCodes, onAccount }: { from?: string
       <Card className="nex-card" styles={{ body: { padding: '16px 20px' } }}>
         <div className="flex items-center justify-between">
           <span className="text-[14px] font-semibold text-[#5a6080]">NET PROFIT / LOSS</span>
-          <span className="text-[20px] font-bold" style={{ color: net >= 0 ? '#047857' : '#b42318' }}>{fmtMoney(net)}</span>
+          <span className="text-[13px] font-semibold tabular-nums" style={{ color: net >= 0 ? '#047857' : '#b42318' }}>{fmtMoney(net)}</span>
         </div>
       </Card>
     </div>
@@ -104,8 +104,8 @@ function BsReport({ from, to, showZero, showCodes, onAccount }: { from?: string;
 function MiniStat({ label, value, color }: { label: string; value: string; color: string }) {
   return (
     <div className="nex-card rounded-lg p-4" style={{ background: '#fff', border: '1px solid #e9edf2' }}>
-      <div className="text-[12px] font-medium text-[#667085]">{label}</div>
-      <div className="text-[20px] font-semibold leading-[1.2] mt-1" style={{ color }}>{value}</div>
+      <div className="text-[11px] font-medium text-[#667085] text-center">{label}</div>
+      <div className="text-[13px] font-semibold leading-tight mt-0.5 tabular-nums text-center" style={{ color }}>{value}</div>
     </div>
   );
 }

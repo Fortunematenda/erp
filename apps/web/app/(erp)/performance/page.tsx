@@ -281,8 +281,8 @@ export default function PerformancePage() {
                 <div className="mt-6">
                   <div className="text-[15px] font-bold text-[#171a2e] mb-3">Completion — {d.activeCycle.name}</div>
                   <div className="flex items-center gap-6">
-                    <div className="text-center"><div className="text-[12px] text-[#64748b]">Submitted</div><div className="text-[22px] font-bold text-[#16a34a]">{c.submitted ?? 0} / {c.employeesDue ?? 0}</div></div>
-                    <div className="text-center"><a className="text-center cursor-pointer" onClick={() => { setTab('assessments'); setFStatus(''); }}><div className="text-[12px] text-[#64748b]">Missing</div><div className="text-[22px] font-bold text-[#dc2626] underline">{c.missing ?? 0}</div></a></div>
+                    <div className="text-center"><div className="text-[11px] text-[#64748b]">Submitted</div><div className="text-[13px] font-semibold text-[#16a34a] tabular-nums">{c.submitted ?? 0} / {c.employeesDue ?? 0}</div></div>
+                    <div className="text-center"><a className="text-center cursor-pointer" onClick={() => { setTab('assessments'); setFStatus(''); }}><div className="text-[11px] text-[#64748b]">Missing</div><div className="text-[13px] font-semibold text-[#dc2626] underline tabular-nums">{c.missing ?? 0}</div></a></div>
                     <div className="flex-1 max-w-xs"><Progress percent={c.employeesDue ? Math.round(((c.submitted ?? 0) / c.employeesDue) * 100) : 0} /></div>
                   </div>
                 </div>

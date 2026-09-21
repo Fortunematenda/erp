@@ -3,6 +3,7 @@ import '@ant-design/v5-patch-for-react-19';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { App as AntApp, ConfigProvider, theme } from 'antd';
 import { useState } from 'react';
+import { Toaster } from 'sonner';
 import { AuthProvider } from '@/components/auth-provider';
 
 export function Providers({ children }: { children: React.ReactNode }) {
@@ -41,7 +42,27 @@ export function Providers({ children }: { children: React.ReactNode }) {
           },
         }}
       >
-        <AntApp><AuthProvider>{children}</AuthProvider></AntApp>
+        <AntApp>
+          <AuthProvider>{children}</AuthProvider>
+          <Toaster
+            position="top-right"
+            richColors
+            closeButton
+            expand
+            visibleToasts={4}
+            gap={10}
+            offset={16}
+            toastOptions={{
+              classNames: {
+                toast: 'nex-toast',
+                title: 'nex-toast-title',
+                description: 'nex-toast-desc',
+                actionButton: 'nex-toast-action',
+                closeButton: 'nex-toast-close',
+              },
+            }}
+          />
+        </AntApp>
       </ConfigProvider>
     </QueryClientProvider>
   );

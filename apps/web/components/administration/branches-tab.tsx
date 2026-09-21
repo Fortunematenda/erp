@@ -53,25 +53,25 @@ export function BranchesTab() {
         <Card className="nex-card" styles={{ body: { padding: '14px 18px' } }}>
           <div className="flex items-center gap-3">
             <div className="nex-stat-icon" style={{ background: '#eff6ff', color: '#1d4ed8' }}><ApartmentOutlined /></div>
-            <div><div className="text-[12px] text-slate-500">Active Branches</div><div className="text-[22px] font-bold text-slate-800">{kpis.active} <span className="text-[12px] font-normal text-slate-400">of {branches.length}</span></div></div>
+            <div><div className="text-[11px] text-slate-500">Active Branches</div><div className="text-[13px] font-semibold text-slate-800 tabular-nums">{kpis.active} <span className="text-[11px] font-normal text-slate-400">of {branches.length}</span></div></div>
           </div>
         </Card>
         <Card className="nex-card" styles={{ body: { padding: '14px 18px' } }}>
           <div className="flex items-center gap-3">
             <div className="nex-stat-icon" style={{ background: '#f0fdf4', color: '#15803d' }}><TeamOutlined /></div>
-            <div><div className="text-[12px] text-slate-500">Users Assigned</div><div className="text-[22px] font-bold text-slate-800">{kpis.users}</div></div>
+            <div><div className="text-[11px] text-slate-500">Users Assigned</div><div className="text-[13px] font-semibold text-slate-800 tabular-nums">{kpis.users}</div></div>
           </div>
         </Card>
         <Card className="nex-card" styles={{ body: { padding: '14px 18px' } }}>
           <div className="flex items-center gap-3">
             <div className="nex-stat-icon" style={{ background: '#fffbeb', color: '#d97706' }}><HddOutlined /></div>
-            <div><div className="text-[12px] text-slate-500">Fiscal Devices</div><div className="text-[22px] font-bold text-slate-800">{kpis.fiscal}</div></div>
+            <div><div className="text-[11px] text-slate-500">Fiscal Devices</div><div className="text-[13px] font-semibold text-slate-800 tabular-nums">{kpis.fiscal}</div></div>
           </div>
         </Card>
         <Card className="nex-card" styles={{ body: { padding: '14px 18px' } }}>
           <div className="flex items-center gap-3">
             <div className="nex-stat-icon" style={{ background: '#f5f3ff', color: '#7c3aed' }}><BankOutlined /></div>
-            <div><div className="text-[12px] text-slate-500">Warehouses</div><div className="text-[22px] font-bold text-slate-800">{kpis.warehouses}</div></div>
+            <div><div className="text-[11px] text-slate-500">Warehouses</div><div className="text-[13px] font-semibold text-slate-800 tabular-nums">{kpis.warehouses}</div></div>
           </div>
         </Card>
       </div>

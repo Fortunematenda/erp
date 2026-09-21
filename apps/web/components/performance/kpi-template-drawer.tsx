@@ -300,5 +300,5 @@ function Row({ label, value }: { label: string; value: any }) {
   return <div className="flex justify-between text-[13px] border-b border-[#f0f1f6] py-1.5"><span className="text-[#64748b]">{label}</span><span className="font-medium text-[#171a2e]">{value || '—'}</span></div>;
 }
 function UsageCard({ label, value }: { label: string; value?: number }) {
-  return <div className="nex-card border rounded-lg p-4 text-center"><div className="text-[12px] font-semibold text-[#64748b]">{label}</div><div className="text-[22px] font-bold text-[#171a2e] mt-1">{value ?? '…'}</div></div>;
+  return <div className="nex-card border rounded-lg p-4 text-center"><div className="text-[11px] font-semibold text-[#64748b]">{label}</div><div className="text-[13px] font-semibold text-[#171a2e] mt-1 tabular-nums">{value ?? '…'}</div></div>;
 }

@@ -39,20 +39,59 @@ export class DocumentsService {
   }
 
   private async enrich(companyId: string, type: string, base: any, template: any, id: string) {
-    const out = { ...base, template, discount: 0 };
+    const prefs = await this.loadPrefs(companyId);
+    // Letterhead: template logo first, then company prefs logo. Always expose pdfHeader on template for PDF/preview.
+    const mergedTpl = {
+      ...template,
+      logoUrl: template?.logoUrl || prefs.logo || null,
+      pdfHeader: prefs.pdfHeader || template?.pdfHeader || null,
+      pdfFooter: prefs.pdfFooter || template?.footerMessage || null,
+    };
+    const company = {
+      ...(base.company || {}),
+      name: base.company?.name || prefs.companyName || '',
+      address: base.company?.address || prefs.address || '',
+      phone: base.company?.phone || prefs.phone || '',
+      email: base.company?.email || prefs.email || '',
+      website: base.company?.website || '',
+    };
+    const out = { ...base, company, template: mergedTpl, discount: 0 };
     if (type === 'invoice') {
-      const inv: any = await this.prisma.salesInvoice.findFirst({ where: { id, companyId }, include: { receipts: true, fiscalReceipt: true, project: true, branch: true } });
+      const inv: any = await this.prisma.salesInvoice.findFirst({ where: { id, companyId }, include: { fiscalReceipt: true, project: true, branch: true } });
       if (inv) {
-        const paid = (inv.receipts || []).reduce((s: number, r: any) => s + money(r.amount), 0);
-        out.paid = paid; out.balance = money(inv.total) - paid;
+        // Prefer stored balances (updated by InvoiceStatusService.recalc from PaymentAllocation).
+        // Do not sum Receipt.amount via invoiceId — modern receipts link through allocations only.
+        const amountPaid = money(inv.amountPaid);
+        const creditsApplied = money(inv.creditsApplied);
+        const total = money(inv.total);
+        const balanceDue = inv.balanceDue != null
+          ? money(inv.balanceDue)
+          : Math.max(0, total - amountPaid - creditsApplied);
+        out.paid = amountPaid;
+        out.balance = balanceDue;
         out.discount = 0;
         out.project = inv.project?.name; out.branch = inv.branch?.name;
-        const resolved = InvoiceStatusService.resolveDocumentStamp({ invoiceStatus: inv.invoiceStatus, paymentStatus: inv.paymentStatus });
-        const PAYMENT_COLORS: Record<string, string> = { UNPAID: '#f59e0b', 'PART PAID': '#0284c7', PAID: '#16a34a', OVERDUE: '#dc2626', VOID: '#b91c1c' };
+        const livePay = InvoiceStatusService.resolvePaymentStatus({
+          invoiceStatus: inv.invoiceStatus,
+          dueDate: inv.dueDate,
+          total,
+          amountPaid,
+          creditsApplied,
+        });
+        const stampPayStatus = livePay.status || inv.paymentStatus;
+        const resolved = InvoiceStatusService.resolveDocumentStamp({ invoiceStatus: inv.invoiceStatus, paymentStatus: stampPayStatus });
+        const STAMP_COLORS: Record<string, string> = {
+          DRAFT: '#64748b',
+          UNPAID: '#f59e0b',
+          'PART PAID': '#0284c7',
+          PAID: '#16a34a',
+          OVERDUE: '#dc2626',
+          VOID: '#b91c1c',
+        };
         out.invoiceStatus = inv.invoiceStatus || 'DRAFT';
-        out.paymentStatus = inv.paymentStatus;
+        out.paymentStatus = stampPayStatus;
         out.fiscalStatus = inv.fiscalStatus;
-        out.displayStatus = resolved; out.displayStatusLabel = resolved; out.displayStatusColor = PAYMENT_COLORS[resolved] || '#f59e0b';
+        out.displayStatus = resolved; out.displayStatusLabel = resolved; out.displayStatusColor = STAMP_COLORS[resolved] || '#f59e0b';
         out.fiscalInfo = inv.fiscalReceipt ? {
           receiptId: inv.fiscalReceipt.zimraReceiptId, receiptType: inv.fiscalReceipt.receiptType,
           dayNo: inv.fiscalReceipt.fiscalDayNo, deviceId: inv.fiscalReceipt.deviceId,
@@ -65,6 +104,16 @@ export class DocumentsService {
     return out;
   }
 
+  /** Company letterhead prefs (logo, pdfHeader, contact) for printed PDFs. */
+  private async loadPrefs(companyId: string): Promise<Record<string, any>> {
+    const rows = await this.prisma.systemConfig.findMany({
+      where: { companyId, key: { in: ['pref.logo', 'pref.pdfHeader', 'pref.pdfFooter', 'pref.companyName', 'pref.email', 'pref.phone', 'pref.address'] } },
+    });
+    const out: Record<string, any> = {};
+    for (const r of rows) out[r.key.replace('pref.', '')] = (r.value as any)?.value ?? r.value;
+    return out;
+  }
+
   private async companyInfo(companyId: string) {
     const c = await this.prisma.company.findUnique({ where: { id: companyId } });
     const branch = await this.prisma.branch.findFirst({ where: { companyId }, orderBy: { name: 'asc' } });
@@ -74,6 +123,9 @@ export class DocumentsService {
       tin: c?.tin,
       vatNumber: c?.vatNumber,
       address: branch ? [branch.address, branch.city].filter(Boolean).join(', ') : '',
+      phone: branch?.phone || '',
+      email: branch?.email || '',
+      website: '',
     };
   }
 
@@ -84,7 +136,15 @@ export class DocumentsService {
     });
     if (!full) throw new NotFoundException('Document not found');
     const company = model === 'salesInvoice'
-      ? { name: full.company?.tradingName || full.company?.legalName || '', tin: full.company?.tin, vatNumber: full.company?.vatNumber, address: full.branch?.address || [full.branch?.city].filter(Boolean).join(', ') }
+      ? {
+          name: full.company?.tradingName || full.company?.legalName || '',
+          tin: full.company?.tin,
+          vatNumber: full.company?.vatNumber,
+          address: full.branch?.address || [full.branch?.city].filter(Boolean).join(', '),
+          phone: full.branch?.phone || '',
+          email: full.branch?.email || '',
+          website: '',
+        }
       : await this.companyInfo(companyId);
     const party = full.customer ? { name: full.customer.name, address: addr(full.customer), email: full.customer.email, phone: full.customer.phone } : null;
     const itemIds = (full.lines || []).map((l: any) => l.itemId).filter(Boolean);
@@ -92,10 +152,12 @@ export class DocumentsService {
     const skuOf = new Map(items.map((i) => [i.id, i.sku]));
     const lines = (full.lines || []).map((l: any) => {
       const sku = l.itemId ? skuOf.get(l.itemId) : undefined;
+      const raw = String(l.description || '').trim();
+      // Keep SKU and description separate — template preview / PDF columns render them independently.
       return {
         sku: sku || '',
         code: sku || '',
-        desc: sku ? `${sku} — ${l.description}` : l.description,
+        desc: raw || (sku ? String(sku) : ''),
         qty: money(l.quantity),
         unit: money(l.unitPrice),
         rate: money(l.unitPrice),
