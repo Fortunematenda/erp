@@ -34,7 +34,7 @@ export function InvoiceFormDrawer({ open, onClose, presetCustomerId }: { open: b
   const meta = useMeta();
   const [form] = Form.useForm();
   const [lines, setLines] = useState<Line[]>([{ key: 1, description: '', quantity: 1, unitPrice: 0, taxRate: 0 }]);
-  const [saving, setSaving] = useState<'draft' | 'save' | null>(null);
+  const [saving, setSaving] = useState<'draft' | 'post' | 'send' | null>(null);
   const [defaultTax, setDefaultTax] = useState(0);
   const [customerModal, setCustomerModal] = useState(false);
   const [itemModalKey, setItemModalKey] = useState<number | null>(null);

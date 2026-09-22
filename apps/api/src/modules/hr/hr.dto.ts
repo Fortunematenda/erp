@@ -119,6 +119,8 @@ export class PayrollRunDto {
   @Type(() => Number) @IsInt() year!: number;
   @IsOptional() @IsDateString() payDate?: string;
   @IsOptional() @IsString() notes?: string;
+  @IsOptional() @IsString() payrollType?: string;
+  @IsOptional() @IsString() currency?: string;
 }
 
 export class StatutoryDto {

@@ -16,6 +16,7 @@ import { api } from '@/lib/api';
 import { ActionCenter } from '@/components/workspace/action-center';
 import { GlobalSearch } from '@/components/workspace/global-search';
 import { QuickCreate } from '@/components/workspace/quick-create';
+import { RouteProgress } from '@/components/route-progress';
 
 const { Sider, Header, Content } = Layout;
 
@@ -511,7 +512,8 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <Layout className="min-h-screen">
+      <Layout className="min-h-screen">
+        <RouteProgress />
       {!isMobile && (
         <Sider
           width={252}

@@ -258,6 +258,25 @@ export class RecruitmentService {
       return emp;
     });
     await this.markVacancyFilled(companyId, app.vacancyId);
+    // Hand over to HR: assign an onboarding plan (default cross-functional plan if none exists).
+    let template = await this.prisma.onboardingTemplate.findFirst({ where: { companyId }, include: { tasks: true }, orderBy: { name: 'asc' } });
+    if (!template) {
+      template = await this.prisma.onboardingTemplate.create({
+        data: { companyId, name: 'Default Onboarding', tasks: { create: [
+          { title: 'Signed employment contract', owner: 'HR', category: 'DOCUMENTS', dueInDays: 1 },
+          { title: 'ID / passport & tax documents', owner: 'HR', category: 'DOCUMENTS', dueInDays: 2 },
+          { title: 'Create payroll profile (salary, bank, tax/NSSA)', owner: 'PAYROLL', category: 'PAYROLL', dueInDays: 2 },
+          { title: 'Laptop and equipment issued', owner: 'IT', category: 'EQUIPMENT', dueInDays: 1 },
+          { title: 'Email, system & access provisioning', owner: 'IT', category: 'ACCESS', dueInDays: 1 },
+          { title: 'Department & role introduction', owner: 'MANAGER', category: 'GENERAL', dueInDays: 3 },
+          { title: 'Complete new-hire checklist & policies', owner: 'EMPLOYEE', category: 'GENERAL', dueInDays: 5 },
+        ] } }, include: { tasks: true },
+      });
+    }
+    const taskStatus: any = {};
+    for (const t of template.tasks) taskStatus[t.id] = { done: false, title: t.title, owner: t.owner, category: t.category, dueInDays: t.dueInDays };
+    await this.prisma.employeeOnboarding.upsert({ where: { employeeId: employee.id }, update: { templateId: template.id, status: 'IN_PROGRESS', taskStatus }, create: { companyId, employeeId: employee.id, templateId: template.id, status: 'IN_PROGRESS', taskStatus } });
+    await this.audit.log(companyId, req.user.sub, 'ONBOARDING_ASSIGNED', 'Employee', employee.id, { template: template.name });
     await this.audit.log(companyId, req.user.sub, 'HIRE', 'Candidate', app.candidateId, { applicationId, employeeNo: empNo });
     return this.prisma.employee.findUnique({ where: { id: employee.id }, include: { department: true } });
   }

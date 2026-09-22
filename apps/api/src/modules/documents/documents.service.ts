@@ -152,10 +152,12 @@ export class DocumentsService {
       { desc: 'Other deductions', qty: 1, unit: 0, tax: 0, taxAmt: 0, total: money(p.otherDeductions), group: 'deduction' },
     ];
     return {
-      kind: 'payslip', title: 'Payslip', number: `PS-${p.id.slice(0, 8)}`, date: p.payrollRun?.period || p.createdAt || new Date(), dueDate: null,
-      currency: 'USD', status: 'PAID', company,
+      kind: 'payslip', title: 'Payslip', number: `PS-${p.id.slice(0, 8)}`, date: p.payrollRun?.payDate || p.createdAt || new Date(), dueDate: null,
+      currency: p.employee?.currency || 'USD', status: p.status || 'GENERATED', company,
       party: { name: p.employee ? `${p.employee.firstName || ''} ${p.employee.lastName || ''}`.trim() || p.employee.employeeNo : '' },
-      lines, subtotal: money(p.grossPay), taxTotal: money(p.payeTax), total: money(p.netPay), netPay: money(p.netPay), notes: null,
+      lines, subtotal: money(p.grossPay), grossPay: money(p.grossPay), netPay: money(p.netPay),
+      deductionTotal: money(Number(p.payeTax || 0) + Number(p.employeeNssa || 0) + Number(p.otherDeductions || 0)),
+      taxTotal: money(p.payeTax), total: money(p.netPay), notes: null,
     };
   }
 

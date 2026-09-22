@@ -53,7 +53,7 @@ export default function VendorCreditsPage() {
     <div className="nex-fade">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <div><h1 className="text-[26px] font-bold text-[#171a2e]">Vendor Credits</h1><p className="text-[13px] text-[#64748b]">Record supplier credits, apply them to bills and track available credit</p></div>
-        <Space><Dropdown menu={{ items: ['available', 'by-reason', 'by-supplier', 'refunds'].map((k) => ({ key: k, label: k.replace(/-/g, ' ').replace(/^by /, 'By ').replace(/^available$/, 'Available Credits').replace(/^refunds$/, 'Supplier Refunds') })), onClick: ({ key }) => setReports(key) }} trigger={['click']}><Button icon={<FileTextOutlined />}>Reports ▾</Button></Dropdown><Button icon={<ReloadOutlined />} onClick={refresh} /><Button type="primary" icon={<PlusOutlined />} onClick={() => setNewOpen(true)}>+ New Vendor Credit</Button></Space>
+        <Space><Dropdown menu={{ items: ['available', 'by-reason', 'by-supplier', 'refunds'].map((k) => ({ key: k, label: k.replace(/-/g, ' ').replace(/^by /, 'By ').replace(/^available$/, 'Available Credits').replace(/^refunds$/, 'Supplier Refunds') })), onClick: ({ key }) => setReports(key) }} trigger={['click']}><Button icon={<FileTextOutlined />}>Reports ▾</Button></Dropdown><Button icon={<ReloadOutlined />} onClick={refresh} /><Button type="primary" icon={<PlusOutlined />} onClick={() => setNewOpen(true)}>New Vendor Credit</Button></Space>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
@@ -73,7 +73,7 @@ export default function VendorCreditsPage() {
       </div>
 
       {arr(list.data).length === 0 ? (
-        <div className="nex-card !rounded-xl p-12 text-center"><FileTextOutlined className="text-4xl text-[#c7ccdd] mb-3" /><div className="text-[17px] font-bold text-[#171a2e]">No vendor credits yet</div><p className="text-[13px] text-[#64748b] mt-1 mb-4 max-w-md mx-auto">Record a supplier credit when a vendor issues a credit memo, return or billing adjustment.</p><Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setNewOpen(true)}>+ New Vendor Credit</Button></div>
+        <div className="nex-card !rounded-xl p-12 text-center"><FileTextOutlined className="text-4xl text-[#c7ccdd] mb-3" /><div className="text-[17px] font-bold text-[#171a2e]">No vendor credits yet</div><p className="text-[13px] text-[#64748b] mt-1 mb-4 max-w-md mx-auto">Record a supplier credit when a vendor issues a credit memo, return or billing adjustment.</p><Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setNewOpen(true)}>New Vendor Credit</Button></div>
       ) : (
         <Table rowKey="id" dataSource={rows} columns={cols} pagination={{ pageSize: 15, showTotal: (t) => `${t} credits` }} scroll={{ x: true }} />
       )}

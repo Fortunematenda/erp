@@ -350,6 +350,56 @@ body {
   .customer-detail-tabs .ant-tabs-nav { padding-left: 28px; }
 }
 
+/* ---------- Global route progress bar ---------- */
+.nex-route-progress {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  z-index: 2000;
+  pointer-events: none;
+  background: transparent;
+  overflow: hidden;
+}
+.nex-route-progress .bar {
+  height: 100%;
+  width: 40%;
+  background: linear-gradient(90deg, #003366, #1d5fb5);
+  border-radius: 0 3px 3px 0;
+  animation: nexRoute 1.05s ease-in-out infinite;
+}
+@keyframes nexRoute {
+  0% { transform: translateX(-100%); width: 40%; }
+  50% { width: 60%; }
+  100% { transform: translateX(340%); width: 40%; }
+}
+
+/* ---------- Global tab alignment (NexusERP design system) ----------
+   Main module tabs that sit directly inside a card get a consistent 24px
+   horizontal inset so the first label aligns with page headings, filters and
+   table content. Nested tabs inside already-padded containers are intentionally
+   NOT matched (avoids double padding). Use .nexus-section-tabs for nested bars
+   and .nexus-page-tabs for explicit top-level bars. */
+.nex-card > .ant-tabs > .ant-tabs-nav,
+.ant-card > .ant-tabs > .ant-tabs-nav,
+.nexus-page-tabs > .ant-tabs-nav {
+  padding-inline: 24px;
+}
+.nexus-section-tabs > .ant-tabs-nav {
+  padding-inline: 20px;
+}
+.nexus-section-tabs > .ant-tabs-content-holder {
+  padding-inline: 20px;
+}
+@media (max-width: 768px) {
+  .nex-card > .ant-tabs > .ant-tabs-nav,
+  .ant-card > .ant-tabs > .ant-tabs-nav,
+  .nexus-page-tabs > .ant-tabs-nav,
+  .nexus-section-tabs > .ant-tabs-nav,
+  .nexus-section-tabs > .ant-tabs-content-holder {
+    padding-inline: 16px;
+  }
+}
+
 /* ---------- Top header controls (scoped — Quick Access, Company, Avatar, Notification) ---------- */
 .nex-quick-access-btn.ant-btn {
   background: #ffffff;

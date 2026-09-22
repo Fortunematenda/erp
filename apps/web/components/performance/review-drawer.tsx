@@ -11,7 +11,7 @@ import { fmtDate, fmtDateTime, fmtMoney } from '@/lib/format';
 
 const STATUS_TONE: Record<string, string> = { PENDING_EMPLOYEE: 'amber', PENDING_MANAGER: 'amber', PENDING_QA: 'amber', PENDING_CALIBRATION: 'amber', PENDING_APPROVAL: 'amber', APPROVED: 'green', COMPLETED: 'green', LOCKED: 'purple' };
 
-export function ReviewDrawer({ open, onClose, assessmentId, mode }: { open: boolean; onClose: () => void; assessmentId: string | null; mode?: 'EMPLOYEE' | 'MANAGER' | 'QA' | 'VIEW' }) {
+export function ReviewDrawer({ open, onClose, assessmentId, mode }: { open: boolean; onClose: () => void; assessmentId: string | null; mode?: 'EMPLOYEE' | 'MANAGER' | 'QA' | 'VIEW' | 'HR_EMPLOYEE' }) {
   const qc = useQueryClient();
   const [tab, setTab] = useState('kpis');
   const [edit, setEdit] = useState<Record<string, any>>({});
@@ -31,6 +31,7 @@ export function ReviewDrawer({ open, onClose, assessmentId, mode }: { open: bool
   const kpis = d?.kpis || [];
   const completion = kpis.length ? Math.round((kpis.filter((k: any) => k.effectiveScore != null).length / kpis.length) * 100) : 0;
   const effMode = mode || 'VIEW';
+  const editableEmployee = effMode === 'EMPLOYEE' || effMode === 'HR_EMPLOYEE';
 
   const isLocked = d?.status === 'LOCKED';
 
@@ -41,6 +42,14 @@ export function ReviewDrawer({ open, onClose, assessmentId, mode }: { open: bool
     try {
       await api(`/performance/assessments/${assessmentId}/employee-submit`, { method: 'POST', body: JSON.stringify({ kpis: Object.entries(edit).map(([kpiId, v]) => ({ kpiId, ...v })) }) });
       message.success('Self assessment submitted'); setEdit({}); await refresh();
+    } catch (e: any) { message.error(e.message); } finally { setBusy(false); }
+  }
+
+  async function submitHrEmployee() {
+    setBusy(true);
+    try {
+      await api(`/performance/assessments/${assessmentId}/hr-employee-submit`, { method: 'POST', body: JSON.stringify({ kpis: Object.entries(edit).map(([kpiId, v]) => ({ kpiId, ...v })) }) });
+      message.success('Employee KPI submitted on behalf'); setEdit({}); await refresh();
     } catch (e: any) { message.error(e.message); } finally { setBusy(false); }
   }
 
@@ -102,7 +111,7 @@ export function ReviewDrawer({ open, onClose, assessmentId, mode }: { open: bool
       const val = e.actual ?? (r.qaActual ?? r.managerActual ?? r.actualValue);
       if (r.measurementType === 'YES_NO') return e.actualText || r.actualText || (val != null ? (Number(val) === 1 || String(val).toUpperCase() === 'YES' ? 'Yes' : 'No') : '—');
       if (r.scoringMethod === 'MANUAL') return '—';
-      if (effMode === 'EMPLOYEE' && !r.systemDerived && !isLocked) return <InputNumber size="small" value={val} onChange={(v) => setEdit((s) => ({ ...s, [r.id]: { ...s[r.id], actual: v } }))} />;
+      if (editableEmployee && !r.systemDerived && !isLocked) return <InputNumber size="small" value={val} onChange={(v) => setEdit((s) => ({ ...s, [r.id]: { ...s[r.id], actual: v } }))} />;
       return val != null ? (r.measurementType === 'CURRENCY' ? fmtMoney(val) : `${Number(val)}${r.unit ? ` ${r.unit}` : ''}`) : '—';
     } },
     { title: 'Achievement', width: 95, align: 'right', render: (_v, r) => r.achievement != null ? <span className={Number(r.achievement) >= Number(d?.version?.passMark ?? 70) ? 'text-[#16a34a] font-semibold' : 'text-[#dc2626] font-semibold'}>{Number(r.achievement)}%{r.capped && <Tooltip title="Capped by maximum achievement"><span className="text-[10px] text-[#b45309] ml-1">cap</span></Tooltip>}</span> : '—' },
@@ -132,6 +141,7 @@ export function ReviewDrawer({ open, onClose, assessmentId, mode }: { open: bool
       extra={d && (
         <Space wrap>
           {effMode === 'EMPLOYEE' && !d.employeeSubmittedAt && !isLocked && <Button size="small" type="primary" icon={<SendOutlined />} loading={busy} onClick={submitEmployee}>Submit self assessment</Button>}
+          {effMode === 'HR_EMPLOYEE' && !d.employeeSubmittedAt && !isLocked && <Button size="small" type="primary" icon={<SendOutlined />} loading={busy} onClick={submitHrEmployee}>Submit employee KPI (on behalf)</Button>}
           {effMode === 'MANAGER' && d.employeeSubmittedAt && !d.managerSubmittedAt && !isLocked && <Button size="small" type="primary" icon={<CheckOutlined />} loading={busy} onClick={submitManager}>Submit manager review</Button>}
           {effMode === 'QA' && !isLocked && !d.qaSubmittedAt && (
             d.qaReviews?.some((q: any) => q.reviewerId && q.status === 'IN_PROGRESS')
@@ -170,6 +180,7 @@ export function ReviewDrawer({ open, onClose, assessmentId, mode }: { open: bool
               <Progress type="circle" size={52} percent={completion} className="mt-1" />
             </div>
           </div>
+          {effMode === 'HR_EMPLOYEE' && <div className="mb-4 rounded-lg border border-[#bfdbfe] bg-[#eff6ff] text-[#1d4ed8] text-[13px] px-4 py-2.5">You are submitting the employee KPI section on behalf of {d.employee?.firstName} {d.employee?.lastName} (no system access). This action is audited.</div>}
           {d.criticalNotMet && <div className="mb-4 rounded-lg border border-[#fecaca] bg-[#fef2f2] text-[#b91c1c] text-[13px] px-4 py-2.5 flex items-center gap-2"><WarningOutlined /> Critical KPI Not Met — this result requires authorized HR review before final approval. It does not automatically change employment status.</div>}
           {d.prorationFactor != null && <div className="mb-4 rounded-lg border border-[#bfdbfe] bg-[#eff6ff] text-[#1d4ed8] text-[13px] px-4 py-2.5">Prorated eligibility: targets adjusted by factor {Number(d.prorationFactor).toFixed(2)} (employee joined during the period). Original targets shown.</div>}
           {d.employmentEndedDuring && <div className="mb-4 rounded-lg border border-[#fde68a] bg-[#fffbeb] text-[#b45309] text-[13px] px-4 py-2.5">Employment ended during the performance period — HR decision recorded.</div>}

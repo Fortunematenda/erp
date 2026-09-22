@@ -5,6 +5,7 @@ import { AuditService } from '../../core/common/audit.service';
 import { companyIdOf } from '../../core/context';
 
 const round2 = (n: number) => Number(n.toFixed(2));
+const toNum = (v: any) => Number(v || 0);
 const DAYS = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
 
 @Injectable()
@@ -184,29 +185,103 @@ export class HrService {
   }
 
   // ---------- Attendance ----------
-  async calculateAttendance(companyId: string, employeeId: string, date: Date, checkIn?: Date, checkOut?: Date, opts?: { scheduledStart?: string; scheduledEnd?: string; breakMinutes?: number; status?: string }) {
+  async calculateAttendance(companyId: string, employeeId: string, date: Date, checkIn?: Date, checkOut?: Date, opts?: { scheduledStart?: string; scheduledEnd?: string; breakMinutes?: number; status?: string; graceMinutes?: number }) {
     const emp = await this.prisma.employee.findFirst({ where: { id: employeeId, companyId }, include: { workCalendar: true } });
     if (!emp) throw new BadRequestException('Employee not found');
     const cal = emp.workCalendar;
     const schedStart = opts?.scheduledStart || cal?.scheduledStart || '08:00';
     const schedEnd = opts?.scheduledEnd || cal?.scheduledEnd || '17:00';
     const breakMin = opts?.breakMinutes != null ? opts.breakMinutes : (cal?.breakMinutes ?? 0);
+    const grace = opts?.graceMinutes ?? 0;
     const status = opts?.status || 'PRESENT';
 
-    let workedHours = 0; let regularHours = 0; let overtimeHours = 0; let lateMinutes = 0; let earlyDeparture = 0;
+    let workedMinutes = 0, regularMinutes = 0, overtimeMinutes = 0, lateMinutes = 0, earlyDeparture = 0;
     if (checkIn && checkOut) {
-      const raw = (checkOut.getTime() - checkIn.getTime()) / 3600000;
-      workedHours = round2(Math.max(0, raw - breakMin / 60));
+      // Cross-midnight safety: if clock-out is not after clock-in, treat it as the next day.
+      let out = new Date(checkOut);
+      if (out.getTime() <= checkIn.getTime()) out = new Date(out.getTime() + 24 * 3600000);
+      const rawMinutes = (out.getTime() - checkIn.getTime()) / 60000;
+      workedMinutes = Math.max(0, Math.round(rawMinutes - breakMin));
       const sS = this.toMin(schedStart); const sE = this.toMin(schedEnd);
-      const scheduledLenHours = Math.max(0, (sE - sS - breakMin) / 60); // net scheduled hours
-      const schedEndVal = this.dateWithTime(checkOut, schedEnd);
+      const scheduledLenMinutes = Math.max(0, (sE - sS) - breakMin);
       const schedStartVal = this.dateWithTime(checkIn, schedStart);
-      if (checkIn > schedStartVal) lateMinutes = Math.round((checkIn.getTime() - schedStartVal.getTime()) / 60000);
-      if (checkOut < schedEndVal) earlyDeparture = Math.round((schedEndVal.getTime() - checkOut.getTime()) / 60000);
-      regularHours = round2(Math.min(workedHours, scheduledLenHours));
-      overtimeHours = round2(Math.max(0, workedHours - scheduledLenHours));
+      const schedEndVal = this.dateWithTime(out, schedEnd);
+      const lateRaw = checkIn > schedStartVal ? Math.round((checkIn.getTime() - schedStartVal.getTime()) / 60000) : 0;
+      lateMinutes = Math.max(0, lateRaw - grace);
+      earlyDeparture = out < schedEndVal ? Math.round((schedEndVal.getTime() - out.getTime()) / 60000) : 0;
+      regularMinutes = Math.min(workedMinutes, scheduledLenMinutes);
+      overtimeMinutes = Math.max(0, workedMinutes - scheduledLenMinutes);
     }
-    return { workedHours, regularHours, overtimeHours, lateMinutes, earlyDeparture, scheduledStart: schedStart, scheduledEnd: schedEnd, breakMinutes: breakMin, status };
+    return {
+      workedHours: round2(workedMinutes / 60), regularHours: round2(regularMinutes / 60), overtimeHours: round2(overtimeMinutes / 60),
+      lateMinutes, earlyDeparture, scheduledStart: schedStart, scheduledEnd: schedEnd, breakMinutes: breakMin, status,
+      workedMinutes, regularMinutes, overtimeMinutes,
+    };
+  }
+
+  attendanceExceptionsFor(record: any) {
+    const ex: any[] = [];
+    if (!record.checkIn) ex.push({ type: 'MISSING_CLOCK_IN' });
+    else if (!record.checkOut) ex.push({ type: 'MISSING_CLOCK_OUT' });
+    if (Number(record.lateMinutes) > 0) ex.push({ type: 'LATE_ARRIVAL', minutes: Number(record.lateMinutes) });
+    if (Number(record.earlyDeparture) > 0) ex.push({ type: 'EARLY_DEPARTURE', minutes: Number(record.earlyDeparture) });
+    if (Number(record.overtimeHours) > 0 && !record.approved) ex.push({ type: 'UNAPPROVED_OVERTIME', hours: Number(record.overtimeHours) });
+    if (record.status === 'ABSENT') ex.push({ type: 'ABSENCE' });
+    return ex;
+  }
+
+  async attendanceDetail(companyId: string, id: string) {
+    const record = await this.prisma.attendance.findFirst({ where: { id, companyId }, include: { employee: { include: { department: { include: { branch: true } } } } } });
+    if (!record) return null;
+    const date = new Date(record.date);
+    const [linkedLeave, holiday, audit] = await Promise.all([
+      this.prisma.leaveRequest.findFirst({ where: { companyId, employeeId: record.employeeId, status: 'APPROVED', startDate: { lte: date }, endDate: { gte: date } }, include: { leaveTypeRef: true } }),
+      this.prisma.holiday.findFirst({ where: { companyId, active: true, OR: [{ date }, { recurring: true }] } }),
+      this.prisma.auditLog.findMany({ where: { companyId, entityType: 'Attendance', entityId: id }, orderBy: { createdAt: 'asc' }, include: { user: { select: { firstName: true, lastName: true } } } }),
+    ]);
+    const holidays = await this.getCompanyHolidays(companyId, date, date);
+    const isHoliday = holidays.has(date.toISOString().slice(0, 10));
+    // Payroll status heuristic: an approved overtime month already processed into a payroll run.
+    let payrollStatus: any = null;
+    if (record.approved && Number(record.overtimeHours) > 0) {
+      const run = await this.prisma.payrollRun.findFirst({ where: { companyId, period: date.getMonth() + 1, year: date.getFullYear() }, orderBy: { period: 'desc' } });
+      const payslip = run ? await this.prisma.payslip.findFirst({ where: { payrollRunId: run.id, employeeId: record.employeeId } }) : null;
+      payrollStatus = run && run.status !== 'DRAFT' && payslip ? { included: true, reference: `PR-${run.year}-${run.period}`, status: run.status } : { included: false, reference: null, status: 'NOT_PROCESSED' };
+    }
+    return {
+      record: { ...record, workedHours: toNum(record.workedHours), regularHours: toNum(record.regularHours), overtimeHours: toNum(record.overtimeHours) },
+      employee: record.employee, schedule: { scheduledStart: record.scheduledStart, scheduledEnd: record.scheduledEnd, breakMinutes: record.breakMinutes },
+      exceptions: this.attendanceExceptionsFor(record),
+      linkedLeave: linkedLeave ? { id: linkedLeave.id, reference: `LV-${linkedLeave.id.slice(0, 8).toUpperCase()}`, type: linkedLeave.leaveTypeRef?.name || linkedLeave.leaveType, days: toNum(linkedLeave.days), status: linkedLeave.status } : null,
+      holiday: isHoliday ? { name: holiday?.name || 'Public Holiday' } : null,
+      payrollStatus,
+      audit: audit.map((a) => ({ at: a.createdAt, action: a.action, user: a.user ? `${a.user.firstName} ${a.user.lastName}` : 'System', reason: a.reason, metadata: a.metadata })),
+    };
+  }
+
+  async attendancePreflight(companyId: string, dto: { employeeId: string; date: string; checkIn?: string; checkOut?: string; breakMinutes?: number; status?: string }) {
+    const date = new Date(dto.date);
+    const employee = await this.prisma.employee.findFirst({ where: { id: dto.employeeId, companyId }, include: { workCalendar: true } });
+    if (!employee) throw new BadRequestException('Employee not found');
+    const existing = await this.prisma.attendance.findFirst({ where: { companyId, employeeId: dto.employeeId, date } });
+    const leave = await this.prisma.leaveRequest.findFirst({ where: { companyId, employeeId: dto.employeeId, status: 'APPROVED', startDate: { lte: date }, endDate: { gte: date } }, include: { leaveTypeRef: true } });
+    const holidaySet = await this.getCompanyHolidays(companyId, date, date);
+    const isHoliday = holidaySet.has(date.toISOString().slice(0, 10));
+    const holiday = isHoliday ? await this.prisma.holiday.findFirst({ where: { companyId, active: true } }) : null;
+    const weekend = this.weekendSet(employee.workCalendar?.weekendDays);
+    const isNonWorking = weekend.has(date.getDay());
+    let calc: any = null;
+    if (dto.checkIn && dto.checkOut) {
+      calc = await this.calculateAttendance(companyId, dto.employeeId, date, new Date(dto.checkIn), new Date(dto.checkOut), { breakMinutes: dto.breakMinutes, status: dto.status });
+    }
+    return {
+      existing: existing ? { id: existing.id, status: existing.status, workedHours: toNum(existing.workedHours) } : null,
+      leave: leave ? { id: leave.id, reference: `LV-${leave.id.slice(0, 8).toUpperCase()}`, type: leave.leaveTypeRef?.name || leave.leaveType, days: toNum(leave.days), halfDay: leave.halfDay } : null,
+      holiday: isHoliday ? { name: holiday?.name || 'Public Holiday' } : null,
+      nonWorkingDay: isNonWorking,
+      schedule: { scheduledStart: employee.workCalendar?.scheduledStart || '08:00', scheduledEnd: employee.workCalendar?.scheduledEnd || '17:00', breakMinutes: employee.workCalendar?.breakMinutes ?? 0, calendar: employee.workCalendar?.name || 'Default (Mon–Fri)', nonWorkingDays: Array.from(weekend).map((i) => DAYS[i]) },
+      calculation: calc,
+    };
   }
 
   private toMin(t: string): number { const m = /(\d{1,2}):(\d{2})/.exec(t || ''); return m ? Number(m[1]) * 60 + Number(m[2]) : 0; }

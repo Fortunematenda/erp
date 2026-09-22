@@ -9,6 +9,7 @@ import { AttendanceDto, CompensationDto, EmployeeDto, IncentiveDto, LeaveDto, Pa
 import { ApplicationDto, CandidateDto, DeclineDto, HireCandidateDto, InterviewDto, MoveStageDto, OfferDto, RejectApplicationDto, RequisitionDto, ScorecardDto, VacancyDto } from './recruitment.dto';
 import { RecruitmentService } from './recruitment.service';
 import { HrService } from './hr.service';
+import { PayrollService } from './payroll.service';
 import { NumberingService } from '../../core/common/numbering.service';
 import { AuditService } from '../../core/common/audit.service';
 import { PostingService } from '../finance/posting.service';
@@ -18,7 +19,7 @@ const round2 = (n: number) => Number(n.toFixed(2));
 
 @ApiTags('HR & Payroll') @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Controller('hr')
 export class HrController {
-  constructor(private prisma: PrismaService, private numbering: NumberingService, private audit: AuditService, private posting: PostingService, private recruitment: RecruitmentService, private hr: HrService) {}
+  constructor(private prisma: PrismaService, private numbering: NumberingService, private audit: AuditService, private posting: PostingService, private recruitment: RecruitmentService, private hr: HrService, private payrollSvc: PayrollService) {}
 
   // ----- Employees -----
   @Get('employees') employees(@Req() req: any) {
@@ -69,8 +70,9 @@ export class HrController {
     await this.audit.log(companyId, req.user.sub, 'CREATE', 'Department', dept.id, { code });
     return dept;
   }
-  @Patch('departments/:id') updateDepartment(@Req() req: any, @Param('id') id: string, @Body() dto: Partial<{ name: string }>) {
-    return this.prisma.department.updateMany({ where: { id, branch: { companyId: companyIdOf(req.user) } }, data: dto });
+  @Patch('departments/:id') updateDepartment(@Req() req: any, @Param('id') id: string, @Body() dto: Partial<{ name: string; code: string; branchId: string }>) {
+    const data: any = { ...dto };
+    return this.prisma.department.updateMany({ where: { id, branch: { companyId: companyIdOf(req.user) } }, data });
   }
 
   // ----- Leave -----
@@ -126,32 +128,58 @@ export class HrController {
     const end = to ? new Date(to) : new Date();
     return this.hr.attendanceSummary(companyId, start, end);
   }
-  @Post('attendance') async createAttendance(@Req() req: any, @Body() dto: AttendanceDto) {
+  @Get('attendance/:id') attendanceDetail(@Req() req: any, @Param('id') id: string) { return this.hr.attendanceDetail(companyIdOf(req.user), id); }
+  @Post('attendance/preflight') attendancePreflight(@Req() req: any, @Body() dto: any) { return this.hr.attendancePreflight(companyIdOf(req.user), dto); }
+  @Post('attendance') async createAttendance(@Req() req: any, @Body() dto: AttendanceDto & { breakMinutes?: number; reason?: string; override?: boolean }) {
     const companyId = companyIdOf(req.user);
     const date = new Date(dto.date);
+    if (isNaN(date.getTime())) throw new BadRequestException('Invalid attendance date');
     const checkIn = dto.checkIn ? new Date(dto.checkIn) : undefined;
     const checkOut = dto.checkOut ? new Date(dto.checkOut) : undefined;
     if (dto.checkIn && isNaN(checkIn!.getTime())) throw new BadRequestException('Invalid check-in time');
-    const calc = await this.hr.calculateAttendance(companyId, dto.employeeId, date, checkIn, checkOut, { status: dto.status });
+    if (dto.checkOut && isNaN(checkOut!.getTime())) throw new BadRequestException('Invalid check-out time');
+    if (!dto.reason && !dto.note) throw new BadRequestException('A reason is required for manual attendance entry');
+    const existing = await this.prisma.attendance.findFirst({ where: { companyId, employeeId: dto.employeeId, date } });
+    if (existing && !dto.override) throw new BadRequestException({ message: 'Attendance already exists for this employee on this date.', existingId: existing.id, code: 'ATTENDANCE_EXISTS' });
+    const leave = await this.prisma.leaveRequest.findFirst({ where: { companyId, employeeId: dto.employeeId, status: 'APPROVED', startDate: { lte: date }, endDate: { gte: date } } });
+    if (leave && (dto.status || 'PRESENT') === 'PRESENT' && !dto.override) throw new BadRequestException({ message: 'Approved leave exists for this employee on this date. Mark as ON LEAVE or provide an override reason.', code: 'APPROVED_LEAVE_EXISTS' });
+    const calc = await this.hr.calculateAttendance(companyId, dto.employeeId, date, checkIn, checkOut, { status: dto.status, breakMinutes: dto.breakMinutes });
     const record = await this.prisma.attendance.upsert({
       where: { companyId_employeeId_date: { companyId, employeeId: dto.employeeId, date } },
-      update: { status: dto.status || 'PRESENT', checkIn, checkOut, scheduledStart: calc.scheduledStart, scheduledEnd: calc.scheduledEnd, breakMinutes: calc.breakMinutes, workedHours: calc.workedHours, regularHours: calc.regularHours, overtimeHours: calc.overtimeHours, lateMinutes: calc.lateMinutes, earlyDeparture: calc.earlyDeparture, note: dto.note, source: 'MANUAL' },
-      create: { companyId, employeeId: dto.employeeId, date, status: dto.status || 'PRESENT', checkIn, checkOut, scheduledStart: calc.scheduledStart, scheduledEnd: calc.scheduledEnd, breakMinutes: calc.breakMinutes, workedHours: calc.workedHours, regularHours: calc.regularHours, overtimeHours: calc.overtimeHours, lateMinutes: calc.lateMinutes, earlyDeparture: calc.earlyDeparture, note: dto.note, source: 'MANUAL' },
+      update: { status: dto.status || 'PRESENT', checkIn, checkOut, scheduledStart: calc.scheduledStart, scheduledEnd: calc.scheduledEnd, breakMinutes: calc.breakMinutes, workedHours: calc.workedHours, regularHours: calc.regularHours, overtimeHours: calc.overtimeHours, lateMinutes: calc.lateMinutes, earlyDeparture: calc.earlyDeparture, note: dto.reason || dto.note, source: 'MANUAL' },
+      create: { companyId, employeeId: dto.employeeId, date, status: dto.status || 'PRESENT', checkIn, checkOut, scheduledStart: calc.scheduledStart, scheduledEnd: calc.scheduledEnd, breakMinutes: calc.breakMinutes, workedHours: calc.workedHours, regularHours: calc.regularHours, overtimeHours: calc.overtimeHours, lateMinutes: calc.lateMinutes, earlyDeparture: calc.earlyDeparture, note: dto.reason || dto.note, source: 'MANUAL' },
     });
-    await this.audit.log(companyId, req.user.sub, 'CREATE', 'Attendance', record.id, { date: dto.date, workedHours: calc.workedHours });
+    await this.audit.log(companyId, req.user.sub, existing ? 'UPDATE' : 'CREATE', 'Attendance', record.id, { module: 'hr', result: 'SUCCESS', reason: dto.reason, metadata: { date: dto.date, workedHours: calc.workedHours, overtimeHours: calc.overtimeHours, source: 'MANUAL' } });
     return record;
   }
   @UseGuards(PermissionsGuard) @RequirePermissions('hr.attendance.manage')
-  @Patch('attendance/:id') updateAttendance(@Req() req: any, @Param('id') id: string, @Body() dto: Partial<AttendanceDto>) {
-    const data: any = { ...dto };
-    if (dto.checkIn) data.checkIn = new Date(dto.checkIn);
-    if (dto.checkOut) data.checkOut = new Date(dto.checkOut);
-    return this.prisma.attendance.updateMany({ where: { id, companyId: companyIdOf(req.user) }, data });
+  @Patch('attendance/:id') async updateAttendance(@Req() req: any, @Param('id') id: string, @Body() dto: any) {
+    const companyId = companyIdOf(req.user);
+    const existing = await this.prisma.attendance.findFirst({ where: { id, companyId } });
+    if (!existing) throw new BadRequestException('Attendance record not found');
+    if (!dto.reason) throw new BadRequestException('A reason is required for attendance corrections');
+    const date = dto.date ? new Date(dto.date) : new Date(existing.date);
+    const checkIn = dto.checkIn ? new Date(dto.checkIn) : existing.checkIn || undefined;
+    const checkOut = dto.checkOut ? new Date(dto.checkOut) : existing.checkOut || undefined;
+    const breakMinutes = dto.breakMinutes != null ? Number(dto.breakMinutes) : existing.breakMinutes;
+    const status = dto.status || existing.status;
+    const calc = await this.hr.calculateAttendance(companyId, existing.employeeId, date, checkIn || undefined, checkOut || undefined, { status, breakMinutes });
+    const record = await this.prisma.attendance.update({
+      where: { id },
+      data: { status, checkIn, checkOut, scheduledStart: calc.scheduledStart, scheduledEnd: calc.scheduledEnd, breakMinutes: calc.breakMinutes, workedHours: calc.workedHours, regularHours: calc.regularHours, overtimeHours: calc.overtimeHours, lateMinutes: calc.lateMinutes, earlyDeparture: calc.earlyDeparture, note: dto.note ?? existing.note, source: 'CORRECTION' },
+    });
+    await this.audit.log(companyId, req.user.sub, 'ADJUST', 'Attendance', id, { module: 'hr', result: 'SUCCESS', reason: dto.reason, metadata: { before: { checkIn: existing.checkIn, checkOut: existing.checkOut, status: existing.status, workedHours: Number(existing.workedHours) }, after: { checkIn, checkOut, status, workedHours: calc.workedHours } } });
+    return record;
   }
   @UseGuards(PermissionsGuard) @RequirePermissions('hr.attendance.manage')
-  @Post('attendance/:id/approve') approveAttendance(@Req() req: any, @Param('id') id: string, @Body() dto: { approved?: boolean; note?: string }) {
+  @Post('attendance/:id/approve') async approveAttendance(@Req() req: any, @Param('id') id: string, @Body() dto: { approved?: boolean; note?: string }) {
     const companyId = companyIdOf(req.user);
-    return this.prisma.attendance.updateMany({ where: { id, companyId }, data: { approved: dto.approved ?? true, approvedBy: req.user.sub, note: dto.note } });
+    const rec = await this.prisma.attendance.findFirst({ where: { id, companyId } });
+    if (!rec) throw new BadRequestException('Attendance record not found');
+    const approved = dto.approved ?? true;
+    const updated = await this.prisma.attendance.updateMany({ where: { id, companyId }, data: { approved, approvedBy: req.user.sub, note: dto.note ?? rec.note } });
+    await this.audit.log(companyId, req.user.sub, approved ? 'OVERTIME_APPROVED' : 'OVERTIME_REJECTED', 'Attendance', id, { module: 'hr', result: 'SUCCESS', reason: dto.note, metadata: { employeeId: rec.employeeId, overtimeHours: Number(rec.overtimeHours || 0) } });
+    return updated;
   }
 
   // ----- Payroll -----
@@ -162,7 +190,7 @@ export class HrController {
     const companyId = companyIdOf(req.user);
     const existing = await this.prisma.payrollRun.findUnique({ where: { companyId_period_year: { companyId, period: dto.period, year: dto.year } } });
     if (existing) throw new BadRequestException('Payroll run already exists for this period');
-    const run = await this.prisma.payrollRun.create({ data: { companyId, period: dto.period, year: dto.year, payDate: dto.payDate ? new Date(dto.payDate) : undefined } });
+    const run = await this.prisma.payrollRun.create({ data: { companyId, period: dto.period, year: dto.year, payDate: dto.payDate ? new Date(dto.payDate) : undefined, payrollType: (dto as any).payrollType || 'REGULAR', currency: (dto as any).currency || 'USD', notes: (dto as any).notes } });
     await this.audit.log(companyId, req.user.sub, 'CREATE', 'PayrollRun', run.id, { period: dto.period, year: dto.year });
     return run;
   }
@@ -204,20 +232,31 @@ export class HrController {
         const bonusTotal = incentives.reduce((s, i) => s + Number(i.amount), 0);
         const allowances = { ...((e.allowances as any) || {}) };
         if (incentives.length) allowances['Performance Bonus'] = Number((allowances['Performance Bonus'] || 0)) + bonusTotal;
+        // Approved overtime only (unapproved overtime is never paid).
+        const runStart = new Date(Date.UTC(run.year, run.period - 1, 1));
+        const runEnd = new Date(Date.UTC(run.year, run.period, 0, 23, 59, 59));
+        const otAgg = await tx.attendance.aggregate({ where: { companyId, employeeId: e.id, approved: true, date: { gte: runStart, lte: runEnd } }, _sum: { overtimeHours: true } });
+        const otHours = Number(otAgg._sum.overtimeHours || 0);
+        if (otHours > 0) allowances['Overtime'] = round2(otHours * round2(Number(e.basicSalary) / 176 * 1.5));
         const allowanceTotal = Object.values(allowances).reduce((s: number, v: any) => s + Number(v || 0), 0);
-        const otherDeductionsRaw = (e.deductions as any) || {};
+        const otherDeductionsRaw = { ...((e.deductions as any) || {}) };
+        // Unpaid leave deduction (paid leave does not reduce salary).
+        const unpaidLeave = await tx.leaveRequest.findMany({ where: { companyId, employeeId: e.id, status: 'APPROVED', leaveTypeRef: { paid: false }, startDate: { lte: runEnd }, endDate: { gte: runStart } } });
+        const unpaidDays = unpaidLeave.reduce((s, l) => s + Number(l.days), 0);
+        if (unpaidDays > 0) otherDeductionsRaw['Unpaid Leave'] = round2(unpaidDays * (Number(e.basicSalary) / 22));
         const otherDeductions = Object.values(otherDeductionsRaw).reduce((s: number, v: any) => s + Number(v || 0), 0);
         const gross = Number(e.basicSalary) + allowanceTotal;
-        const stat = await this.statutory(companyId, gross, new Date(run.year, run.period - 1, 28));
-        const net = gross - stat.paye - stat.employeeNssa - otherDeductions;
-        totalGross += gross; totalDeductions += stat.paye + stat.employeeNssa + otherDeductions; totalNet += net; totalEmployerNssa += stat.employerNssa;
+        const stat = await this.payrollSvc.computeStatutory(companyId, e, gross, new Date(Date.UTC(run.year, run.period - 1, 28)));
+        if (!stat.payeConfigured) throw new BadRequestException('PAYE statutory rule is not configured for this payroll date. Configure it under Payroll → Settings → Statutory Rules.');
+        const net = gross - stat.employeeTotal - otherDeductions;
+        totalGross += gross; totalDeductions += stat.employeeTotal + otherDeductions; totalNet += net; totalEmployerNssa += stat.employerTotal;
         const bonusRefs = incentives.map((i) => ({ reference: i.reference, amount: Number(i.amount), assessmentId: i.assessmentId, score: Number(i.finalScore), cycle: i.planName }));
-        await tx.payslip.create({ data: { payrollRunId: run.id, employeeId: e.id, basicSalary: round2(Number(e.basicSalary)), grossPay: round2(gross), payeTax: stat.paye, nssaDeduction: stat.employeeNssa, otherDeductions: round2(otherDeductions), netPay: round2(net), employeeNssa: stat.employeeNssa, employerNssa: stat.employerNssa, allowances, deductions: otherDeductionsRaw, bonusAmount: round2(bonusTotal), bonusReferences: bonusRefs.length ? bonusRefs : undefined } });
+        await tx.payslip.create({ data: { payrollRunId: run.id, employeeId: e.id, basicSalary: round2(Number(e.basicSalary)), grossPay: round2(gross), payeTax: stat.paye, nssaDeduction: stat.employeeNssa, otherDeductions: round2(otherDeductions), netPay: round2(net), employeeNssa: stat.employeeNssa, employerNssa: stat.employerNssa, allowances, deductions: otherDeductionsRaw, bonusAmount: round2(bonusTotal), bonusReferences: bonusRefs.length ? bonusRefs : undefined, statutoryBreakdown: stat.lines, employerContributions: { total: stat.employerTotal, lines: stat.lines.filter((l) => l.employer > 0) } } });
         for (const inc of incentives) {
           await tx.performanceIncentive.update({ where: { id: inc.id }, data: { status: 'SENT_TO_PAYROLL', payrollInputRef: `PAYROLL-${run.year}-${run.period}`, paidAt: null } });
         }
       }
-      await tx.payrollRun.update({ where: { id: run.id }, data: { status: 'PROCESSED', processedAt: new Date(), employeeCount: employees.length, totalGross: round2(totalGross), totalDeductions: round2(totalDeductions), totalNet: round2(totalNet) } });
+      await tx.payrollRun.update({ where: { id: run.id }, data: { status: 'PROCESSED', processedAt: new Date(), employeeCount: employees.length, totalGross: round2(totalGross), totalDeductions: round2(totalDeductions), totalNet: round2(totalNet), employerCost: round2(totalGross + totalEmployerNssa) } });
     });
     await this.prisma.performanceIncentive.updateMany({ where: { companyId, status: 'SENT_TO_PAYROLL', payrollInputRef: `PAYROLL-${run.year}-${run.period}` }, data: { paidAt: new Date() } });
     await this.posting.postJournal(companyId, {
@@ -286,7 +325,8 @@ export class HrController {
   }
 
   private async statutory(companyId: string, gross: number, date: Date) {
-    const rules = await this.prisma.statutoryRule.findMany({ where: { active: true, validFrom: { lte: date }, OR: [{ validTo: null }, { validTo: { gte: date } }] } });
+    // Effective-dated resolution: pick the rule version whose validity covers the payroll date.
+    const rules = await this.prisma.statutoryRule.findMany({ where: { validFrom: { lte: date }, OR: [{ validTo: null }, { validTo: { gte: date } }] }, orderBy: { validFrom: 'desc' } });
     const payeRule = rules.find((r) => r.code === 'PAYE');
     if (!payeRule) throw new BadRequestException('PAYE statutory rule is not configured. Configure it under HR → Payroll Rules before processing payroll.');
     let paye = 0;
@@ -493,16 +533,42 @@ export class HrController {
 
   // ----- Onboarding -----
   @Get('onboarding-templates') onboardingTemplates(@Req() req: any) { return this.prisma.onboardingTemplate.findMany({ where: { companyId: companyIdOf(req.user) }, include: { tasks: true } }); }
+  @Get('onboarding-templates/:id') onboardingTemplate(@Req() req: any, @Param('id') id: string) { return this.prisma.onboardingTemplate.findFirst({ where: { id, companyId: companyIdOf(req.user) }, include: { tasks: { orderBy: { dueInDays: 'asc' } } } }); }
   @Post('onboarding-templates') createOnboardingTemplate(@Req() req: any, @Body() body: any) {
-    return this.prisma.onboardingTemplate.create({ data: { companyId: companyIdOf(req.user), name: body.name, tasks: { create: (body.tasks || []).map((t: any) => ({ title: t.title, dueInDays: Number(t.dueInDays || 0) })) } }, include: { tasks: true } });
+    return this.prisma.onboardingTemplate.create({ data: { companyId: companyIdOf(req.user), name: body.name, tasks: { create: (body.tasks || []).map((t: any) => ({ title: t.title, dueInDays: Number(t.dueInDays || 0), owner: t.owner || 'HR', category: t.category || 'GENERAL' })) } }, include: { tasks: true } });
+  }
+  @Patch('onboarding-templates/:id') async updateOnboardingTemplate(@Req() req: any, @Param('id') id: string, @Body() body: any) {
+    const companyId = companyIdOf(req.user);
+    const tpl = await this.prisma.onboardingTemplate.findFirst({ where: { id, companyId } });
+    if (!tpl) throw new BadRequestException('Onboarding template not found');
+    await this.prisma.$transaction(async (tx) => {
+      await tx.onboardingTask.deleteMany({ where: { templateId: id } });
+      await tx.onboardingTemplate.update({ where: { id }, data: { name: body.name ?? tpl.name, tasks: { create: (body.tasks || []).map((t: any) => ({ title: t.title, dueInDays: Number(t.dueInDays || 0), owner: t.owner || 'HR', category: t.category || 'GENERAL' })) } } });
+    });
+    await this.audit.log(companyId, req.user.sub, 'ONBOARDING_TEMPLATE_UPDATED', 'OnboardingTemplate', id, { module: 'hr', result: 'SUCCESS' });
+    return this.prisma.onboardingTemplate.findUnique({ where: { id }, include: { tasks: true } });
   }
   @Get('employee-onboardings') employeeOnboardings(@Req() req: any) { return this.prisma.employeeOnboarding.findMany({ where: { companyId: companyIdOf(req.user) }, include: { employee: true, template: { include: { tasks: true } } }, orderBy: { startedAt: 'desc' } }); }
-  @Post('employees/:id/onboarding') startOnboarding(@Req() req: any, @Param('id') id: string, @Body() body: any) {
+  @Post('employees/:id/onboarding') async startOnboarding(@Req() req: any, @Param('id') id: string, @Body() body: any) {
     const companyId = companyIdOf(req.user);
-    return this.prisma.employeeOnboarding.upsert({ where: { employeeId: id }, update: { templateId: body.templateId, status: 'IN_PROGRESS' }, create: { companyId, employeeId: id, templateId: body.templateId } });
+    const template = await this.prisma.onboardingTemplate.findFirst({ where: { id: body.templateId, companyId }, include: { tasks: true } });
+    const taskStatus: any = {};
+    for (const t of template?.tasks || []) taskStatus[t.id] = { done: false, title: t.title, owner: t.owner, category: t.category, dueInDays: t.dueInDays };
+    return this.prisma.employeeOnboarding.upsert({ where: { employeeId: id }, update: { templateId: body.templateId, status: 'IN_PROGRESS', taskStatus }, create: { companyId, employeeId: id, templateId: body.templateId, taskStatus } });
   }
-  @Patch('employee-onboardings/:id') updateOnboarding(@Req() req: any, @Param('id') id: string, @Body() body: any) {
-    return this.prisma.employeeOnboarding.updateMany({ where: { id, companyId: companyIdOf(req.user) }, data: { status: body.status, taskStatus: body.taskStatus, completedAt: body.status === 'COMPLETED' ? new Date() : undefined } });
+  @Patch('employee-onboardings/:id') async updateOnboarding(@Req() req: any, @Param('id') id: string, @Body() body: any) {
+    const companyId = companyIdOf(req.user);
+    const ob = await this.prisma.employeeOnboarding.findFirst({ where: { id, companyId } });
+    if (!ob) throw new BadRequestException('Onboarding not found');
+    const taskStatus: any = body.taskStatus ?? (ob.taskStatus as any);
+    const entries = taskStatus && typeof taskStatus === 'object' ? Object.values(taskStatus) : [];
+    const allDone = entries.length > 0 && entries.every((t: any) => t?.done);
+    const status = body.status || (allDone ? 'COMPLETED' : 'IN_PROGRESS');
+    const data: any = { taskStatus, status };
+    if (status === 'COMPLETED') data.completedAt = new Date();
+    const updated = await this.prisma.employeeOnboarding.update({ where: { id }, data });
+    await this.audit.log(companyId, req.user.sub, status === 'COMPLETED' ? 'ONBOARDING_COMPLETED' : 'ONBOARDING_UPDATED', 'EmployeeOnboarding', id, { module: 'hr', result: 'SUCCESS', metadata: { employeeId: ob.employeeId, status } });
+    return updated;
   }
 
   // ----- Leave -----
@@ -511,11 +577,28 @@ export class HrController {
     const companyId = companyIdOf(req.user);
     return this.prisma.leaveType.create({ data: { companyId, code: body.code, name: body.name, daysPerYear: Number(body.daysPerYear || 20), active: body.active ?? true, policy: body.policy ? { create: { companyId, maxCarryOver: Number(body.policy.maxCarryOver || 0), accrualPerMonth: Number(body.policy.accrualPerMonth || 0) } } : undefined } });
   }
+  @Patch('leave-types/:id') async updateLeaveType(@Req() req: any, @Param('id') id: string, @Body() body: any) {
+    const companyId = companyIdOf(req.user);
+    const existing = await this.prisma.leaveType.findFirst({ where: { id, companyId } });
+    if (!existing) throw new BadRequestException('Leave type not found');
+    const data: any = {};
+    for (const f of ['code', 'name', 'active']) if (body[f] !== undefined) data[f] = body[f];
+    if (body.daysPerYear != null) data.daysPerYear = Number(body.daysPerYear);
+    if (body.policy) data.policy = { upsert: { update: { maxCarryOver: Number(body.policy.maxCarryOver || 0), accrualPerMonth: Number(body.policy.accrualPerMonth || 0) }, create: { companyId, maxCarryOver: Number(body.policy.maxCarryOver || 0), accrualPerMonth: Number(body.policy.accrualPerMonth || 0) } } };
+    const updated = await this.prisma.leaveType.update({ where: { id }, data, include: { policy: true } });
+    await this.audit.log(companyId, req.user.sub, 'LEAVE_TYPE_UPDATED', 'LeaveType', id, { module: 'hr', result: 'SUCCESS' });
+    return updated;
+  }
   @Get('leave-policies') leavePolicies(@Req() req: any) { return this.prisma.leavePolicy.findMany({ where: { companyId: companyIdOf(req.user) }, include: { leaveType: true } }); }
   @Get('leave-balances') leaveBalances(@Req() req: any) { return this.prisma.leaveBalance.findMany({ where: { companyId: companyIdOf(req.user) }, include: { employee: true, leaveType: true } }); }
   @Post('leave-balances/accrue') accrueLeave(@Req() req: any, @Body() body: any) {
     const companyId = companyIdOf(req.user);
     return this.prisma.leaveBalance.upsert({ where: { companyId_employeeId_leaveTypeId: { companyId, employeeId: body.employeeId, leaveTypeId: body.leaveTypeId } }, update: { balance: { increment: Number(body.days || 0) } }, create: { companyId, employeeId: body.employeeId, leaveTypeId: body.leaveTypeId, balance: Number(body.days || 0) } });
+  }
+  @Post('leave-balances') setLeaveBalance(@Req() req: any, @Body() body: any) {
+    const companyId = companyIdOf(req.user);
+    if (!body.employeeId || !body.leaveTypeId) throw new BadRequestException('Employee and leave type are required');
+    return this.prisma.leaveBalance.upsert({ where: { companyId_employeeId_leaveTypeId: { companyId, employeeId: body.employeeId, leaveTypeId: body.leaveTypeId } }, update: { balance: Number(body.balance || 0) }, create: { companyId, employeeId: body.employeeId, leaveTypeId: body.leaveTypeId, balance: Number(body.balance || 0) } });
   }
   @Post('leave-requests/:id/status') approveLeave(@Req() req: any, @Param('id') id: string, @Body() body: any) {
     const companyId = companyIdOf(req.user);
@@ -525,8 +608,28 @@ export class HrController {
   // ----- Benefits -----
   @Get('benefit-plans') benefitPlans(@Req() req: any) { return this.prisma.benefitPlan.findMany({ where: { companyId: companyIdOf(req.user) } }); }
   @Post('benefit-plans') createBenefitPlan(@Req() req: any, @Body() body: any) { return this.prisma.benefitPlan.create({ data: { companyId: companyIdOf(req.user), name: body.name, type: body.type || 'MEDICAL', taxable: body.taxable ?? false, employerContribution: Number(body.employerContribution || 0) } }); }
+  @Patch('benefit-plans/:id') async updateBenefitPlan(@Req() req: any, @Param('id') id: string, @Body() body: any) {
+    const companyId = companyIdOf(req.user);
+    const data: any = {};
+    for (const f of ['name', 'type', 'active']) if (body[f] !== undefined) data[f] = body[f];
+    if (body.taxable !== undefined) data.taxable = body.taxable;
+    if (body.employerContribution != null) data.employerContribution = Number(body.employerContribution);
+    const res = await this.prisma.benefitPlan.updateMany({ where: { id, companyId }, data });
+    await this.audit.log(companyId, req.user.sub, 'BENEFIT_PLAN_UPDATED', 'BenefitPlan', id, { module: 'hr', result: 'SUCCESS' });
+    return res;
+  }
   @Get('employee-benefits') employeeBenefits(@Req() req: any) { return this.prisma.employeeBenefit.findMany({ where: { companyId: companyIdOf(req.user) }, include: { employee: true, plan: true } }); }
   @Post('employee-benefits') createEmployeeBenefit(@Req() req: any, @Body() body: any) { return this.prisma.employeeBenefit.create({ data: { companyId: companyIdOf(req.user), employeeId: body.employeeId, planId: body.planId, amount: Number(body.amount || 0) } }); }
+  @Patch('employee-benefits/:id') async updateEmployeeBenefit(@Req() req: any, @Param('id') id: string, @Body() body: any) {
+    const companyId = companyIdOf(req.user);
+    const data: any = {};
+    if (body.amount != null) data.amount = Number(body.amount);
+    if (body.active !== undefined) data.active = body.active;
+    if (body.planId) data.planId = body.planId;
+    const res = await this.prisma.employeeBenefit.updateMany({ where: { id, companyId }, data });
+    await this.audit.log(companyId, req.user.sub, 'EMPLOYEE_BENEFIT_UPDATED', 'EmployeeBenefit', id, { module: 'hr', result: 'SUCCESS' });
+    return res;
+  }
 
   // ----- Leave calendar / holidays / work calendars -----
   @Get('leave-requests/calendar') async leaveCalendar(@Req() req: any, @Query('month') month?: string) {

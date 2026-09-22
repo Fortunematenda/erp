@@ -61,7 +61,7 @@ export class DocumentPdfService {
     let y = 165;
 
     // Customer block
-    const headerLabel = vm.kind === 'quote' ? (vm.template?.preparedForLabel || 'PREPARED FOR') : vm.kind === 'order' ? 'SOLD TO' : 'BILL TO';
+    const headerLabel = vm.kind === 'quote' ? (vm.template?.preparedForLabel || 'PREPARED FOR') : vm.kind === 'order' ? 'SOLD TO' : vm.kind === 'payslip' ? 'EMPLOYEE' : 'BILL TO';
     doc.fillColor(muted).font(font).fontSize(baseFontSize - 2).text(headerLabel, 40, y);
     y += 13;
     doc.fillColor('#171a2e').font(font).fontSize(baseFontSize).text(vm.party?.name || '', 40, y);
@@ -111,30 +111,39 @@ export class DocumentPdfService {
     // Totals
     doc.font(font).fillColor('#171a2e').fontSize(baseFontSize - 1);
     const totalLeft = 380, totalWidth = right - totalLeft;
+    // Fixed-width value column so long labels (e.g. "Balance Due") never overlap the amount.
+    const valueWidth = 95;
+    const labelWidth = totalWidth - valueWidth;
     const line = (label: string, val: string, bold = false) => {
       if (ty + 16 > bottom) { doc.addPage(); drawHeader(); ty = 55; }
       doc.font(bold ? 'Helvetica-Bold' : font).fontSize(bold ? baseFontSize + 2 : baseFontSize - 1).fillColor(bold ? primary : '#171a2e');
-      doc.text(label, totalLeft, ty, { width: totalWidth, align: 'right' });
-      doc.text(val, totalLeft, ty, { width: totalWidth - 60, align: 'right' });
+      doc.text(label, totalLeft, ty, { width: labelWidth, align: 'right' });
+      doc.text(val, right - valueWidth, ty, { width: valueWidth, align: 'right' });
       ty += 16;
     };
-    if (vm.kind !== 'quote') line('Subtotal', money(vm.subtotal));
-    else line('Subtotal', money(vm.subtotal));
-    if (vm.discount) line('Discount', `- ${money(vm.discount)}`);
-    if (vm.taxTotal) line('Tax', money(vm.taxTotal));
-    if (vm.kind !== 'quote') {
-      line('TOTAL', money(vm.total), true);
-      if (vm.kind !== 'order' && vm.template?.showBalanceDue !== false) {
-        line('Paid', money(vm.paid));
-        doc.fillColor(primary).font('Helvetica-Bold').fontSize(baseFontSize + 1);
-        doc.text('Balance Due', totalLeft, ty, { width: totalWidth, align: 'right' });
-        doc.text(money(vm.balance), totalLeft, ty, { width: totalWidth - 60, align: 'right' });
-        ty += 16;
-      }
+    if (vm.kind === 'payslip') {
+      // A payslip has no "balance due" — show gross, deductions and net pay.
+      const gross = Number(vm.subtotal ?? vm.grossPay ?? 0);
+      const net = Number(vm.netPay ?? vm.total ?? 0);
+      const deductions = Number(vm.deductionTotal ?? Math.max(0, gross - net));
+      line('Gross pay', money(gross));
+      line('Total deductions', money(deductions));
+      line('NET PAY', money(net), true);
     } else {
-      line('QUOTE TOTAL', money(vm.total), true);
+      line('Subtotal', money(vm.subtotal));
+      if (vm.discount) line('Discount', `- ${money(vm.discount)}`);
+      if (vm.taxTotal) line('Tax', money(vm.taxTotal));
+      if (vm.kind !== 'quote') {
+        line('TOTAL', money(vm.total), true);
+        if (vm.kind !== 'order' && vm.template?.showBalanceDue !== false) {
+          line('Paid', money(vm.paid));
+          line('Balance Due', money(vm.balance), true);
+        }
+      } else {
+        line('QUOTE TOTAL', money(vm.total), true);
+      }
     }
-    if (vm.total != null) {
+    if (vm.total != null && vm.kind !== 'payslip') {
       ty += 4;
       doc.font(font).fontSize(baseFontSize - 1).fillColor('#373a44');
       doc.text(`Amount in words: ${this.amountInWords(Number(vm.total || 0), vm.currency || 'USD')}`, 40, ty, { width: right - 40 });

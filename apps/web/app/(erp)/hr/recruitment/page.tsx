@@ -1,13 +1,13 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import {
   AppstoreOutlined, CalendarOutlined, CheckCircleOutlined, DollarOutlined,
   PlusOutlined, ReloadOutlined, RiseOutlined, TeamOutlined, UserOutlined,
   FireOutlined, ClockCircleOutlined, SendOutlined,
 } from '@ant-design/icons';
-import { Button, DatePicker, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Tabs, Tag, Timeline, Col, Row } from 'antd';
+import { App, Button, Checkbox, Col, DatePicker, Drawer, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tabs, Tag, Timeline } from 'antd';
 import dayjs from 'dayjs';
 import { api } from '@/lib/api';
 import { Can } from '@/components/Can';
@@ -48,6 +48,7 @@ function useDepAndEmps() {
 
 // ---- Requisition Drawer ----
 function RequisitionDrawer({ open, onClose, onSaved, editing }: { open: boolean; onClose: () => void; onSaved: () => void; editing: any | null }) {
+  const { message } = App.useApp();
   const [form] = Form.useForm();
   const { departments } = useDepAndEmps();
   useEffect(() => {
@@ -102,6 +103,7 @@ function RequisitionDrawer({ open, onClose, onSaved, editing }: { open: boolean;
 
 // ---- Vacancy Drawer ----
 function VacancyDrawer({ open, onClose, onSaved, editing, requisitionId, preset }: { open: boolean; onClose: () => void; onSaved: () => void; editing: any | null; requisitionId?: string; preset?: any }) {
+  const { message } = App.useApp();
   const [form] = Form.useForm();
   const { departments } = useDepAndEmps();
   useEffect(() => {
@@ -158,7 +160,7 @@ function VacancyDrawer({ open, onClose, onSaved, editing, requisitionId, preset 
           <Col span={12}><Form.Item label="Currency" name="currency" initialValue="USD"><Select options={['USD', 'ZAR', 'ZWG', 'EUR', 'GBP'].map((c) => ({ label: c, value: c }))} /></Form.Item></Col>
           <Col span={12}><Form.Item label="Pay frequency" name="payFrequency" initialValue="MONTHLY"><Select options={['DAILY', 'WEEKLY', 'MONTHLY', 'ANNUAL'].map((f) => ({ label: f, value: f }))} /></Form.Item></Col>
         </Row>
-        <Form.Item label="Posting" name="internalOnly" valuePropName="checked" className="col-span-2"><input type="checkbox" className="accent-[#003366] mr-2" />Internal-only posting</Form.Item>
+        <Form.Item label="Posting" name="internalOnly" valuePropName="checked" className="col-span-2"><Checkbox>Internal-only posting</Checkbox></Form.Item>
       </Form>
     </Drawer>
   );
@@ -166,6 +168,7 @@ function VacancyDrawer({ open, onClose, onSaved, editing, requisitionId, preset 
 
 // ---- Candidate Drawer ----
 function CandidateDrawer({ open, onClose, onSaved, editing }: { open: boolean; onClose: () => void; onSaved: () => void; editing: any | null }) {
+  const { message } = App.useApp();
   const [form] = Form.useForm();
   useEffect(() => {
     if (!open) return;
@@ -221,6 +224,7 @@ function CandidateDrawer({ open, onClose, onSaved, editing }: { open: boolean; o
 
 // ---- Application Drawer (detail) ----
 function ApplicationDrawer({ app, onClose, onSaved }: { app: any | null; onClose: () => void; onSaved: () => void }) {
+  const { message } = App.useApp();
   async function doAction(a: string, extra?: any) {
     if (!app) return;
     try {
@@ -275,13 +279,15 @@ function ApplicationDrawer({ app, onClose, onSaved }: { app: any | null; onClose
 function canReject(app: any) { return app && app.status !== 'HIRED' && app.status !== 'REJECTED' && app.status !== 'WITHDRAWN'; }
 
 export default function RecruitmentPage() {
+  const { message } = App.useApp();
   const qc = useQueryClient();
-  const dash = useQuery({ queryKey: ['recruit', 'dashboard'], queryFn: () => api('/hr/recruitment/dashboard') });
-  const requisitions = useQuery({ queryKey: ['recruit', 'requisitions'], queryFn: () => api('/hr/recruitment/requisitions') });
-  const vacancies = useQuery({ queryKey: ['recruit', 'vacancies'], queryFn: () => api('/hr/recruitment/vacancies') });
-  const candidates = useQuery({ queryKey: ['recruit', 'candidates'], queryFn: () => api('/hr/recruitment/candidates') });
-  const applications = useQuery({ queryKey: ['recruit', 'applications'], queryFn: () => api('/hr/recruitment/applications') });
-  const offers = useQuery({ queryKey: ['recruit', 'offers'], queryFn: () => api('/hr/recruitment/offers') });
+  const dash = useQuery({ queryKey: ['recruit', 'dashboard'], queryFn: () => api('/hr/recruitment/dashboard'), placeholderData: keepPreviousData });
+  const requisitions = useQuery({ queryKey: ['recruit', 'requisitions'], queryFn: () => api('/hr/recruitment/requisitions'), placeholderData: keepPreviousData });
+  const vacancies = useQuery({ queryKey: ['recruit', 'vacancies'], queryFn: () => api('/hr/recruitment/vacancies'), placeholderData: keepPreviousData });
+  const candidates = useQuery({ queryKey: ['recruit', 'candidates'], queryFn: () => api('/hr/recruitment/candidates'), placeholderData: keepPreviousData });
+  const applications = useQuery({ queryKey: ['recruit', 'applications'], queryFn: () => api('/hr/recruitment/applications'), placeholderData: keepPreviousData });
+  const offers = useQuery({ queryKey: ['recruit', 'offers'], queryFn: () => api('/hr/recruitment/offers'), placeholderData: keepPreviousData });
+  const interviews = useQuery({ queryKey: ['recruit', 'interviews'], queryFn: () => api('/hr/recruitment/interviews'), placeholderData: keepPreviousData });
 
   const [tab, setTab] = useState('dashboard');
   const [reqDrawer, setReqDrawer] = useState(false);
@@ -427,49 +433,51 @@ export default function RecruitmentPage() {
         </div>
       </div>
 
-      {tab === 'dashboard' && (
-        <div className="nex-card mb-5 p-5">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatCard icon={<AppstoreOutlined />} label="Open Vacancies" value={d.openVacancies ?? 0} hint="Active openings" color="#1d5fb5" />
-            <StatCard icon={<TeamOutlined />} label="Active Candidates" value={d.activeCandidates ?? 0} hint="In pipeline" color="#7c3aed" />
-            <StatCard icon={<CalendarOutlined />} label="Interviews This Week" value={d.interviewsThisWeek ?? 0} hint="Scheduled" color="#ea580c" />
-            <StatCard icon={<DollarOutlined />} label="Offers Pending" value={d.offersPending ?? 0} hint="Awaiting response" color="#16a34a" />
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
-            <StatCard icon={<RiseOutlined />} label="Applications This Month" value={d.applicationsThisMonth ?? 0} color="#2563eb" />
-            <StatCard icon={<ClockCircleOutlined />} label="Avg Time to Hire" value={`${d.timeToHire ?? 0}d`} color="#64748b" />
-            <StatCard icon={<FireOutlined />} label="Awaiting Approval" value={d.positionsAwaitingApproval ?? 0} color="#f59e0b" />
-            <StatCard icon={<CheckCircleOutlined />} label="Offers Accepted" value={d.offersAcceptedHires ?? 0} color="#16a34a" />
-          </div>
-          <div className="grid grid-cols-2 gap-6 mt-6">
-            <div className="nex-card p-4">
-              <div className="text-[13px] font-semibold text-[#171a2e] mb-3">Hiring funnel</div>
-              <div className="space-y-2">
-                {PIPELINE.map((s) => (
-                  <div key={s.code} className="flex items-center gap-3">
-                    <span className="w-28 text-[12px] text-[#64748b]">{s.label}</span>
-                    <div className="flex-1 h-2.5 rounded-full" style={{ background: `${s.color}1f` }}><div className="h-2.5 rounded-full" style={{ width: `${Math.min(100, ((stageTotals[s.code] || 0) / Math.max(1, (stageTotals.APPLIED || 1)) * 100))}%`, background: s.color }} /></div>
-                    <span className="w-8 text-right text-[12px] font-semibold text-[#171a2e]">{stageTotals[s.code] || 0}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="nex-card p-4">
-              <div className="text-[13px] font-semibold text-[#171a2e] mb-3">Needs attention</div>
-              <div className="space-y-2.5">
-                <div className="flex items-center gap-2 text-[13px] text-[#344054]"><ClockCircleOutlined className="text-[#f59e0b]" /> {attention.interviewsFeedbackPending || 0} interviews need feedback</div>
-                <div className="flex items-center gap-2 text-[13px] text-[#344054]"><DollarOutlined className="text-[#e11d48]" /> {attention.offersExpiringSoon || 0} offers expire this week</div>
-                <div className="flex items-center gap-2 text-[13px] text-[#344054]"><FireOutlined className="text-[#0ea5e9]" /> {attention.requisitionsAwaitingApproval || 0} requisitions awaiting approval</div>
-                <div className="flex items-center gap-2 text-[13px] text-[#344054]"><UserOutlined className="text-[#64748b]" /> {attention.staleCandidates || 0} candidates with no activity for 7 days</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Dashboard content is rendered inside the Dashboard tab (tabs are at the top). */}
 
       <Tabs activeKey={tab} onChange={setTab}
         items={[
-          { key: 'dashboard', label: 'Dashboard', children: null },
+          { key: 'dashboard', label: 'Dashboard', children: (
+            <div className="nex-card mb-5 p-5">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <StatCard icon={<AppstoreOutlined />} label="Open Vacancies" value={d.openVacancies ?? 0} hint="Active openings" color="#1d5fb5" onClick={() => setTab('vacancies')} />
+                <StatCard icon={<TeamOutlined />} label="Active Candidates" value={d.activeCandidates ?? 0} hint="In pipeline" color="#7c3aed" onClick={() => setTab('candidates')} />
+                <StatCard icon={<CalendarOutlined />} label="Interviews This Week" value={d.interviewsThisWeek ?? 0} hint="Scheduled" color="#ea580c" onClick={() => setTab('more')} />
+                <StatCard icon={<DollarOutlined />} label="Offers Pending" value={d.offersPending ?? 0} hint="Awaiting response" color="#16a34a" onClick={() => setTab('more')} />
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+                <StatCard icon={<RiseOutlined />} label="Applications This Month" value={d.applicationsThisMonth ?? 0} color="#2563eb" onClick={() => setTab('applications')} />
+                <StatCard icon={<ClockCircleOutlined />} label="Avg Time to Hire" value={d.timeToHire != null && Number(d.timeToHire) > 0 ? `${d.timeToHire}d` : '—'} color="#64748b" />
+                <StatCard icon={<FireOutlined />} label="Awaiting Approval" value={d.positionsAwaitingApproval ?? 0} color="#f59e0b" onClick={() => setTab('requisitions')} />
+                <StatCard icon={<CheckCircleOutlined />} label="Offers Accepted" value={d.offersAcceptedHires ?? 0} color="#16a34a" onClick={() => setTab('more')} />
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+                <div className="nex-card p-4">
+                  <div className="text-[13px] font-semibold text-[#171a2e] mb-3">Hiring funnel</div>
+                  <div className="space-y-2">
+                    {PIPELINE.map((s) => (
+                      <button key={s.code} onClick={() => { setStageFilter(s.code); setTab('applications'); }} className="w-full flex items-center gap-3 hover:bg-[#f7f8fc] rounded px-1 py-0.5">
+                        <span className="w-28 text-left text-[12px] text-[#64748b]">{s.label}</span>
+                        <div className="flex-1 h-2.5 rounded-full" style={{ background: `${s.color}1f` }}><div className="h-2.5 rounded-full" style={{ width: `${Math.min(100, ((stageTotals[s.code] || 0) / Math.max(1, (stageTotals.APPLIED || 1)) * 100))}%`, background: s.color }} /></div>
+                        <span className="w-8 text-right text-[12px] font-semibold text-[#171a2e]">{stageTotals[s.code] || 0}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="nex-card p-4">
+                  <div className="text-[13px] font-semibold text-[#171a2e] mb-3">Needs attention</div>
+                  {((attention.interviewsFeedbackPending || 0) + (attention.offersExpiringSoon || 0) + (attention.requisitionsAwaitingApproval || 0) + (attention.staleCandidates || 0)) > 0 ? (
+                    <div className="space-y-2.5">
+                      {attention.interviewsFeedbackPending > 0 && <button onClick={() => setTab('more')} className="w-full flex items-center gap-2 text-[13px] text-[#344054] hover:text-[#003366]"><ClockCircleOutlined className="text-[#f59e0b]" /> {attention.interviewsFeedbackPending} interviews need feedback</button>}
+                      {attention.offersExpiringSoon > 0 && <button onClick={() => setTab('more')} className="w-full flex items-center gap-2 text-[13px] text-[#344054] hover:text-[#003366]"><DollarOutlined className="text-[#e11d48]" /> {attention.offersExpiringSoon} offers expire this week</button>}
+                      {attention.requisitionsAwaitingApproval > 0 && <button onClick={() => setTab('requisitions')} className="w-full flex items-center gap-2 text-[13px] text-[#344054] hover:text-[#003366]"><FireOutlined className="text-[#0ea5e9]" /> {attention.requisitionsAwaitingApproval} requisitions awaiting approval</button>}
+                      {attention.staleCandidates > 0 && <button onClick={() => setTab('candidates')} className="w-full flex items-center gap-2 text-[13px] text-[#344054] hover:text-[#003366]"><UserOutlined className="text-[#64748b]" /> {attention.staleCandidates} candidates with no activity for 7 days</button>}
+                    </div>
+                  ) : <div className="text-[13px] text-[#64748b] py-3">You're all caught up.</div>}
+                </div>
+              </div>
+            </div>
+          ) },
           { key: 'requisitions', label: `Requisitions (${requisitions.data?.length || 0})`, children: <div className="nex-card"><Table rowKey="id" loading={requisitions.isLoading} dataSource={requisitions.data || []} columns={reqCols} pagination={false} /></div> },
           { key: 'vacancies', label: `Vacancies (${vacancies.data?.length || 0})`, children: <div className="nex-card">{vacancies.data?.length ? <Table rowKey="id" loading={vacancies.isLoading} dataSource={vacancies.data || []} columns={vacCols} pagination={false} /> : <EmptyState title="No vacancies yet." description="Create an approved hiring requisition to open your first vacancy." />}</div> },
           { key: 'candidates', label: `Candidates (${candidates.data?.length || 0})`, children: <div className="nex-card">{candidates.data?.length ? <Table rowKey="id" loading={candidates.isLoading} dataSource={candidates.data || []} columns={candCols} pagination={false} /> : <EmptyState title="No candidates found." />}</div> },
@@ -484,6 +492,17 @@ export default function RecruitmentPage() {
           ) },
           { key: 'more', label: 'More', children: (
             <div className="grid grid-cols-1 gap-4">
+              <div className="nex-card p-4">
+                <div className="text-[14px] font-semibold text-[#171a2e] mb-3 flex items-center gap-2"><CalendarOutlined className="text-[#7c3aed]" /> Interviews</div>
+                <Table rowKey="id" loading={interviews.isLoading} dataSource={interviews.data || []} pagination={false} locale={{ emptyText: <EmptyState title="No interviews scheduled." /> }} columns={[
+                  { title: 'Candidate', render: (_v, r) => r.application?.candidate?.name || '—' },
+                  { title: 'Vacancy', render: (_v, r) => r.application?.vacancy?.title || '—' },
+                  { title: 'Type', dataIndex: 'interviewType', width: 120 },
+                  { title: 'Scheduled', dataIndex: 'scheduledAt', width: 160, render: (v) => (v ? fmtDateTime(v) : '—') },
+                  { title: 'Status', dataIndex: 'status', width: 120, render: (v) => statusTag(v) },
+                  { title: 'Result', dataIndex: 'result', width: 120, render: (v) => v || '—' },
+                ] as ColumnsType<any>} />
+              </div>
               <div className="nex-card p-4">
                 <div className="text-[14px] font-semibold text-[#171a2e] mb-3 flex items-center gap-2"><SendOutlined className="text-[#1d5fb5]" /> Offers</div>
                 <Table rowKey="id" loading={offers.isLoading} dataSource={offers.data || []} columns={offerCols} pagination={false} />

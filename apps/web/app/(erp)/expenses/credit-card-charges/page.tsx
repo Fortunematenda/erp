@@ -73,7 +73,7 @@ export default function CardChargesPage() {
     <div className="nex-fade">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <div><h1 className="text-[26px] font-bold text-[#171a2e]">Credit Card Charges</h1><p className="text-[13px] text-[#64748b]">Track card spending, balances and payments</p></div>
-        <Space><Dropdown menu={{ items: ['spend-by-account', 'spend-by-vendor', 'spend-by-project', 'missing-receipts'].map((k) => ({ key: k, label: k.replace(/-/g, ' ').replace(/^spend/, 'Spend capital').replace(/spend/, 'Spend') })), onClick: ({ key }) => setReports(key) }} trigger={['click']}><Button icon={<FileTextOutlined />}>Reports ▾</Button></Dropdown><Button icon={<ReloadOutlined />} onClick={refresh} /><Button icon={<PayCircleOutlined />} onClick={() => setPayCard(true)}>Pay Card</Button><Button type="primary" icon={<PlusOutlined />} onClick={() => setAddCharge(true)}>+ Add Charge</Button></Space>
+        <Space><Dropdown menu={{ items: ['spend-by-account', 'spend-by-vendor', 'spend-by-project', 'missing-receipts'].map((k) => ({ key: k, label: k.replace(/-/g, ' ').replace(/^spend/, 'Spend capital').replace(/spend/, 'Spend') })), onClick: ({ key }) => setReports(key) }} trigger={['click']}><Button icon={<FileTextOutlined />}>Reports ▾</Button></Dropdown><Button icon={<ReloadOutlined />} onClick={refresh} /><Button icon={<PayCircleOutlined />} onClick={() => setPayCard(true)}>Pay Card</Button><Button type="primary" icon={<PlusOutlined />} onClick={() => setAddCharge(true)}>Add Charge</Button></Space>
       </div>
 
       {cardList.length === 0 ? (
@@ -81,7 +81,7 @@ export default function CardChargesPage() {
           <CreditCardOutlined className="text-4xl text-[#c7ccdd] mb-3" />
           <div className="text-[17px] font-bold text-[#171a2e]">No credit cards yet</div>
           <p className="text-[13px] text-[#64748b] mt-1 mb-5 max-w-sm mx-auto">Add a corporate card to track charges, payments, receipts and reconciliation.</p>
-          <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setAddCard(true)}>+ Add Credit Card</Button>
+          <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setAddCard(true)}>Add Credit Card</Button>
         </div>
       ) : (
         <>

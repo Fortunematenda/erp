@@ -1,7 +1,7 @@
 'use client';
 import { useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { useQuery, useQueryClient, keepPreviousData, useIsFetching } from '@tanstack/react-query';
 import { Alert, Button, DatePicker, Drawer, Dropdown, Input, InputNumber, MenuProps, Modal, Popconfirm, Progress, Select, Space, Table, Tabs, Tag, Tooltip, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { BarChartOutlined, BugOutlined, CaretRightOutlined, CopyOutlined, DownOutlined, EditOutlined, ExportOutlined, EyeOutlined, FileDoneOutlined, PlusOutlined, ReloadOutlined, RocketOutlined, SendOutlined, StopOutlined, TeamOutlined, ThunderboltOutlined, CheckCircleOutlined, CloseOutlined } from '@ant-design/icons';
@@ -32,10 +32,26 @@ function deadlineTone(deadline: string | null | undefined, done: boolean, window
   return { tone: 'grey', label: `DUE ${fmtDate(deadline)}` };
 }
 
+function QaCard({ label, value, onClick }: { label: string; value: any; onClick?: () => void }) {
+  return <button onClick={onClick} className="nex-card border rounded-lg p-4 text-center hover:border-[#c7d2fe] transition"><div className="text-[12px] font-semibold text-[#64748b]">{label}</div><div className="text-[20px] font-bold text-[#171a2e]">{value}</div></button>;
+}
+function QaEmpty({ hasFilters, onClear }: { hasFilters: boolean; onClear: () => void }) {
+  return (
+    <div className="text-center py-14">
+      <div className="text-[15px] font-semibold text-[#171a2e]">{hasFilters ? 'No assessments match the selected filters.' : 'No assessments are ready for QA'}</div>
+      {!hasFilters && <div className="text-[13px] text-[#64748b] mt-1 max-w-md mx-auto">Assessments will appear here after employees submit their assessments and manager reviews are completed.</div>}
+      {hasFilters && <Button className="mt-4" onClick={onClear}>Clear filters</Button>}
+    </div>
+  );
+}
+
 export default function PerformancePage() {
   const qc = useQueryClient();
   const params = useSearchParams();
+  const router = useRouter();
   const meta = useMeta();
+  const fetching = useIsFetching();
+  const [busy, setBusy] = useState<string | null>(null);
   const [tab, setTab] = useState(params.get('tab') || 'dashboard');
   const [tplDrawer, setTplDrawer] = useState(false);
   const [editingTpl, setEditingTpl] = useState<any>(null);
@@ -46,18 +62,38 @@ export default function PerformancePage() {
   const [reviewMode, setReviewMode] = useState<any>('VIEW');
   const [planDrawer, setPlanDrawer] = useState(false);
   const [editingPlan, setEditingPlan] = useState<any>(null);
-  const [fDept, setFDept] = useState('');
+  const [fDept, setFDept] = useState(params.get('departmentId') || '');
   const [fStatus, setFStatus] = useState('');
-  const [fCycle, setFCycle] = useState('');
+  const [fCycle, setFCycle] = useState(params.get('cycleId') || '');
   const [fSearch, setFSearch] = useState('');
-  const [missingDept, setMissingDept] = useState<{ departmentId: string } | null>(null);
+  const [fSubmission, setFSubmission] = useState(params.get('submissionStatus') || (params.get('missing') === '1' ? 'MISSING' : ''));
+  const [fIssue, setFIssue] = useState(params.get('issue') || (params.get('missingTemplate') === '1' ? 'NO_ACTIVE_TEMPLATE' : ''));
+  const [missingDept, setMissingDept] = useState<{ departmentId: string } | null>(params.get('issue') ? { departmentId: params.get('departmentId') || '' } : null);
+  const [qaF, setQaF] = useState<any>({});
 
-  const dash = useQuery({ queryKey: ['/performance/dashboard', fDept], queryFn: () => api(`/performance/dashboard${fDept ? `?departmentId=${fDept}` : ''}`) });
-  const attention = useQuery({ queryKey: ['/performance/needs-attention'], queryFn: () => api('/performance/needs-attention') });
-  const templates = useQuery({ queryKey: ['/performance/kpi-templates'], queryFn: () => api('/performance/kpi-templates') });
-  const cycles = useQuery({ queryKey: ['/performance/cycles'], queryFn: () => api('/performance/cycles') });
-  const assessments = useQuery({ queryKey: ['/performance/assessments', fCycle], queryFn: () => api(`/performance/assessments${fCycle ? `?cycleId=${fCycle}` : ''}`) });
-  const incentives = useQuery({ queryKey: ['/performance/incentives'], queryFn: () => api('/performance/incentives') });
+  const assessmentQs = new URLSearchParams();
+  if (fCycle) assessmentQs.set('cycleId', fCycle);
+  if (fDept) assessmentQs.set('departmentId', fDept);
+  if (fSubmission) assessmentQs.set('submissionStatus', fSubmission);
+  if (fIssue) assessmentQs.set('issue', fIssue);
+  const assessmentQuery = assessmentQs.toString();
+
+  const dash = useQuery({ queryKey: ['/performance/dashboard', fDept], queryFn: () => api(`/performance/dashboard${fDept ? `?departmentId=${fDept}` : ''}`), placeholderData: keepPreviousData });
+  const attention = useQuery({ queryKey: ['/performance/needs-attention'], queryFn: () => api('/performance/needs-attention'), placeholderData: keepPreviousData });
+  const templates = useQuery({ queryKey: ['/performance/kpi-templates'], queryFn: () => api('/performance/kpi-templates'), placeholderData: keepPreviousData });
+  const cycles = useQuery({ queryKey: ['/performance/cycles'], queryFn: () => api('/performance/cycles'), placeholderData: keepPreviousData });
+  const assessments = useQuery({ queryKey: ['/performance/assessments', assessmentQuery], queryFn: () => api(`/performance/assessments${assessmentQuery ? `?${assessmentQuery}` : ''}`), placeholderData: keepPreviousData });
+  const qaQs = new URLSearchParams();
+  if (qaF.search) qaQs.set('search', qaF.search);
+  if (qaF.cycleId) qaQs.set('cycleId', qaF.cycleId);
+  if (qaF.departmentId) qaQs.set('departmentId', qaF.departmentId);
+  if (qaF.qaStatus) qaQs.set('qaStatus', qaF.qaStatus);
+  if (qaF.reviewerId) qaQs.set('reviewerId', qaF.reviewerId);
+  if (qaF.flagged) qaQs.set('flagged', 'true');
+  if (qaF.overdue) qaQs.set('overdue', 'true');
+  const qaQueueQ = useQuery({ queryKey: ['/performance/qa/queue', qaQs.toString()], queryFn: () => api(`/performance/qa/queue${qaQs.toString() ? `?${qaQs.toString()}` : ''}`), placeholderData: keepPreviousData });
+  const qaSummaryQ = useQuery({ queryKey: ['/performance/qa/summary'], queryFn: () => api('/performance/qa/summary'), placeholderData: keepPreviousData });
+  const incentives = useQuery({ queryKey: ['/performance/incentives'], queryFn: () => api('/performance/incentives'), placeholderData: keepPreviousData });
   const plans = useQuery({ queryKey: ['/performance/incentive-plans'], queryFn: () => api('/performance/incentive-plans') });
   const bands = useQuery({ queryKey: ['/performance/bands'], queryFn: () => api('/performance/bands') });
   const repDept = useQuery({ queryKey: ['perf-rep-dept', fCycle], queryFn: () => api(`/performance/reports/by-department${fCycle ? `?cycleId=${fCycle}` : ''}`), enabled: tab === 'reports' });
@@ -66,15 +102,32 @@ export default function PerformancePage() {
   const repInc = useQuery({ queryKey: ['perf-rep-inc', fCycle], queryFn: () => api(`/performance/reports/incentives${fCycle ? `?cycleId=${fCycle}` : ''}`), enabled: tab === 'reports' });
 
   function refresh() {
-    ['/performance/dashboard', '/performance/needs-attention', '/performance/kpi-templates', '/performance/cycles', '/performance/assessments', '/performance/incentives', '/performance/incentive-plans'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+    ['/performance/dashboard', '/performance/needs-attention', '/performance/kpi-templates', '/performance/cycles', '/performance/assessments', '/performance/incentives', '/performance/incentive-plans', '/performance/qa/queue', '/performance/qa/summary'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+  }
+
+  function clearIssueFilter() {
+    setFSubmission(''); setFIssue('');
+    const url = new URL(window.location.href);
+    ['submissionStatus', 'issue', 'missing', 'missingTemplate'].forEach((k) => url.searchParams.delete(k));
+    router.replace(`${url.pathname}${url.searchParams.toString() ? `?${url.searchParams.toString()}` : ''}`);
+  }
+
+  async function startAssessment(r: any) {
+    try {
+      const active = fCycle || (cycles.data || []).find((x: any) => ['OPEN', 'EMPLOYEE_SUBMISSION', 'MANAGER_REVIEW'].includes(x.status))?.id;
+      if (!active) { message.error('Select a performance cycle first'); return; }
+      const a = await api('/performance/assessments', { method: 'POST', body: JSON.stringify({ cycleId: active, employeeId: r.employeeId }) });
+      message.success('Assessment created'); refresh(); setReviewId(a.id); setReviewMode('VIEW');
+    } catch (e: any) { message.error(e.message); }
   }
 
   const d = dash.data;
   const c = d?.counts || {};
 
   // ---------- Template actions ----------
-  async function activateTpl(id: string) { try { await api(`/performance/kpi-templates/${id}/activate`, { method: 'POST' }); message.success('Template activated'); refresh(); } catch (e: any) { message.error(e.message); } }
-  async function duplicateTpl(t: any) { try { const copy = await api(`/performance/kpi-templates/${t.id}/duplicate`, { method: 'POST', body: JSON.stringify({ name: `${t.name} (Copy)` }) }); message.success('Duplicated as DRAFT'); refresh(); setEditingTpl(copy); setTplDrawer(true); } catch (e: any) { message.error(e.message); } }
+  async function run(key: string, fn: () => Promise<any>) { if (busy) return; setBusy(key); try { await fn(); } catch (e: any) { message.error(e.message); } finally { setBusy(null); } }
+  async function activateTpl(id: string) { return run(`tpl-act-${id}`, async () => { await api(`/performance/kpi-templates/${id}/activate`, { method: 'POST' }); message.success('Template activated'); refresh(); }); }
+  async function duplicateTpl(t: any) { return run(`tpl-dup-${t.id}`, async () => { const copy = await api(`/performance/kpi-templates/${t.id}/duplicate`, { method: 'POST', body: JSON.stringify({ name: `${t.name} (Copy)` }) }); message.success('Duplicated as DRAFT'); refresh(); setEditingTpl(copy); setTplDrawer(true); }); }
 
   // ---------- Templates table ----------
   const tplCols: ColumnsType<any> = [
@@ -95,8 +148,8 @@ export default function PerformancePage() {
       <RowActionsMenu items={[
         { key: 'view', label: 'View details', icon: <EyeOutlined />, onClick: () => setTplDetailsId(r.id) },
         { key: 'edit', label: 'Edit', icon: <EditOutlined />, permission: 'performance.templates.manage', onClick: () => { setEditingTpl(r); setTplDrawer(true); } },
-        { key: 'dup', label: 'Duplicate template', icon: <CopyOutlined />, permission: 'performance.templates.manage', onClick: () => duplicateTpl(r) },
-        { key: 'act', label: 'Activate', icon: <CaretRightOutlined />, hidden: r.status !== 'DRAFT', permission: 'performance.templates.manage', onClick: () => activateTpl(r.id) },
+        { key: 'dup', label: 'Duplicate template', icon: <CopyOutlined />, permission: 'performance.templates.manage', disabled: busy === `tpl-dup-${r.id}`, onClick: () => duplicateTpl(r) },
+        { key: 'act', label: 'Activate', icon: <CaretRightOutlined />, hidden: r.status !== 'DRAFT', permission: 'performance.templates.manage', disabled: busy === `tpl-act-${r.id}`, onClick: () => activateTpl(r.id) },
         { key: 'deact', label: 'Deactivate', icon: <StopOutlined />, hidden: r.status !== 'ACTIVE', permission: 'performance.templates.manage', onClick: async () => { try { await api(`/performance/kpi-templates/${r.id}/status`, { method: 'POST', body: JSON.stringify({ status: 'INACTIVE' }) }); message.success('Deactivated'); refresh(); } catch (e: any) { message.error(e.message); } } },
         { key: 'arch', label: 'Archive', icon: <StopOutlined />, danger: true, hidden: r.status === 'ARCHIVED', permission: 'performance.templates.manage', onClick: async () => { try { await api(`/performance/kpi-templates/${r.id}/status`, { method: 'POST', body: JSON.stringify({ status: 'ARCHIVED' }) }); message.success('Template archived — historical assessments preserved'); refresh(); } catch (e: any) { message.error(e.message); } } },
       ]} />
@@ -136,7 +189,7 @@ export default function PerformancePage() {
     { title: 'Department', width: 120, render: (_v, r) => r.employee?.department?.name || '—' },
     { title: 'Job Role', width: 130, render: (_v, r) => r.employee?.position || '—' },
     { title: 'Cycle', width: 130, render: (_v, r) => r.cycle?.name },
-    { title: 'Template', width: 130, render: (_v, r) => <span className="text-[12px]">{r.templateName} v{r.version?.version}</span> },
+    { title: 'Template', width: 130, render: (_v, r) => <span className="text-[12px]">{r.templateName ? `${r.templateName}${r.version?.version ? ` v${r.version.version}` : ''}` : (r.missingTemplate ? 'No active template' : '—')}</span> },
     { title: 'Employee Submission', width: 165, render: (_v, r) => {
       const o = deadlineTone(r.cycle?.employeeDeadline, !!r.employeeSubmittedAt);
       return r.excludedReason ? <SoftBadge tone="purple" dotless>EXCLUDED</SoftBadge> : r.employeeSubmittedAt ? <SoftBadge tone="green" dotless>SUBMITTED</SoftBadge> : o ? <Tooltip title={`Deadline ${fmtDate(r.cycle?.employeeDeadline)}`}><SoftBadge tone={o.tone} dotless>{o.label}</SoftBadge></Tooltip> : <SoftBadge tone="grey" dotless>NOT SUBMITTED</SoftBadge>;
@@ -148,9 +201,15 @@ export default function PerformancePage() {
     { title: 'QA', width: 110, render: (_v, r) => r.qaSubmittedAt ? <SoftBadge tone="green" dotless>SUBMITTED</SoftBadge> : r.managerSubmittedAt ? <SoftBadge tone="amber" dotless>PENDING</SoftBadge> : <SoftBadge tone="grey" dotless>—</SoftBadge> },
     { title: 'Score', width: 85, align: 'right', render: (_v, r) => r.totalScore != null ? <span className="font-bold text-[#171a2e]">{Number(r.totalScore).toFixed(1)}%</span> : '—' },
     { title: 'Result', width: 90, render: (_v, r) => r.result ? <SoftBadge tone={r.result === 'PASS' ? 'green' : 'red'} dotless>{r.result}</SoftBadge> : '—' },
-    { title: 'Status', width: 150, render: (_v, r) => <SoftBadge tone={ASSESS_STATUS_TONE[r.status]} dotless>{r.status.replace(/_/g, ' ')}</SoftBadge> },
+    { title: 'Status', width: 150, render: (_v, r) => r.missingTemplate ? <SoftBadge tone="red" dotless>NO KPI TEMPLATE</SoftBadge> : <SoftBadge tone={ASSESS_STATUS_TONE[r.status]} dotless>{(r.status || '').replace(/_/g, ' ')}</SoftBadge> },
     { ...ACTIONS_COL, render: (_v, r) => (
-      <RowActionsMenu items={[
+      <RowActionsMenu items={r.missingTemplate ? [
+        { key: 'configure', label: 'Configure KPI Template', icon: <PlusOutlined />, permission: 'performance.templates.manage', onClick: () => { setTab('templates'); setEditingTpl(null); setMissingDept({ departmentId: r.departmentId }); setTplDrawer(true); } },
+        { key: 'dept', label: 'View Department', onClick: () => router.push(`/hr?tab=departments`) },
+      ] : !r.assessmentId ? [
+        { key: 'start', label: 'Start Assessment', icon: <FileDoneOutlined />, permission: ['performance.cycles.manage', 'hr.performance.manage'], onClick: () => startAssessment(r) },
+        { key: 'emp', label: 'View Employee', onClick: () => router.push(`/hr/employees/${r.employeeId}`) },
+      ] : [
         { key: 'view', label: 'View', icon: <EyeOutlined />, onClick: () => { setReviewId(r.id); setReviewMode('VIEW'); } },
         { key: 'assess', label: 'Assess', icon: <FileDoneOutlined />, hidden: !(!r.employeeSubmittedAt && (modeOf(r) === 'EMPLOYEE')), onClick: () => { setReviewId(r.id); setReviewMode('EMPLOYEE'); } },
         { key: 'review', label: 'Review', icon: <FileDoneOutlined />, hidden: !(r.employeeSubmittedAt && !r.managerSubmittedAt && modeOf(r) === 'MANAGER'), onClick: () => { setReviewId(r.id); setReviewMode('MANAGER'); } },
@@ -204,18 +263,35 @@ export default function PerformancePage() {
     ) },
   ];
 
-  const qaQueue = useMemo(() => (assessments.data || []).filter((r: any) => r.managerSubmittedAt && !r.qaSubmittedAt && !r.excludedReason), [assessments.data]);
+  const qaRows = qaQueueQ.data || [];
+  const qaS = qaSummaryQ.data || {};
+  const QA_STATUS_TONE: Record<string, string> = { READY_FOR_QA: 'amber', IN_REVIEW: 'blue', CHANGES_REQUESTED: 'red', APPROVED: 'green', FINALIZED: 'purple' };
+  const qaLabel = (s: string) => ({ READY_FOR_QA: 'Ready for QA', IN_REVIEW: 'In Review', CHANGES_REQUESTED: 'Changes Requested', APPROVED: 'Approved', FINALIZED: 'Finalized' } as any)[s] || s;
 
-  const qaCols = [
-    { title: 'Employee', render: (_v: any, r: any) => `${r.employee?.firstName} ${r.employee?.lastName}` },
-    { title: 'Department', render: (_v: any, r: any) => r.employee?.department?.name || '—' },
-    { title: 'Cycle', render: (_v: any, r: any) => r.cycle?.name },
-    { title: 'Manager Review', width: 130, render: () => <SoftBadge tone="green" dotless>SUBMITTED</SoftBadge> },
-    { title: 'QA', width: 130, render: (_v: any, r: any) => deadlineTone(r.cycle?.qaDeadline, false) ? <SoftBadge tone={deadlineTone(r.cycle?.qaDeadline, false)!.tone} dotless>{deadlineTone(r.cycle?.qaDeadline, false)!.label}</SoftBadge> : <SoftBadge tone="amber" dotless>AWAITING QA</SoftBadge> },
-    { title: 'Score so far', width: 100, align: 'right', render: (_v: any, r: any) => r.totalScore != null ? `${Number(r.totalScore).toFixed(1)}%` : '—' },
-    { ...ACTIONS_COL, render: (_v: any, r: any) => (
+  async function qaStart(r: any) { if (busy) return; setBusy(`qa-start-${r.id}`); try { await api(`/performance/assessments/${r.id}/qa-start`, { method: 'POST' }); message.success('QA review started'); refresh(); setReviewId(r.id); setReviewMode('QA'); } catch (e: any) { message.error(e.message); } finally { setBusy(null); } }
+  async function qaRequestChanges(r: any) { const reason = window.prompt('Reason for requesting changes?'); if (!reason) return; if (busy) return; setBusy(`qa-changes-${r.id}`); try { await api(`/performance/assessments/${r.id}/qa-request-changes`, { method: 'POST', body: JSON.stringify({ reason }) }); message.success('Changes requested'); refresh(); } catch (e: any) { message.error(e.message); } finally { setBusy(null); } }
+  async function qaApprove(r: any) { if (busy) return; setBusy(`qa-approve-${r.id}`); try { await api(`/performance/assessments/${r.id}/approve`, { method: 'POST', body: JSON.stringify({}) }); message.success('QA approved'); refresh(); } catch (e: any) { message.error(e.message); } finally { setBusy(null); } }
+  async function qaFinalize(r: any) { if (busy) return; setBusy(`qa-finalize-${r.id}`); try { if (r.status === 'PENDING_APPROVAL') await api(`/performance/assessments/${r.id}/approve`, { method: 'POST', body: JSON.stringify({}) }); await api(`/performance/assessments/${r.id}/lock`, { method: 'POST' }); message.success('Assessment finalized'); refresh(); } catch (e: any) { message.error(e.message); } finally { setBusy(null); } }
+
+  const qaCols: ColumnsType<any> = [
+    { title: 'Employee', render: (_v, r) => <a className="text-[13px] font-medium text-[#171a2e]" onClick={() => { setReviewId(r.id); setReviewMode('QA'); }}>{r.employee?.preferredName || `${r.employee?.firstName} ${r.employee?.lastName}`}<div className="text-[11px] text-[#94a3b8]">{r.employee?.employeeNo}</div></a> },
+    { title: 'Department', width: 140, render: (_v, r) => r.department || '—' },
+    { title: 'Cycle', width: 140, render: (_v, r) => r.cycle?.name },
+    { title: 'Manager Score', dataIndex: 'managerScore', width: 110, align: 'right', render: (v) => v != null ? `${Number(v).toFixed(1)}%` : '—' },
+    { title: 'Evidence', width: 120, render: (_v, r) => r.evidence?.required ? (r.evidence.complete ? <SoftBadge tone="green" dotless>Complete</SoftBadge> : <SoftBadge tone="amber" dotless>Missing {r.evidence.missing}</SoftBadge>) : <SoftBadge tone="grey" dotless>N/A</SoftBadge> },
+    { title: 'QA Status', width: 170, render: (_v, r) => <Space size={4}><SoftBadge tone={QA_STATUS_TONE[r.qaStatus]} dotless>{qaLabel(r.qaStatus)}</SoftBadge>{r.flagged && <Tooltip title={`Flagged: ${r.variance != null ? `variance ${r.variance > 0 ? '+' : ''}${Number(r.variance).toFixed(1)}%` : 'evidence / critical KPI'}`}><BugOutlined className="text-[#dc2626]" /></Tooltip>}</Space> },
+    { title: 'Final Score', dataIndex: 'finalScore', width: 100, align: 'right', render: (v) => v != null ? <span className="font-bold">{Number(v).toFixed(1)}%</span> : '—' },
+    { title: 'Reviewer', dataIndex: 'qaReviewer', width: 140, render: (v) => v || '—' },
+    { title: 'Due Date', width: 130, render: (_v, r) => r.dueDate ? <span className={r.overdue ? 'text-[#dc2626] font-medium' : ''}>{fmtDate(r.dueDate)}{r.overdue ? ' · overdue' : ''}</span> : '—' },
+    { ...ACTIONS_COL, render: (_v, r) => (
       <RowActionsMenu items={[
-        { key: 'qa', label: 'QA Review', icon: <EyeOutlined />, permission: 'performance.qa.review', onClick: () => { setReviewId(r.id); setReviewMode('QA'); } },
+        { key: 'view', label: 'View Assessment', icon: <EyeOutlined />, onClick: () => { setReviewId(r.id); setReviewMode('VIEW'); } },
+        { key: 'start', label: 'Start QA Review', icon: <FileDoneOutlined />, hidden: r.qaStatus !== 'READY_FOR_QA', permission: 'performance.qa.review', disabled: busy === `qa-start-${r.id}`, onClick: () => qaStart(r) },
+        { key: 'continue', label: 'Continue Review', icon: <FileDoneOutlined />, hidden: r.qaStatus !== 'IN_REVIEW', permission: 'performance.qa.review', onClick: () => { setReviewId(r.id); setReviewMode('QA'); } },
+        { key: 'changes', label: 'Request Changes', icon: <CloseOutlined />, danger: true, hidden: !['READY_FOR_QA', 'IN_REVIEW'].includes(r.qaStatus), permission: 'performance.qa.review', disabled: busy === `qa-changes-${r.id}`, onClick: () => qaRequestChanges(r) },
+        { key: 'approve', label: 'Approve QA', icon: <CheckCircleOutlined />, hidden: r.status !== 'PENDING_APPROVAL', permission: 'performance.approve', disabled: busy === `qa-approve-${r.id}`, onClick: () => qaApprove(r) },
+        { key: 'finalize', label: 'Finalize', icon: <CheckCircleOutlined />, hidden: !['PENDING_APPROVAL', 'APPROVED'].includes(r.status), permission: 'performance.approve', disabled: busy === `qa-finalize-${r.id}`, onClick: () => qaFinalize(r) },
+        { key: 'audit', label: 'View Audit Trail', icon: <EyeOutlined />, onClick: () => { setReviewId(r.id); setReviewMode('VIEW'); } },
       ]} />
     ) },
   ];
@@ -227,7 +303,7 @@ export default function PerformancePage() {
       <div className="flex items-center justify-between mb-5">
         <div><h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">Performance & Quality Assurance</h1><p className="text-[13px] text-[#64748b] mt-1">KPI templates, assessment cycles, QA reviews and incentives</p></div>
         <Space>
-          <Button icon={<ReloadOutlined />} onClick={refresh}>Refresh</Button>
+          <Button icon={<ReloadOutlined />} loading={fetching > 0} onClick={refresh}>Refresh</Button>
           <Can permission="performance.templates.manage"><Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingTpl(null); setTplDrawer(true); }}>KPI Template</Button></Can>
         </Space>
       </div>
@@ -296,7 +372,7 @@ export default function PerformancePage() {
                 <Input allowClear placeholder="Search templates..." value={fSearch} onChange={(e) => setFSearch(e.target.value)} style={{ width: 200 }} />
                 <Select allowClear placeholder="Department" style={{ width: 170 }} value={fDept || undefined} onChange={(v) => setFDept(v || '')} options={(meta.data?.departments || []).map((o: any) => ({ label: o.name, value: o.id }))} />
                 <Select allowClear placeholder="Status" style={{ width: 130 }} value={fStatus || undefined} onChange={(v) => setFStatus(v || '')} options={['DRAFT', 'ACTIVE', 'INACTIVE', 'ARCHIVED'].map((s) => ({ label: s, value: s }))} />
-                <div className="ml-auto"><Can permission="performance.templates.manage"><Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingTpl(null); setTplDrawer(true); }}>+ KPI Template</Button></Can></div>
+                <div className="ml-auto"><Can permission="performance.templates.manage"><Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingTpl(null); setTplDrawer(true); }}>KPI Template</Button></Can></div>
               </div>
               <Table rowKey="id" loading={templates.isLoading} dataSource={filteredTemplates} columns={tplCols} pagination={{ pageSize: 10 }} />
             </div>
@@ -306,7 +382,7 @@ export default function PerformancePage() {
             <div>
               <div className="px-4 py-3 flex justify-between">
                 <span className="text-[13px] text-[#64748b]">Every assessment belongs to a cycle with clear submission windows. Opening a cycle snapshots the resolved KPI template per employee — later template changes never alter the snapshot.</span>
-                <Can permission="performance.cycles.manage"><Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingCycleId(null); setCycleDrawer(true); }}>+ Performance Cycle</Button></Can>
+                <Can permission="performance.cycles.manage"><Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingCycleId(null); setCycleDrawer(true); }}>Performance Cycle</Button></Can>
               </div>
               <Table rowKey="id" loading={cycles.isLoading} dataSource={cycles.data || []} columns={cycleCols} pagination={false} />
             </div>
@@ -320,16 +396,39 @@ export default function PerformancePage() {
                 <Select allowClear placeholder="Status" style={{ width: 170 }} value={fStatus || undefined} onChange={(v) => setFStatus(v || '')} options={Object.keys(ASSESS_STATUS_TONE).map((s) => ({ label: s.replace(/_/g, ' '), value: s }))} />
                 <Input allowClear placeholder="Search employee..." value={fSearch} onChange={(e) => setFSearch(e.target.value)} style={{ width: 190 }} />
               </div>
-              <Table rowKey="id" loading={assessments.isLoading} dataSource={filteredAssessments} columns={asmtCols} pagination={{ pageSize: 12 }} scroll={{ x: 1400 }} />
+              {(fSubmission || fIssue) && (
+                <div className="flex flex-wrap items-center gap-2 px-4 pb-3">
+                  <span className="text-[13px] font-semibold text-[#171a2e]">{fIssue ? 'Employees with no active KPI template' : 'Missing KPI Submissions'}</span>
+                  <SoftBadge tone="amber" dotless>{fSubmission ? 'Submission: Missing' : 'Issue: No KPI template'}</SoftBadge>
+                  <span className="text-[12px] text-[#64748b]">{filteredAssessments.length} employee(s)</span>
+                  <Button size="small" type="link" onClick={clearIssueFilter}>Clear Filters</Button>
+                </div>
+              )}
+              <Table rowKey={(r: any) => r.id || r.employeeId} loading={assessments.isLoading} dataSource={filteredAssessments} columns={asmtCols} pagination={{ pageSize: 12 }} scroll={{ x: 1400 }} />
             </div>
           ) },
 
           { key: 'qa', label: 'Quality Assurance', children: (
             <div>
-              <div className="px-4 py-3 flex items-center justify-between">
-                <span className="text-[13px] text-[#64748b]">QA reviewers verify evidence, system metrics and manager ratings. Score adjustments require a reason and are audited.</span>
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 px-4 pt-4">
+                <QaCard label="Ready for QA" value={qaS.readyForQa ?? 0} onClick={() => setQaF({ qaStatus: 'READY_FOR_QA' })} />
+                <QaCard label="In Review" value={qaS.inReview ?? 0} onClick={() => setQaF({ qaStatus: 'IN_REVIEW' })} />
+                <QaCard label="Changes Requested" value={qaS.changesRequested ?? 0} onClick={() => setQaF({ qaStatus: 'CHANGES_REQUESTED' })} />
+                <QaCard label="Finalized" value={qaS.finalized ?? 0} onClick={() => setQaF({ qaStatus: 'FINALIZED' })} />
+                <QaCard label="Flagged Variances" value={qaS.flagged ?? 0} onClick={() => setQaF({ flagged: true })} />
               </div>
-              <Table rowKey="id" loading={assessments.isLoading} dataSource={qaQueue} pagination={{ pageSize: 12 }} columns={qaCols as ColumnsType<any>} />
+              <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+                <Input allowClear placeholder="Search employee..." style={{ width: 180 }} value={qaF.search} onChange={(e) => setQaF({ ...qaF, search: e.target.value })} />
+                <Select allowClear placeholder="Cycle" style={{ width: 190 }} value={qaF.cycleId} onChange={(v) => setQaF({ ...qaF, cycleId: v })} options={(cycles.data || []).map((o: any) => ({ label: o.name, value: o.id }))} />
+                <Select allowClear placeholder="Department" style={{ width: 160 }} value={qaF.departmentId} onChange={(v) => setQaF({ ...qaF, departmentId: v })} options={(meta.data?.departments || []).map((o: any) => ({ label: o.name, value: o.id }))} />
+                <Select allowClear placeholder="QA status" style={{ width: 170 }} value={qaF.qaStatus} onChange={(v) => setQaF({ ...qaF, qaStatus: v })} options={['READY_FOR_QA', 'IN_REVIEW', 'CHANGES_REQUESTED', 'APPROVED', 'FINALIZED'].map((s) => ({ label: qaLabel(s), value: s }))} />
+                <Select allowClear placeholder="Manager review" style={{ width: 150 }} value={qaF.managerStatus} onChange={(v) => setQaF({ ...qaF, managerStatus: v })} options={[{ label: 'Completed', value: 'COMPLETED' }]} />
+                <Select allowClear placeholder="Reviewer" style={{ width: 150 }} value={qaF.reviewerId} onChange={(v) => setQaF({ ...qaF, reviewerId: v })} options={Array.from(new Set(qaRows.map((r: any) => r.qaReviewerId).filter(Boolean))).map((id: any) => ({ label: qaRows.find((r: any) => r.qaReviewerId === id)?.qaReviewer || id, value: id }))} />
+                <label className="text-[13px] text-[#344054] flex items-center gap-1.5"><input type="checkbox" className="accent-[#003366]" checked={!!qaF.flagged} onChange={(e) => setQaF({ ...qaF, flagged: e.target.checked })} />Flagged only</label>
+                <label className="text-[13px] text-[#344054] flex items-center gap-1.5"><input type="checkbox" className="accent-[#003366]" checked={!!qaF.overdue} onChange={(e) => setQaF({ ...qaF, overdue: e.target.checked })} />Overdue only</label>
+                <Button size="small" onClick={() => setQaF({})}>Reset Filters</Button>
+              </div>
+              <Table rowKey="id" loading={qaQueueQ.isLoading} dataSource={qaRows} columns={qaCols} pagination={{ pageSize: 12 }} scroll={{ x: 1400 }} locale={{ emptyText: <QaEmpty hasFilters={Object.keys(qaF).some((k) => qaF[k])} onClear={() => setQaF({})} /> }} />
             </div>
           ) },
 
@@ -343,7 +442,7 @@ export default function PerformancePage() {
                   <Can permission="performance.incentives.view">
                     <Button onClick={async () => { const active = (cycles.data || []).find((x: any) => ['OPEN', 'APPROVAL', 'COMPLETED'].includes(x.status)); if (!active) { message.error('Open or complete a cycle first'); return; } try { const r = await api(`/performance/cycles/${active.id}/run-incentive-eligibility`, { method: 'POST' }); message.success(`${r.proposed} proposal(s) created from ${active.name}`); refresh(); } catch (e: any) { message.error(e.message); } }} icon={<RocketOutlined />}>Run eligibility (active cycle)</Button>
                   </Can>
-                  <Can permission="performance.incentives.propose"><Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingPlan(null); setPlanDrawer(true); }}>+ Incentive Plan</Button></Can>
+                  <Can permission="performance.incentives.propose"><Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingPlan(null); setPlanDrawer(true); }}>Incentive Plan</Button></Can>
                 </Space>
               </div>
               <div className="px-4 pb-2 text-[15px] font-bold text-[#171a2e]">Proposals</div>

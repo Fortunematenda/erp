@@ -91,8 +91,14 @@ export class PerformanceController {
       include: { user: { select: { firstName: true, lastName: true, email: true } } },
     });
   }
+  @UseGuards(PermissionsGuard) @RequirePermissions('performance.cycles.manage', 'hr.performance.manage')
+  @Post('assessments') createAssessment(@Req() req: any, @Body() dto: any) { return this.cycles.createAssessment(req, dto); }
+  @UseGuards(PermissionsGuard) @RequirePermissions('performance.incentives.approve', 'hr.performance.manage')
+  @Post('incentives/:id/send-to-payroll') sendIncentiveToPayroll(@Req() req: any, @Param('id') id: string) { return this.incentives.sendToPayroll(req, id); }
   @UseGuards(PermissionsGuard) @RequirePermissions('performance.self.submit')
   @Post('assessments/:id/employee-submit') employeeSubmit(@Req() req: any, @Param('id') id: string, @Body() dto: any) { return this.assessments.employeeSubmit(req, id, dto); }
+  @UseGuards(PermissionsGuard) @RequirePermissions('hr.performance.manage')
+  @Post('assessments/:id/hr-employee-submit') hrEmployeeSubmit(@Req() req: any, @Param('id') id: string, @Body() dto: any) { return this.assessments.hrEmployeeSubmit(req, id, dto); }
   @UseGuards(PermissionsGuard) @RequirePermissions('performance.manager.review')
   @Post('assessments/:id/manager-review') managerReview(@Req() req: any, @Param('id') id: string, @Body() dto: any) { return this.assessments.managerReview(req, id, dto); }
   @UseGuards(PermissionsGuard) @RequirePermissions('performance.qa.review')
@@ -101,6 +107,14 @@ export class PerformanceController {
   @Post('assessments/:id/qa-adjust') qaAdjust(@Req() req: any, @Param('id') id: string, @Body() dto: any) { return this.assessments.qaAdjust(req, id, dto); }
   @UseGuards(PermissionsGuard) @RequirePermissions('performance.qa.review')
   @Post('assessments/:id/qa-submit') qaSubmit(@Req() req: any, @Param('id') id: string, @Body() dto: any) { return this.assessments.qaSubmit(req, id, dto); }
+  @UseGuards(PermissionsGuard) @RequirePermissions('performance.qa.view', 'performance.cycles.view')
+  @Get('qa/queue') qaQueue(@Req() req: any, @Query() q: any) { return this.assessments.qaQueue(companyIdOf(req.user), q); }
+  @UseGuards(PermissionsGuard) @RequirePermissions('performance.qa.view', 'performance.cycles.view')
+  @Get('qa/summary') qaSummary(@Req() req: any) { return this.assessments.qaSummary(companyIdOf(req.user)); }
+  @UseGuards(PermissionsGuard) @RequirePermissions('performance.qa.review')
+  @Post('assessments/:id/qa-assign') qaAssign(@Req() req: any, @Param('id') id: string, @Body() dto: any) { return this.assessments.assignQaReviewer(req, id, dto.reviewerId); }
+  @UseGuards(PermissionsGuard) @RequirePermissions('performance.qa.review')
+  @Post('assessments/:id/qa-request-changes') qaRequestChanges(@Req() req: any, @Param('id') id: string, @Body() dto: any) { return this.assessments.requestQaChanges(req, id, dto.reason); }
   @UseGuards(PermissionsGuard) @RequirePermissions('performance.calibration.manage')
   @Post('assessments/:id/calibrate') calibrate(@Req() req: any, @Param('id') id: string, @Body() dto: any) { return this.assessments.calibrate(req, id, dto); }
   @UseGuards(PermissionsGuard) @RequirePermissions('performance.approve')

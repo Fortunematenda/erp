@@ -237,8 +237,7 @@ export class PerformanceCycleService {
   }
 
   /** Explicitly regenerate a DRAFT assessment snapshot (HR action). */
-  async regenerate(req: AnyReq, assessmentId: string) {
-    const companyId = req.user.companyId!;
+  async regenerate(req: AnyReq, assessmentId: string) {    const companyId = req.user.companyId!;
     const a = await this.prisma.employeePerformanceAssessment.findFirst({ where: { id: assessmentId, companyId } });
     if (!a) throw new NotFoundException('Assessment not found');
     if (a.status !== 'PENDING_EMPLOYEE') throw new BadRequestException('Only assessments not yet submitted can be regenerated');
@@ -257,6 +256,32 @@ export class PerformanceCycleService {
     });
     await this.audit.log(companyId, req.user.sub, 'ASSESSMENT_REGENERATED', 'EmployeePerformanceAssessment', a.id, { template: resolved.template.name, version: resolved.version.version });
     return this.assessmentDetail(companyId, a.id);
+  }
+
+  /** Create a single performance review (assessment) for an employee in a cycle, snapshotting the resolved KPI template. */
+  async createAssessment(req: AnyReq, dto: { cycleId: string; employeeId: string; managerId?: string }) {
+    const companyId = req.user.companyId!;
+    if (!dto.cycleId || !dto.employeeId) throw new BadRequestException('Performance cycle and employee are required');
+    const cycle = await this.prisma.performanceCycle.findFirst({ where: { id: dto.cycleId, companyId } });
+    if (!cycle) throw new NotFoundException('Performance cycle not found');
+    const emp = await this.prisma.employee.findFirst({ where: { id: dto.employeeId, companyId }, include: { user: { select: { id: true } } } });
+    if (!emp) throw new NotFoundException('Employee not found');
+    const existing = await this.prisma.employeePerformanceAssessment.findFirst({ where: { companyId, cycleId: dto.cycleId, employeeId: dto.employeeId } });
+    if (existing) throw new BadRequestException({ message: 'A performance review already exists for this employee for this cycle.', existingId: existing.id, code: 'REVIEW_EXISTS' });
+    if (!emp.departmentId) throw new BadRequestException('Employee has no department to resolve a KPI template from');
+    const resolved = await this.resolveTemplate(companyId, emp.departmentId, emp.position || null);
+    if (!resolved) throw new BadRequestException('No active KPI template is configured for this employee\'s department/role');
+    const kpiDefs = await this.prisma.kpiDefinition.findMany({ where: { versionId: resolved.version.id }, orderBy: { position: 'asc' } });
+    const assessment = await this.prisma.employeePerformanceAssessment.create({
+      data: {
+        companyId, cycleId: cycle.id, employeeId: emp.id, departmentId: emp.departmentId,
+        managerId: dto.managerId || emp.managerId || null, versionId: resolved.version.id, templateName: resolved.template.name, status: 'PENDING_EMPLOYEE',
+        kpis: { create: kpiDefs.map((k) => ({ companyId, kpiDefinitionId: k.id, code: k.code, name: k.name, description: k.description, categoryLabel: k.categoryLabel, weight: k.weight, measurementType: k.measurementType, direction: k.direction, scoringMethod: k.scoringMethod, targetType: k.targetType, targetValue: k.targetValue, targetText: k.targetText, unit: k.unit, dataSource: k.dataSource, dataSourceLabel: k.dataSourceLabel, critical: k.critical, position: k.position, systemDerived: !!k.dataSource })) },
+      },
+    });
+    await this.audit.log(companyId, req.user.sub, 'REVIEW_CREATED', 'EmployeePerformanceAssessment', assessment.id, { employeeId: emp.id, cycleId: cycle.id, template: resolved.template.name, version: resolved.version.version });
+    try { if (emp.user?.id) await this.prisma.performanceNotification.create({ data: { companyId, userId: emp.user.id, employeeId: emp.id, type: 'REVIEW_ASSIGNED', title: 'Performance review assigned', body: `Your performance review for "${cycle.name}" is ready.`, link: `/performance?assessment=${assessment.id}` } }); } catch { /* ignore */ }
+    return this.assessmentDetail(companyId, assessment.id);
   }
 
   async assessmentDetail(companyId: string, id: string) {

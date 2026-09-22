@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, keepPreviousData, useIsFetching } from '@tanstack/react-query';
 import { Button, Calendar, DatePicker, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tabs, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { PlusOutlined, ReloadOutlined, TeamOutlined, FileDoneOutlined, WalletOutlined, CheckCircleOutlined, CloseOutlined, EditOutlined, EyeOutlined, PrinterOutlined, BarChartOutlined, StopOutlined } from '@ant-design/icons';
@@ -14,6 +14,11 @@ import { StatusPill } from '@/components/sales-ui';
 import { StatCard } from '@/components/stat-card';
 import { EmployeeSelector } from '@/components/employee-selector';
 import { EmployeeDrawer } from '@/components/employee-drawer';
+import { DepartmentDrawer, type DepartmentView } from '@/components/department-drawer';
+import { LeaveManagement } from '@/components/leave-management';
+import { AttendanceManagement } from '@/components/attendance-management';
+import { HrPerformance } from '@/components/hr-performance';
+import { PayrollManagement } from '@/components/payroll-management';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
 
@@ -28,18 +33,19 @@ export default function Hr() {
   const qc = useQueryClient();
   const params = useSearchParams();
   const router = useRouter();
-  const dash = useQuery({ queryKey: ['/hr/dashboard'], queryFn: () => api('/hr/dashboard') });
-  const employees = useQuery({ queryKey: ['/hr/employees'], queryFn: () => api('/hr/employees') });
-  const departments = useQuery({ queryKey: ['/hr/departments'], queryFn: () => api('/hr/departments') });
-  const leaveRequests = useQuery({ queryKey: ['/hr/leave-requests'], queryFn: () => api('/hr/leave-requests') });
-  const leaveBalances = useQuery({ queryKey: ['/hr/leave-balances'], queryFn: () => api('/hr/leave-balances') });
-  const leaveTypes = useQuery({ queryKey: ['/hr/leave-types'], queryFn: () => api('/hr/leave-types') });
-  const holidays = useQuery({ queryKey: ['/hr/holidays'], queryFn: () => api('/hr/holidays') });
-  const attendance = useQuery({ queryKey: ['/hr/attendance'], queryFn: () => api('/hr/attendance') });
-  const attSummary = useQuery({ queryKey: ['/hr/attendance/summary'], queryFn: () => api('/hr/attendance/summary') });
-  const attExceptions = useQuery({ queryKey: ['/hr/attendance/exceptions'], queryFn: () => api('/hr/attendance/exceptions') });
-  const payrollRuns = useQuery({ queryKey: ['/hr/payroll-runs'], queryFn: () => api('/hr/payroll-runs') });
-  const payslipsQ = useQuery({ queryKey: ['/hr/payslips'], queryFn: () => api('/hr/payslips') });
+  const fetching = useIsFetching();
+  const dash = useQuery({ queryKey: ['/hr/dashboard'], queryFn: () => api('/hr/dashboard'), placeholderData: keepPreviousData });
+  const employees = useQuery({ queryKey: ['/hr/employees'], queryFn: () => api('/hr/employees'), placeholderData: keepPreviousData });
+  const departments = useQuery({ queryKey: ['/hr/departments'], queryFn: () => api('/hr/departments'), placeholderData: keepPreviousData });
+  const leaveRequests = useQuery({ queryKey: ['/hr/leave-requests'], queryFn: () => api('/hr/leave-requests'), placeholderData: keepPreviousData });
+  const leaveBalances = useQuery({ queryKey: ['/hr/leave-balances'], queryFn: () => api('/hr/leave-balances'), placeholderData: keepPreviousData });
+  const leaveTypes = useQuery({ queryKey: ['/hr/leave-types'], queryFn: () => api('/hr/leave-types'), placeholderData: keepPreviousData });
+  const holidays = useQuery({ queryKey: ['/hr/holidays'], queryFn: () => api('/hr/holidays'), placeholderData: keepPreviousData });
+  const attendance = useQuery({ queryKey: ['/hr/attendance'], queryFn: () => api('/hr/attendance'), placeholderData: keepPreviousData });
+  const attSummary = useQuery({ queryKey: ['/hr/attendance/summary'], queryFn: () => api('/hr/attendance/summary'), placeholderData: keepPreviousData });
+  const attExceptions = useQuery({ queryKey: ['/hr/attendance/exceptions'], queryFn: () => api('/hr/attendance/exceptions'), placeholderData: keepPreviousData });
+  const payrollRuns = useQuery({ queryKey: ['/hr/payroll-runs'], queryFn: () => api('/hr/payroll-runs'), placeholderData: keepPreviousData });
+  const payslipsQ = useQuery({ queryKey: ['/hr/payslips'], queryFn: () => api('/hr/payslips'), placeholderData: keepPreviousData });
   const perfReviews = useQuery({ queryKey: ['/hr/performance-reviews'], queryFn: () => api('/hr/performance-reviews') });
   const qaAssessments = useQuery({ queryKey: ['/hr/qa-assessments'], queryFn: () => api('/hr/qa-assessments') });
   const incentives = useQuery({ queryKey: ['/hr/employee-incentives'], queryFn: () => api('/hr/employee-incentives') });
@@ -59,6 +65,7 @@ export default function Hr() {
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [payrollOpen, setPayrollOpen] = useState(false);
   const [previewPay, setPreviewPay] = useState<any>(null);
+  const [deptDrawer, setDeptDrawer] = useState<{ id: string; view: DepartmentView; sub?: string } | null>(null);
   const [leaveForm] = Form.useForm();
   const [deptForm] = Form.useForm();
   const [holidayForm] = Form.useForm();
@@ -72,6 +79,16 @@ export default function Hr() {
     const dept = params.get('departmentId');
     if (dept) setFDepart(dept);
   }, [params]);
+
+  // Deep link a specific payslip (e.g. from the Employee 360 Payroll tab): /hr?tab=payslips&payslip=<id>
+  useEffect(() => {
+    const pid = params.get('payslip');
+    if (!pid) return;
+    setTab('payslips');
+    const list = payslipsQ.data || [];
+    const found = list.find((p: any) => p.id === pid);
+    if (found) setPreviewPay(found);
+  }, [params, payslipsQ.data]);
 
   function refresh() {
     ['/hr/employees', '/hr/departments', '/hr/leave-requests', '/hr/leave-balances', '/hr/leave-types', '/hr/holidays', '/hr/attendance', '/hr/attendance/summary', '/hr/attendance/exceptions', '/hr/payroll-runs', '/hr/payslips', '/hr/performance-reviews', '/hr/qa-assessments', '/hr/employee-incentives'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
@@ -108,15 +125,15 @@ export default function Hr() {
 
   const deptCols: ColumnsType<any> = [
     { title: 'Code', dataIndex: 'code', width: 110 },
-    { title: 'Department', dataIndex: 'name' },
+    { title: 'Department', dataIndex: 'name', render: (v, r) => <a className="text-[13px] font-medium text-[#171a2e] hover:text-[#1d5fb5] hover:underline" onClick={() => setDeptDrawer({ id: r.id, view: 'OVERVIEW' })}>{v}</a> },
     { title: 'Branch', render: (_v, r) => r.branch?.name || '—' },
     { title: 'Employees', width: 100, align: 'right', render: (_v, r) => (employees.data || []).filter((e: any) => e.departmentId === r.id).length },
     { ...ACTIONS_COL, render: (_v, r) => (
       <RowActionsMenu items={[
-        { key: 'edit', label: 'Edit', icon: <EditOutlined />, permission: 'hr.employees.manage', onClick: () => { setEditingDept(r); deptForm.setFieldsValue({ name: r.name, branchId: r.branchId, code: r.code }); setDeptOpen(true); } },
-        { key: 'employees', label: 'View Employees', icon: <TeamOutlined />, onClick: () => router.push(`/hr?tab=employees&departmentId=${r.id}`) },
-        { key: 'kpi', label: 'KPI Templates', icon: <BarChartOutlined />, onClick: () => router.push(`/performance?tab=templates&departmentId=${r.id}`) },
-        { key: 'perf', label: 'Performance', icon: <FileDoneOutlined />, onClick: () => router.push(`/performance?tab=assessments&departmentId=${r.id}`) },
+        { key: 'edit', label: 'Edit', icon: <EditOutlined />, permission: 'hr.employees.manage', onClick: () => setDeptDrawer({ id: r.id, view: 'OVERVIEW', sub: 'EDIT' }) },
+        { key: 'employees', label: 'View Employees', icon: <TeamOutlined />, permission: 'hr.employees.view', onClick: () => setDeptDrawer({ id: r.id, view: 'EMPLOYEES' }) },
+        { key: 'kpi', label: 'KPI Templates', icon: <BarChartOutlined />, permission: ['performance.templates.view', 'hr.employees.view'], onClick: () => setDeptDrawer({ id: r.id, view: 'KPI_TEMPLATES' }) },
+        { key: 'perf', label: 'Performance', icon: <FileDoneOutlined />, permission: ['performance.cycles.view', 'hr.employees.view'], onClick: () => setDeptDrawer({ id: r.id, view: 'PERFORMANCE' }) },
       ]} />
     ) },
   ];
@@ -244,7 +261,7 @@ export default function Hr() {
         <div><h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">HR & Payroll</h1><p className="text-[13px] text-[#64748b] mt-1">Employees, leave, attendance, performance and payroll</p></div>
         <Space>
           <Link href="/performance"><Button type="primary" ghost>Performance & QA Module</Button></Link>
-          <Button icon={<ReloadOutlined />} onClick={refresh}>Refresh</Button>
+          <Button icon={<ReloadOutlined />} loading={fetching > 0} onClick={refresh}>Refresh</Button>
         </Space>
       </div>
 
@@ -266,79 +283,25 @@ export default function Hr() {
                 <Select allowClear placeholder="Department" style={{ width: 160 }} value={fDepart || undefined} onChange={(v) => setFDepart(v || '')} options={(departments.data || []).map((o: any) => ({ label: o.name, value: o.id }))} />
                 <Select allowClear placeholder="Employment type" style={{ width: 150 }} value={fType || undefined} onChange={(v) => setFType(v || '')} options={EMPLOYMENT_TYPES.map((t) => ({ label: t.replace(/_/g, ' '), value: t }))} />
                 <Select allowClear placeholder="Status" style={{ width: 130 }} value={fStatus || undefined} onChange={(v) => setFStatus(v || '')} options={['ACTIVE', 'PROBATION', 'ON_LEAVE', 'TERMINATED'].map((t) => ({ label: t.replace(/_/g, ' '), value: t }))} />
-                <div className="ml-auto"><Can permission="hr.employees.manage"><Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingEmp(null); setEmpDrawer(true); }}>+ Employee</Button></Can></div>
+                <div className="ml-auto"><Can permission="hr.employees.manage"><Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingEmp(null); setEmpDrawer(true); }}>Employee</Button></Can></div>
               </div>
               <Table rowKey="id" loading={employees.isLoading} dataSource={filteredEmps} columns={empCols} pagination={{ pageSize: 12 }} />
             </div>
           ) },
           { key: 'departments', label: 'Departments', children: (
-            <div><div className="px-4 py-3"><Can permission="hr.employees.manage"><Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingDept(null); deptForm.resetFields(); setDeptOpen(true); }}>+ Department</Button></Can></div><Table rowKey="id" loading={departments.isLoading} dataSource={departments.data || []} columns={deptCols} pagination={false} /></div>
+            <div><div className="px-4 py-3"><Can permission="hr.employees.manage"><Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingDept(null); deptForm.resetFields(); setDeptOpen(true); }}>Department</Button></Can></div><Table rowKey="id" loading={departments.isLoading} dataSource={departments.data || []} columns={deptCols} pagination={false} /></div>
           ) },
-          { key: 'leave', label: 'Leave', children: (
-            <div className="px-2 py-2">
-              <Tabs activeKey={leaveTab} onChange={setLeaveTab} items={[
-                { key: 'requests', label: `Requests (${leaveRequests.data?.length || 0})`, children: (
-                  <div><div className="px-3 py-3"><Can permission="hr.leave.manage"><Button type="primary" icon={<PlusOutlined />} onClick={() => setLeaveOpen(true)}>+ New Leave Request</Button></Can></div><Table rowKey="id" loading={leaveRequests.isLoading} dataSource={leaveRequests.data || []} columns={leaveCols} pagination={false} /></div>
-                ) },
-                { key: 'calendar', label: 'Calendar', children: (
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 p-4">
-                    <div className="lg:col-span-2 nex-card border rounded-lg p-4"><Calendar value={calMonth} fullscreen={false} onPanelChange={(v) => setCalMonth(v)} dateCellRender={(day) => {
-                      const key = day.format('YYYY-MM-DD');
-                      const isHoliday = calHolidays.includes(key);
-                      const reqs = calRequests.filter((l: any) => dayjs(l.startDate) <= day && dayjs(l.endDate) >= day);
-                      return <div className="text-[10px] mt-1 space-y-0.5">{isHoliday && <div className="text-[#e11d48] font-semibold">Holiday</div>}{reqs.map((r: any) => <div key={r.id} className="truncate rounded px-1" style={{ background: r.status === 'APPROVED' ? '#16a34a22' : '#f59e0b22', color: r.status === 'APPROVED' ? '#15803d' : '#b45309' }}>{r.employee?.firstName}</div>)}</div>;
-                    }} /></div>
-                    <div className="nex-card border rounded-lg p-4">
-                      <div className="text-[13px] font-semibold text-[#171a2e] mb-2">Holidays · {calMonth.format('MMMM YYYY')}</div>
-                      {(holidays.data || []).filter((h: any) => dayjs(h.date).isSame(calMonth, 'month')).map((hh: any) => <div key={hh.id} className="flex items-center justify-between text-[13px] py-1.5 border-b border-[#f0f1f6] last:border-0"><span>{hh.name}</span><span className="text-[#64748b] text-[12px]">{fmtDate(hh.date)}</span></div>)}
-                      <div className="text-[13px] font-semibold text-[#171a2e] mt-4 mb-2">Pending requests</div>
-                      {calRequests.filter((r: any) => r.status !== 'APPROVED').map((r: any) => <div key={r.id} className="flex items-center justify-between text-[13px] py-1.5 border-b border-[#f0f1f6] last:border-0"><span>{r.employee?.firstName} {r.employee?.lastName}</span><span className="text-[#64748b] text-[12px]">{r.leaveType}</span></div>)}
-                    </div>
-                  </div>
-                ) },
-                { key: 'balances', label: 'Balances', children: (
-                  <div className="p-4"><Table rowKey="id" size="small" loading={leaveBalances.isLoading} dataSource={(leaveBalances.data || []).map((b: any) => ({ ...b, employeeName: `${b.employee?.firstName} ${b.employee?.lastName}`, leaveName: b.leaveType?.name }))} columns={[{ title: 'Employee', dataIndex: 'employeeName' }, { title: 'Leave Type', dataIndex: 'leaveName' }, { title: 'Balance', dataIndex: 'balance', align: 'right' }]} pagination={false} /></div>
-                ) },
-                { key: 'types', label: 'Leave Types', children: <div className="p-4"><Table rowKey="id" loading={leaveTypes.isLoading} dataSource={leaveTypes.data || []} columns={leaveTypesCols} pagination={false} /></div> },
-                { key: 'holidays', label: 'Holidays', children: (
-                  <div className="p-4"><div className="mb-3"><Can permission="hr.leave.manage"><Button type="primary" icon={<PlusOutlined />} onClick={() => setHolidayOpen(true)}>+ Holiday</Button></Can></div><Table rowKey="id" loading={holidays.isLoading} dataSource={holidays.data || []} columns={holidayCols} pagination={false} /></div>
-                ) },
-              ]} />
-            </div>
-          ) },
-          { key: 'attendance', label: 'Attendance', children: (
-            <div className="p-4">
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-                <div className="nex-card border rounded-lg p-4 text-center"><div className="text-[12px] font-semibold text-[#64748b]">Records</div><div className="text-[22px] font-bold text-[#171a2e]">{attSummary.data?.totals?.records ?? 0}</div></div>
-                <div className="nex-card border rounded-lg p-4 text-center"><div className="text-[12px] font-semibold text-[#64748b]">Worked hours</div><div className="text-[22px] font-bold text-[#171a2e]">{Number(attSummary.data?.totals?.workedHours || 0)}h</div></div>
-                <div className="nex-card border rounded-lg p-4 text-center"><div className="text-[12px] font-semibold text-[#64748b]">Overtime</div><div className="text-[22px] font-bold text-[#e11d48]">{Number(attSummary.data?.totals?.overtimeHours || 0)}h</div></div>
-                <div className="nex-card border rounded-lg p-4 text-center"><div className="text-[12px] font-semibold text-[#64748b]">Exceptions</div><div className="text-[22px] font-bold text-[#b45309]">{attExceptions.data?.length ?? 0}</div></div>
-              </div>
-              <div className="mb-4">
-                <div className="text-[13px] font-semibold text-[#171a2e] mb-2">Exceptions</div>
-                <div className="flex flex-wrap gap-2">
-                  {(attExceptions.data || []).slice(0, 8).map((x: any) => <div key={x.id} className="text-[12px] px-2.5 py-1.5 rounded-full bg-[#fff7ed] text-[#b45309] font-medium border border-[#fed7aa]">{x.exception.replace(/_/g, ' ')} · {x.employee?.firstName} {x.employee?.lastName}</div>)}
-                  {!attExceptions.data?.length && <span className="text-[13px] text-[#94a3b8]">No exceptions detected.</span>}
-                </div>
-              </div>
-              <Table rowKey="id" loading={attendance.isLoading} dataSource={attendance.data || []} columns={attCols} pagination={{ pageSize: 12 }} />
-            </div>
-          ) },
-          { key: 'performance', label: 'Performance', children: (
-            <div className="grid grid-cols-1 gap-4 p-4">
-              <div><div className="text-[13px] font-semibold text-[#171a2e] mb-2">Reviews</div><Table rowKey="id" size="small" loading={perfReviews.isLoading} dataSource={perfReviews.data || []} columns={perfCols} pagination={false} /></div>
-              <div><div className="text-[13px] font-semibold text-[#171a2e] mb-2">Quality Assurance</div><Table rowKey="id" size="small" loading={qaAssessments.isLoading} dataSource={qaAssessments.data || []} columns={qaCols} pagination={false} /></div>
-              <div><div className="text-[13px] font-semibold text-[#171a2e] mb-2">Incentives</div><Table rowKey="id" size="small" loading={incentives.isLoading} dataSource={incentives.data || []} columns={incCols} pagination={false} /></div>
-            </div>
-          ) },
-          { key: 'payroll', label: 'Payroll', children: (
-            <div className="p-4"><div className="mb-3"><Can permission="payroll.create"><Button type="primary" icon={<PlusOutlined />} onClick={() => setPayrollOpen(true)}>+ New Payroll Run</Button></Can></div><Table rowKey="id" loading={payrollRuns.isLoading} dataSource={payrollRuns.data || []} columns={payrollCols} pagination={false} /></div>
-          ) },
+          { key: 'leave', label: 'Leave', children: <LeaveManagement /> },
+          { key: 'attendance', label: 'Attendance', children: <AttendanceManagement /> },
+          { key: 'performance', label: 'Performance', children: <HrPerformance /> },
+          { key: 'payroll', label: 'Payroll', children: <PayrollManagement /> },
           { key: 'payslips', label: 'Payslips', children: <div className="p-4"><Table rowKey="id" size="small" loading={payslipsQ.isLoading} dataSource={allPayslips} columns={payslipCols} pagination={false} /></div> },
         ]} />
       </div>
 
       <EmployeeDrawer open={empDrawer} onClose={() => setEmpDrawer(false)} onSaved={refresh} editing={editingEmp} />
+
+      <DepartmentDrawer open={!!deptDrawer} departmentId={deptDrawer?.id || null} initialView={deptDrawer?.view} initialSub={deptDrawer?.sub} onClose={() => setDeptDrawer(null)} onChanged={refresh} />
 
       <Modal open={leaveOpen} title="New leave request" onCancel={() => setLeaveOpen(false)} onOk={submitLeave} okText="Submit request" destroyOnHidden>
         <Form form={leaveForm} layout="vertical" className="mt-2">
