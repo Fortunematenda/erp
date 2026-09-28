@@ -232,6 +232,38 @@ export class ProcurementController {
     await this.audit.log(companyId, req.user.sub, 'CREATE', 'PurchaseOrder', po.id, { poNo });
     return po;
   }
+  /** Open purchase orders for a vendor with a remaining billable balance ("Add from PO"). */
+  @Get('purchase-orders/eligible') async eligiblePos(@Req() req: any, @Query('supplierId') supplierId: string) {
+    const companyId = companyIdOf(req.user);
+    if (!supplierId) throw new BadRequestException('supplierId is required');
+    const pos = await this.prisma.purchaseOrder.findMany({ where: { companyId, supplierId, status: { in: ['OPEN', 'APPROVED', 'PART_RECEIVED', 'RECEIVED'] } }, include: { supplier: true, lines: true, goodsReceivedNotes: { include: { lines: true } }, supplierInvoices: { include: { lines: true } } }, orderBy: { createdAt: 'desc' } });
+    const stockByItem = await this.stockMap(companyId, pos.flatMap((p) => p.lines));
+    return pos
+      .map((p) => ({ id: p.id, poNo: p.poNo, status: p.status, orderDate: p.orderDate, expectedDate: p.expectedDate, currency: p.currency, supplier: { id: p.supplier.id, name: p.supplier.name }, progress: this.poProgress(p, stockByItem) }))
+      .filter((p) => p.progress.remainingToBill > 0);
+  }
+  /** Per-line prefill for "Add from PO": unbilled quantity, cost, unit, tax and account mapping. */
+  @Get('purchase-orders/:id/bill-lines') async billLines(@Req() req: any, @Param('id') id: string) {
+    const companyId = companyIdOf(req.user);
+    const po = await this.prisma.purchaseOrder.findFirst({ where: { id, companyId }, include: { lines: true, goodsReceivedNotes: { include: { lines: true } } } });
+    if (!po) throw new BadRequestException('Purchase order not found');
+    const stockByItem = await this.stockMap(companyId, po.lines);
+    const receivedRows = po.goodsReceivedNotes.filter((g: any) => g.status === 'POSTED').flatMap((g: any) => g.lines || []);
+    const lines = [];
+    for (const l of po.lines) {
+      const isStock = l.itemId ? (stockByItem.get(l.itemId) ?? true) : true;
+      const received = l.itemId ? receivedRows.filter((r: any) => r.itemId === l.itemId).reduce((s: number, r: any) => s + Number(r.quantity), 0) : 0;
+      const eligible = isStock ? Math.min(received, Number(l.quantity)) : Number(l.quantity);
+      const remainingToBill = Math.max(0, eligible - Number(l.invoicedQty || 0));
+      let taxCode: string | null = null, accountId: string | null = null, accountCode: string | null = null, unit = 'EA';
+      if (l.itemId) {
+        const d = await this.items.resolveForPurchase(companyId, l.itemId);
+        taxCode = d.taxCode; accountId = d.accountId; accountCode = d.accountCode; unit = d.unit;
+      }
+      lines.push({ purchaseOrderLineId: l.id, itemId: l.itemId, description: l.description, ordered: Number(l.quantity), received, invoiced: Number(l.invoicedQty || 0), remainingToBill, unitPrice: Number(l.unitPrice), unit, taxCode, accountId, accountCode });
+    }
+    return { purchaseOrderId: po.id, poNo: po.poNo, supplierId: po.supplierId, currency: po.currency, lines };
+  }
   @Get('purchase-orders/:id') async orderDetail(@Req() req: any, @Param('id') id: string) {
     const companyId = companyIdOf(req.user);
     const po = await this.prisma.purchaseOrder.findFirst({ where: { id, companyId }, include: { supplier: true, lines: true, goodsReceivedNotes: { include: { lines: true } }, supplierInvoices: { include: { lines: true } } } });
@@ -598,13 +630,26 @@ export class ProcurementController {
       if (dup) throw new BadRequestException(`This supplier invoice number (${dto.invoiceNo.trim()}) already exists for this supplier. Bill: ${dup.invoiceNo}`);
     }
     if (dto.purchaseOrderId) {
-      // Allow multiple bills against one PO while received qty remains (partial billing).
-      const po = await this.prisma.purchaseOrder.findFirst({ where: { id: dto.purchaseOrderId, companyId }, include: { lines: true } });
+      // Partial billing is bounded by what has been received (stock) or ordered (non-stock),
+      // checked per line so one PO can be billed across many bills without double-billing.
+      const po = await this.prisma.purchaseOrder.findFirst({ where: { id: dto.purchaseOrderId, companyId }, include: { lines: true, goodsReceivedNotes: { include: { lines: true } } } });
       if (!po) throw new BadRequestException('Purchase order not found');
-      const totalInv = dto.lines.reduce((s, l) => s + Number(l.quantity), 0);
-      const received = po.lines.reduce((s, l) => s + Number(l.receivedQty || 0), 0);
-      const alreadyInvoiced = po.lines.reduce((s, l) => s + Number(l.invoicedQty || 0), 0);
-      if (totalInv > received - alreadyInvoiced + 0.001) throw new BadRequestException(`Cannot bill more than remaining received quantity (received ${received}, already billed ${alreadyInvoiced}, this bill ${totalInv})`);
+      const stockByItem = await this.stockMap(companyId, po.lines);
+      const receivedRows = po.goodsReceivedNotes.filter((g: any) => g.status === 'POSTED').flatMap((g: any) => g.lines || []);
+      const recvOf = (itemId?: string | null) => (itemId ? receivedRows.filter((r: any) => r.itemId === itemId).reduce((s: number, r: any) => s + Number(r.quantity), 0) : 0);
+      for (const l of dto.lines) {
+        const poLine = l.purchaseOrderLineId
+          ? po.lines.find((p: any) => p.id === l.purchaseOrderLineId)
+          : po.lines.find((p: any) => p.itemId && p.itemId === l.itemId);
+        if (l.purchaseOrderLineId && !poLine) throw new BadRequestException('A bill line references a purchase order line that does not belong to this purchase order.');
+        if (!poLine) continue;
+        const isStock = poLine.itemId ? (stockByItem.get(poLine.itemId) ?? true) : true;
+        const eligible = isStock ? Math.min(recvOf(poLine.itemId), Number(poLine.quantity)) : Number(poLine.quantity);
+        const remaining = eligible - Number(poLine.invoicedQty || 0);
+        if (Number(l.quantity) > remaining + 0.001) {
+          throw new BadRequestException(`Cannot bill ${l.quantity} for "${poLine.description}": only ${remaining} remaining to bill (eligible ${eligible}, already billed ${Number(poLine.invoicedQty || 0)}).`);
+        }
+      }
     }
     // Resolve item-master defaults (description, cost, account mapping) for item lines
     // — applies equally to direct bills and PO-linked bills. Line values win.
@@ -612,11 +657,13 @@ export class ProcurementController {
     const { mapped, subtotal, taxTotal, total } = this.computeLines(dto.lines);
     for (const l of mapped) { if (l.accountId) { const v = await this.validateLineAccount(companyId, l.accountId); l.accountCode = v?.code; } }
     const invoiceNo = await this.numbering.next(companyId, 'PINV');
-    const si = await this.prisma.supplierInvoice.create({ data: { companyId, purchaseOrderId: dto.purchaseOrderId, supplierId: dto.supplierId, projectId: dto.projectId, invoiceNo, supplierInvoiceNo: dto.invoiceNo?.trim() || null, invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : new Date(), dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined, terms: dto.terms, currency: dto.currency || 'USD', ref: dto.ref, memo: dto.memo, warehouseId: dto.warehouseId || null, receiveNow: dto.receiveNow ?? false, subtotal, taxTotal, total, balanceDue: total, status: 'DRAFT', paymentStatus: 'UNPAID', matchStatus: 'NOT_MATCHED', lines: { create: mapped.map((l: any) => ({ description: l.description, itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice, discount: l.discount, taxRate: l.taxRate, taxAmount: l.taxAmount, lineTotal: l.lineTotal, accountId: l.accountId, accountCode: l.accountCode })) } }, include: { lines: true } });
+    const si = await this.prisma.supplierInvoice.create({ data: { companyId, purchaseOrderId: dto.purchaseOrderId, supplierId: dto.supplierId, projectId: dto.projectId, invoiceNo, supplierInvoiceNo: dto.invoiceNo?.trim() || null, invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : new Date(), dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined, terms: dto.terms, currency: dto.currency || 'USD', ref: dto.ref, memo: dto.memo, warehouseId: dto.warehouseId || null, receiveNow: dto.receiveNow ?? false, subtotal, taxTotal, total, balanceDue: total, status: 'DRAFT', paymentStatus: 'UNPAID', matchStatus: 'NOT_MATCHED', lines: { create: mapped.map((l: any) => ({ description: l.description, itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice, discount: l.discount, taxRate: l.taxRate, taxAmount: l.taxAmount, lineTotal: l.lineTotal, accountId: l.accountId, accountCode: l.accountCode, purchaseOrderLineId: l.purchaseOrderLineId, grnLineId: l.grnLineId })) } }, include: { lines: true } });
     if (dto.purchaseOrderId && si.id) {
       await this.prisma.$transaction(async (tx) => {
         for (const l of si.lines) {
-          const poi = await tx.purchaseOrderLine.findFirst({ where: { purchaseOrderId: dto.purchaseOrderId, itemId: l.itemId } });
+          const poi = l.purchaseOrderLineId
+            ? await tx.purchaseOrderLine.findFirst({ where: { id: l.purchaseOrderLineId, purchaseOrderId: dto.purchaseOrderId } })
+            : await tx.purchaseOrderLine.findFirst({ where: { purchaseOrderId: dto.purchaseOrderId, itemId: l.itemId } });
           if (poi) await tx.purchaseOrderLine.update({ where: { id: poi.id }, data: { invoicedQty: Number(poi.invoicedQty || 0) + Number(l.quantity) } });
         }
         const po2 = await tx.purchaseOrder.findUnique({ where: { id: dto.purchaseOrderId }, include: { lines: true } });

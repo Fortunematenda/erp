@@ -10,6 +10,8 @@ export class ReqLineDto {
   @IsOptional() @Type(() => Number) @IsNumber() taxRate?: number;
   @IsOptional() @IsString() accountId?: string;
   @IsOptional() @IsString() accountCode?: string;
+  @IsOptional() @IsString() purchaseOrderLineId?: string;
+  @IsOptional() @IsString() grnLineId?: string;
 }
 
 export class CreateRequisitionDto {

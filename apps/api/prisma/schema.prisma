@@ -2384,6 +2384,9 @@ model SupplierInvoiceLine {
   lineTotal         Decimal         @default(0) @db.Decimal(18, 2)
   accountId         String?
   accountCode       String?
+  /// Line-level source links for one PO -> many receipts -> many bills.
+  purchaseOrderLineId String?
+  grnLineId           String?
 }
 
 model SupplierInvoiceAttachment {
