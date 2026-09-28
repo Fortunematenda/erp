@@ -28,7 +28,8 @@ async function main() {
   const accounts = [
     ['1000','Cash & Bank',AccountType.ASSET],['1100','Accounts Receivable',AccountType.ASSET],['1200','Inventory',AccountType.ASSET],
     ['2000','Accounts Payable',AccountType.LIABILITY],['2100','VAT Payable',AccountType.LIABILITY],['3000','Share Capital',AccountType.EQUITY],
-    ['4000','Sales Revenue',AccountType.REVENUE],['5000','Cost of Sales',AccountType.EXPENSE],['6000','Operating Expenses',AccountType.EXPENSE]
+    ['4000','Sales Revenue',AccountType.REVENUE],['5000','Cost of Sales',AccountType.EXPENSE],['6000','Operating Expenses',AccountType.EXPENSE],
+    ['6500','Inventory Adjustments',AccountType.EXPENSE]
   ] as const;
   for (const [code,name,type] of accounts) await prisma.ledgerAccount.upsert({ where:{companyId_code:{companyId:company.id,code}}, update:{name,type}, create:{companyId:company.id,code,name,type} });
 

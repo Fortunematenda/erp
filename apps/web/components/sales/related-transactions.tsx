@@ -1,6 +1,7 @@
 'use client';
 import { RightOutlined } from '@ant-design/icons';
 import { fmtMoney } from '@/lib/format';
+import { invoiceDisplayStatus } from '@/lib/invoice-status';
 import Link from 'next/link';
 
 type DocKind = 'quote' | 'order' | 'invoice' | 'payment' | 'credit-note' | 'delivery';
@@ -16,17 +17,13 @@ function hrefFor(k: DocKind, id: string) {
   return undefined;
 }
 function dispStatus(k: DocKind, r: any): string {
-  if (k === 'invoice') {
-    if ((r.invoiceStatus || r.status) === 'VOID') return 'VOID';
-    const p = (r.paymentStatus || '').replace(/_/g, ' ');
-    return p || (r.status || '').replace(/_/g, ' ');
-  }
+  if (k === 'invoice') return invoiceDisplayStatus(r);
   if (k === 'order') return (r.status || '').replace(/_/g, ' ');
   return (r.status || '').replace(/_/g, ' ');
 }
 function stepFor(k: DocKind, r: any): Step { return { kind: k, no: r.quotationNo || r.orderNo || r.invoiceNo || r.receiptNo || r.creditNoteNo || r.deliveryNo || r.number || '—', id: r.id, sub: dispStatus(k, r) }; }
 
-function invoiceStatus(r: any): string { if ((r.invoiceStatus || r.status) === 'VOID') return 'VOID'; return (r.paymentStatus || '').replace(/_/g, ' ') || (r.status || '').replace(/_/g, ' '); }
+function invoiceStatus(r: any): string { return invoiceDisplayStatus(r); }
 
 function Chain({ steps }: { steps: Step[] }) {
   return (

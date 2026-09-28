@@ -99,7 +99,7 @@ export function BusinessPerformanceSlide(props: any) {
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-[#f8fafc] px-4 py-3">
                 <div className="text-[11.5px] text-[#64748b]">Fiscal Day</div>
-                <div className="text-[20px] font-bold text-[#171a2e]">#{device?.fiscalDayNo || 0}</div>
+                <div className="text-[13px] font-semibold text-[#171a2e] tabular-nums">#{device?.fiscalDayNo || 0}</div>
               </div>
               <div className="rounded-xl bg-[#f8fafc] px-4 py-3">
                 <div className="text-[11.5px] text-[#64748b]">Day Status</div>
@@ -107,11 +107,11 @@ export function BusinessPerformanceSlide(props: any) {
               </div>
               <div className="rounded-xl bg-[#f8fafc] px-4 py-3">
                 <div className="text-[11.5px] text-[#64748b]">Receipts Today</div>
-                <div className="text-[20px] font-bold text-[#171a2e]">{fmtNumber(receiptsToday)}</div>
+                <div className="text-[13px] font-semibold text-[#171a2e] tabular-nums">{fmtNumber(receiptsToday)}</div>
               </div>
               <div className="rounded-xl bg-[#f8fafc] px-4 py-3">
                 <div className="text-[11.5px] text-[#64748b]">VAT Today</div>
-                <div className="text-[20px] font-bold text-[#171a2e]">{fmtMoney(vatToday)}</div>
+                <div className="text-[13px] font-semibold text-[#171a2e] tabular-nums">{fmtMoney(vatToday)}</div>
               </div>
             </div>
             <div className="flex items-center justify-between border-t border-[#eef0f6] pt-3">

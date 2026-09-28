@@ -105,7 +105,7 @@ export function FinanceAccountSummaryDrawer({ open, category, onClose }: { open:
     <div className="flex items-center justify-between mb-4">
       <div>
         <div className="flex items-center gap-2">
-          <span className="text-[22px] font-semibold leading-[1.2] tracking-[-0.01em] text-[#1f2937]">{money(d?.balance, d?.currency)}</span>
+          <span className="text-[13px] font-semibold leading-tight tracking-[-0.01em] text-[#1f2937] tabular-nums">{money(d?.balance, d?.currency)}</span>
         </div>
         <div className="text-[12px] text-[#98A2B3] mt-1">{d?.totalLabel}{d?.periodLabel ? ` · ${d.periodLabel}` : ''}</div>
       </div>

@@ -156,8 +156,8 @@ export function DocKpi(props: Kpi) {
       <div className="flex items-center gap-4">
         <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-lg" style={{ background: props.color || '#003366', boxShadow: `0 6px 14px ${(props.color || '#003366')}55` }}>{props.icon}</div>
         <div className="min-w-0">
-          <div className="text-[12px] font-medium text-[#8a90ad] truncate">{props.label}</div>
-          <div className="text-[20px] font-bold text-[#171a2e] leading-tight truncate">{props.value}</div>
+          <div className="text-[11px] font-medium text-[#8a90ad] truncate">{props.label}</div>
+          <div className="text-[13px] font-semibold text-[#171a2e] leading-tight truncate tabular-nums">{props.value}</div>
           {props.hint && <div className="text-[11px] text-[#a1a6c0]">{props.hint}</div>}
         </div>
       </div>

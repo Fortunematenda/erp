@@ -18,9 +18,9 @@ export default function EditQuotePage() {
   const [busy, setBusy] = useState(false);
   const list = useQuery({ queryKey: ['/sales/quotations'], queryFn: () => api('/sales/quotations') });
   const preview = useQuery({ queryKey: ['/documents/quotation', id], queryFn: () => api(`/documents/quotation/${id}`), enabled: !!id });
-  if (list.isLoading) return <div className="nex-fade max-w-3xl mx-auto p-8 text-center text-slate-400"><Spin /></div>;
+  if (list.isLoading) return <div className="nex-fade p-8 text-center text-slate-400"><Spin /></div>;
   const record = (list.data || []).find((x: any) => x.id === id);
-  if (!record) return <div className="nex-fade max-w-3xl mx-auto p-8 text-center text-slate-400">Quotation not found</div>;
+  if (!record) return <div className="nex-fade p-8 text-center text-slate-400">Quotation not found</div>;
   const canConvert = ['OPEN', 'PENDING', 'SENT', 'ACCEPTED'].includes(String(record.status || '').toUpperCase()) && record.conversionType == null;
 
   async function convert(to: 'order' | 'invoice') {
@@ -37,7 +37,7 @@ export default function EditQuotePage() {
   }
 
   return (
-    <div className="nex-fade max-w-[1024px] mx-auto">
+    <div className="nex-fade">
       {canConvert && (
         <div className="mb-4 flex items-center gap-2 flex-wrap rounded-xl border border-[#eef0f6] bg-white px-4 py-3">
           <span className="text-[13px] font-medium text-[#344054]">This quote is accepted. Convert it to:</span>

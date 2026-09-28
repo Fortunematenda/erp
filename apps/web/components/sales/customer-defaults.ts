@@ -1,5 +1,6 @@
 'use client';
 import { api } from '@/lib/api';
+import { itemSelectorSubtitle, itemTypeLabel } from '@/lib/item-type';
 
 /**
  * Shared customer → document hydration used by Quote, Sales Order and Invoice forms
@@ -109,22 +110,30 @@ export function dueDateFromTerms(terms: string | null | undefined, invoiceDate: 
   return null;
 }
 
-/** Line defaults from the selected product (description / unit / qty seed). */
+/** Line defaults from the selected product (description / unit / qty seed).
+ * Description is customer-facing name only — SKU stays in the Product column. */
 export function productLineDefaults(item: any): { description: string; unit?: string; quantity: number } {
   return {
-    description: [item?.sku ? `${item.sku}` : null, item?.description || item?.name].filter(Boolean).join(' — ') || item?.name || '',
+    description: (item?.description || item?.name || '').trim() || 'Item',
     unit: item?.unit || undefined,
     quantity: 1,
   };
 }
 
-/** Improved product dropdown option: product name only (clean labels on quote/order/invoice lines). */
-export function productOptions(items: any[] | undefined, currency = 'USD') {
-  return (items || []).map((i: any) => ({
-    label: i.name,
-    value: i.id,
-    item: i,
-  }));
+/** Product/service dropdown options — SKU, name, and search text. */
+export function productOptions(items: any[] | undefined, _currency = 'USD') {
+  return (items || []).map((i: any) => {
+    const skuPart = i.sku ? `${i.sku} ` : '';
+    const subtitle = itemSelectorSubtitle(i.type);
+    return {
+      label: i.sku ? `${i.sku} · ${i.name || 'Item'}` : (i.name || 'Item'),
+      value: i.id,
+      item: i,
+      searchLabel: `${skuPart}${i.name || ''} ${i.description || ''} ${subtitle}`,
+      typeBadge: subtitle,
+      typeLabel: itemTypeLabel(i.type),
+    };
+  });
 }
 
 /**
@@ -140,4 +149,29 @@ export async function resolveProductLinePatch(itemId: string, items: any[] | und
   const patch: Record<string, any> = { itemId, description: base.description, unit: base.unit, quantity: base.quantity };
   if (res.price != null) patch.unitPrice = res.price; // otherwise leave the current rate untouched and warn
   return { patch, warning: res.warning };
+}
+
+type MergeableLine = { key: number; itemId?: string; quantity: number; description?: string; unitPrice?: number; taxRate?: number };
+
+/**
+ * One product = one line (Xero/QB style). If the product is already on another line,
+ * add this line's quantity into it and remove the duplicate row.
+ */
+export function mergeDuplicateProductLine<T extends MergeableLine>(
+  lines: T[],
+  key: number,
+  itemId: string,
+  emptyLine: () => T,
+): { lines: T[]; merged: true; newQty: number } | { lines: T[]; merged: false } {
+  if (!itemId) return { lines, merged: false };
+  const existing = lines.find((l) => l.key !== key && l.itemId === itemId);
+  if (!existing) return { lines, merged: false };
+  const current = lines.find((l) => l.key === key);
+  const addQty = Math.max(Number(current?.quantity || 1) || 1, 0.0001);
+  const newQty = Number(existing.quantity || 0) + addQty;
+  let next = lines
+    .map((l) => (l.key === existing.key ? { ...l, quantity: newQty } : l))
+    .filter((l) => l.key !== key) as T[];
+  if (!next.length) next = [emptyLine()];
+  return { lines: next, merged: true, newQty };
 }

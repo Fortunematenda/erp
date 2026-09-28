@@ -16,7 +16,7 @@ export function SummaryCard({ icon, label, value, tone = '#003366', hint, valueC
         <div className="w-11 h-11 rounded-xl flex items-center justify-center text-white text-lg shrink-0" style={{ background: tone, boxShadow: `0 6px 14px ${tone}40` }}>{icon}</div>
         <div className="min-w-0">
           <div className="text-[13px] font-medium text-[#344054] truncate">{label}</div>
-          <div className="text-[19px] font-semibold leading-[1.2] tracking-[-0.01em] truncate" style={{ color: valueColor || '#475467' }}>{value}</div>
+          <div className="text-[13px] font-semibold leading-tight tracking-[-0.01em] truncate tabular-nums" style={{ color: valueColor || '#475467' }}>{value}</div>
           {hint && <div className="text-[12px] text-[#98A2B3] mt-0.5 truncate">{hint}</div>}
         </div>
       </div>
@@ -88,9 +88,9 @@ export function DetailGrid({ items, cols = 1 }: { items: [string, React.ReactNod
 
 export function FilterBar({ children, extra }: { children: React.ReactNode; extra?: React.ReactNode }) {
   return (
-    <div className="nex-card mb-4 px-4 py-3 flex flex-wrap items-center gap-3">
+    <div className="nex-card nex-filter-bar mb-4 px-4 py-3.5 flex flex-wrap items-center gap-3">
       {children}
-      <div className="ml-auto">{extra}</div>
+      {extra ? <div className="ml-auto text-[12px] font-medium text-[#475569]">{extra}</div> : null}
     </div>
   );
 }

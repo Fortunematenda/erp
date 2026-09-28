@@ -26,7 +26,11 @@ export class CompanyController {
       this.prisma.inventoryCategory.findMany({ where: { companyId, active: true }, orderBy: { name: 'asc' } }),
       this.prisma.priceList.findMany({ where: { companyId, active: true }, orderBy: { name: 'asc' } }),
     ]);
-    return { branches, departments, accounts, customers, suppliers, items, warehouses, employees, taxRates, plans, categories, priceLists };
+    return {
+      branches, departments, accounts, customers, suppliers,
+      items: items.map((i) => ({ ...i, type: i.type === 'INVENTORY' ? 'INVENTORY_PRODUCT' : i.type === 'NON_INVENTORY' ? 'NON_INVENTORY_PRODUCT' : i.type })),
+      warehouses, employees, taxRates, plans, categories, priceLists,
+    };
   }
 }
 

@@ -196,7 +196,7 @@ export function FinancialTab({ ctx }: { ctx: ReportCtx }) {
                 </div>
                 <div className="lg:col-span-2 rounded-lg bg-[#f0f6ff] border border-[#d7e6fa] px-4 py-3 flex justify-between items-center">
                   <span className="text-[13px] font-semibold text-[#171a2e]">Net Profit</span>
-                  <span className="text-[18px] font-bold" style={{ color: Number(d.netProfit) >= 0 ? '#16a34a' : '#dc2626' }}>{fmtMoney(d.netProfit)}</span>
+                  <span className="text-[13px] font-semibold tabular-nums" style={{ color: Number(d.netProfit) >= 0 ? '#16a34a' : '#dc2626' }}>{fmtMoney(d.netProfit)}</span>
                 </div>
               </div>
             )}
@@ -278,9 +278,9 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
                 { label: 'Outstanding', v: d.kpis?.outstanding, c: '#f59e0b' },
                 { label: 'Invoices', v: d.kpis?.count, plain: true },
               ].map((k) => (
-                <div key={k.label} className="nex-card border rounded-lg px-4 py-3">
-                  <div className="text-[12px] text-[#64748b]">{k.label}</div>
-                  <div className="text-[19px] font-semibold text-[#171a2e] mt-0.5">{k.plain ? fmtNumber(k.v) : fmtMoney(k.v)}</div>
+                <div key={k.label} className="nex-card border rounded-lg px-4 py-3 text-center">
+                  <div className="text-[11px] text-[#64748b]">{k.label}</div>
+                  <div className="text-[13px] font-semibold text-[#171a2e] mt-0.5 tabular-nums">{k.plain ? fmtNumber(k.v) : fmtMoney(k.v)}</div>
                 </div>
               ))}
             </div>

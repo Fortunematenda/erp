@@ -17,16 +17,24 @@ export class InvoiceStatusService {
     const { invoiceStatus, dueDate, total, amountPaid, creditsApplied } = input;
     const balanceDue = Math.max(0, Number(total) - Number(amountPaid) - Number(creditsApplied));
     const paid = Math.max(0, Number(amountPaid) + Number(creditsApplied));
+    const life = String(invoiceStatus || '').toUpperCase();
+    // Drafts are not AR — keep payment axis as UNPAID but never treat a $0 draft as PAID.
+    if (life === 'DRAFT' || life === 'VOID') {
+      return { status: 'UNPAID', balanceDue: Number(balanceDue.toFixed(2)) };
+    }
     let status: string;
     if (balanceDue <= 0.005) status = 'PAID';
     else if (paid > 0.005) status = 'PARTIALLY_PAID';
-    else if (invoiceStatus === 'POSTED' && dueDate && new Date(dueDate) < startOfToday()) status = 'OVERDUE';
+    else if (life === 'POSTED' && dueDate && new Date(dueDate) < startOfToday()) status = 'OVERDUE';
     else status = 'UNPAID';
     return { status, balanceDue: Number(balanceDue.toFixed(2)) };
   }
 
+  /** Stamp on Preview / Print / PDF — mirrors Xero/QB (DRAFT watermark until posted). */
   static resolveDocumentStamp(invoice: { invoiceStatus?: string; paymentStatus?: string }): string {
-    if (String(invoice.invoiceStatus || '').toUpperCase() === 'VOID') return 'VOID';
+    const life = String(invoice.invoiceStatus || '').toUpperCase();
+    if (life === 'VOID') return 'VOID';
+    if (life === 'DRAFT') return 'DRAFT';
     const p = String(invoice.paymentStatus || '').toUpperCase();
     if (p === 'PAID') return 'PAID';
     if (p === 'PARTIALLY_PAID') return 'PART PAID';

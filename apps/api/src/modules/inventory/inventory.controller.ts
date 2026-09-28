@@ -2,15 +2,24 @@ import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post,
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { JwtAuthGuard } from '../auth/auth.guard';
+import { PermissionsGuard, RequirePermissions } from '../auth/permissions.guard';
 import { companyIdOf } from '../../core/context';
-import { CountLineDto, CreateCountDto, CreateMovementDto, InventoryCategoryDto, ItemDto, PriceListDto, TransferDto, WarehouseDto } from './inventory.dto';
+import { CountLineDto, CreateAdjustmentDto, CreateCountDto, CreateMovementDto, InventoryCategoryDto, ItemDto, PriceListDto, TransferDto, WarehouseDto } from './inventory.dto';
 import { NumberingService } from '../../core/common/numbering.service';
 import { AuditService } from '../../core/common/audit.service';
 import { InventoryMovementService } from './inventory-movement.service';
+import { PostingService } from '../finance/posting.service';
+import { ITEM_TYPE, isService, isStockTracked, normalizeItemType, trackingStatus, itemTypeFromTracking } from './item-type';
 
 @ApiTags('Inventory') @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Controller('inventory')
 export class InventoryController {
-  constructor(private prisma: PrismaService, private numbering: NumberingService, private audit: AuditService, private movementService: InventoryMovementService) {}
+  constructor(
+    private prisma: PrismaService,
+    private numbering: NumberingService,
+    private audit: AuditService,
+    private movementService: InventoryMovementService,
+    private posting: PostingService,
+  ) {}
 
   private sign = (t: string) => ['RECEIPT', 'TRANSFER_IN', 'ADJUSTMENT_IN', 'RETURN_IN'].includes(t) ? 1 : -1;
   private onHandOf = (m: any[]) => m.reduce((s, x) => s + this.sign(x.type) * Number(x.quantity), 0);
@@ -28,15 +37,33 @@ export class InventoryController {
     return { onHand: qty, avgCost: Number(avgCost.toFixed(2)), value: Number(value.toFixed(2)) };
   }
   private async itemBalance(companyId: string, itemId: string, warehouseId?: string) {
-    const where: any = { itemId };
-    const wh = warehouseId ? await this.prisma.warehouse.findFirst({ where: { id: warehouseId, companyId } }) : null;
-    if (wh) where.warehouseId = wh.id;
-    const movements = await this.prisma.stockMovement.findMany({ where });
-    const onHand = Number(movements.reduce((s, m) => s + (Number((m as any).signedQuantity) || this.sign(m.type) * Number(m.quantity)), 0).toFixed(4));
-    const reservedAgg = await this.prisma.stockReservation.aggregate({ where: { itemId, status: 'ACTIVE', ...(wh ? { OR: [{ warehouseId: wh.id }, { warehouseId: null }] } : {}) }, _sum: { qty: true } });
-    const reserved = Number((reservedAgg._sum.qty || 0).toFixed(4));
-    const avg = this.wac(movements);
-    return { onHand, reserved, available: Number((onHand - reserved).toFixed(4)), avgCost: avg.avgCost, value: avg.value };
+    return this.movementService.balance(companyId, itemId, warehouseId);
+  }
+
+  /** Resolve inventory asset + adjustment P&L account codes (never hard-code UUIDs). */
+  private async resolveInventoryAccounts(companyId: string, item: { inventoryAssetAccountId?: string | null; adjustmentAccountId?: string | null; cogsAccountId?: string | null }) {
+    const byCode = await this.posting.accountsByCode(companyId);
+    let assetCode = '1200';
+    let adjCode = '6500';
+    if (item.inventoryAssetAccountId) {
+      const a = await this.prisma.ledgerAccount.findFirst({ where: { id: item.inventoryAssetAccountId, companyId } });
+      if (a) assetCode = a.code;
+    } else if (!byCode['1200']) {
+      await this.prisma.ledgerAccount.create({ data: { companyId, code: '1200', name: 'Inventory', type: 'ASSET' } });
+    }
+    if (item.adjustmentAccountId) {
+      const a = await this.prisma.ledgerAccount.findFirst({ where: { id: item.adjustmentAccountId, companyId } });
+      if (a) adjCode = a.code;
+    } else if (!byCode['6500']) {
+      await this.prisma.ledgerAccount.create({ data: { companyId, code: '6500', name: 'Inventory Adjustments', type: 'EXPENSE' } });
+    }
+    return { assetCode, adjCode };
+  }
+
+  private adjustmentMovementType(reason: string, delta: number): string {
+    if (reason === 'OPENING_BALANCE') return 'RECEIPT';
+    if (delta > 0) return 'ADJUSTMENT_IN';
+    return 'ADJUSTMENT_OUT';
   }
 
   // ----- Inventory categories -----
@@ -114,7 +141,16 @@ export class InventoryController {
     const companyId = companyIdOf(req.user);
     const where: any = { companyId };
     if (q.q) where.OR = [{ sku: { contains: q.q, mode: 'insensitive' } }, { name: { contains: q.q, mode: 'insensitive' } }, { barcode: { contains: q.q, mode: 'insensitive' } }, { description: { contains: q.q, mode: 'insensitive' } }, { hsCode: { contains: q.q, mode: 'insensitive' } }];
-    if (q.type) where.type = q.type;
+    if (q.type) {
+      const nt = normalizeItemType(String(q.type));
+      // Accept legacy short codes in filters too
+      where.type = { in: [nt, ...(nt === ITEM_TYPE.INVENTORY_PRODUCT ? ['INVENTORY'] : nt === ITEM_TYPE.NON_INVENTORY_PRODUCT ? ['NON_INVENTORY'] : [])] };
+    } else if (q.tracking) {
+      const fromTracking = itemTypeFromTracking(String(q.tracking));
+      if (fromTracking) {
+        where.type = { in: [fromTracking, ...(fromTracking === ITEM_TYPE.INVENTORY_PRODUCT ? ['INVENTORY'] : fromTracking === ITEM_TYPE.NON_INVENTORY_PRODUCT ? ['NON_INVENTORY'] : [])] };
+      }
+    }
     if (q.categoryId) where.categoryId = q.categoryId;
     if (q.active !== undefined) where.active = q.active === 'true' || q.active === true;
     if (q.createdFrom || q.createdTo) where.createdAt = { ...(q.createdFrom ? { gte: new Date(q.createdFrom) } : {}), ...(q.createdTo ? { lte: new Date(q.createdTo) } : {}) };
@@ -127,9 +163,25 @@ export class InventoryController {
     for (const i of items) {
       const b = await this.itemBalance(companyId, i.id);
       const s = perf[i.id] || { qty: 0, net: 0, lastSale: null };
-      const performance = i.type === 'SERVICE' ? 'SERVICE' : this.classifyPerf(Number(s.qty), b.onHand, i.createdAt, s.lastSale);
-      const incoming = openPOs.filter((p) => p.itemId === i.id).reduce((sum, p) => sum + Math.max(0, Number(p.quantity) - Number(p.receivedQty)), 0);
-      rows.push({ ...i, movements: undefined, onHand: b.onHand, reserved: b.reserved, available: b.available, avgCost: b.avgCost, value: b.value, qtySold: Number(s.qty.toFixed(2)), net: Number(s.net.toFixed(2)), lastSale: s.lastSale, performance, incoming, warehouses: warehouses.length });
+      const performance = isService(i.type) ? 'SERVICE' : this.classifyPerf(Number(s.qty), b.onHand, i.createdAt, s.lastSale);
+      const incoming = isStockTracked(i.type) ? openPOs.filter((p) => p.itemId === i.id).reduce((sum, p) => sum + Math.max(0, Number(p.quantity) - Number(p.receivedQty)), 0) : 0;
+      rows.push({
+        ...i,
+        type: normalizeItemType(i.type),
+        trackingStatus: trackingStatus(i.type),
+        movements: undefined,
+        onHand: isStockTracked(i.type) ? b.onHand : null,
+        reserved: isStockTracked(i.type) ? b.reserved : null,
+        available: isStockTracked(i.type) ? b.available : null,
+        avgCost: isStockTracked(i.type) ? b.avgCost : null,
+        value: isStockTracked(i.type) ? b.value : null,
+        qtySold: Number(s.qty.toFixed(2)),
+        net: Number(s.net.toFixed(2)),
+        lastSale: s.lastSale,
+        performance,
+        incoming: isStockTracked(i.type) ? incoming : null,
+        warehouses: warehouses.length,
+      });
     }
     let filtered = rows;
     if (q.performance && q.performance !== 'ALL') filtered = rows.filter((r) => r.performance === q.performance);
@@ -143,23 +195,144 @@ export class InventoryController {
     const sku = dto.sku || await this.numbering.next(companyId, 'SKU');
     let cat: any = null;
     if (dto.categoryId) cat = await this.prisma.inventoryCategory.findFirst({ where: { id: dto.categoryId, companyId } });
-    const item = await this.prisma.inventoryItem.create({ data: { companyId, sku, name: dto.name, unit: dto.unit || 'EA', hsCode: dto.hsCode, barcode: dto.barcode, brand: dto.brand, description: dto.description, salesDescription: dto.salesDescription, purchaseDescription: dto.purchaseDescription, type: dto.type || 'INVENTORY', itemCategory: dto.itemCategory, categoryId: cat?.id, imageUrl: dto.imageUrl, reorderLevel: dto.reorderLevel ?? 0, reorderQuantity: dto.reorderQuantity ?? 0, safetyStock: dto.safetyStock ?? 0, sellingPrice: dto.sellingPrice ?? 0, minSellingPrice: dto.minSellingPrice, purchaseCost: dto.purchaseCost ?? 0, costingMethod: dto.costingMethod, trackBatch: dto.trackBatch ?? false, trackSerial: dto.trackSerial ?? false, trackExpiry: dto.trackExpiry ?? false, salesTaxCode: dto.salesTaxCode ?? cat?.salesTaxCode, purchaseTaxCode: dto.purchaseTaxCode ?? cat?.purchaseTaxCode, incomeAccountId: dto.incomeAccountId ?? cat?.incomeAccountId, cogsAccountId: dto.cogsAccountId ?? cat?.cogsAccountId, inventoryAssetAccountId: dto.inventoryAssetAccountId ?? cat?.inventoryAssetAccountId, expenseAccountId: dto.expenseAccountId ?? cat?.expenseAccountId, adjustmentAccountId: dto.adjustmentAccountId, defaultWarehouseId: dto.defaultWarehouseId, preferredSupplierId: dto.preferredSupplierId, supplierSku: dto.supplierSku, leadTimeDays: dto.leadTimeDays, allowDiscount: dto.allowDiscount ?? true, active: dto.active ?? true } });
-    await this.audit.log(companyId, req.user.sub, 'CREATE', 'InventoryItem', item.id, { sku });
+    const itemType = normalizeItemType(dto.type || ITEM_TYPE.INVENTORY_PRODUCT);
+    const stock = isStockTracked(itemType);
+    const item = await this.prisma.inventoryItem.create({
+      data: {
+        companyId, sku, name: dto.name, unit: dto.unit || (itemType === ITEM_TYPE.SERVICE ? 'Hour' : 'EA'),
+        hsCode: dto.hsCode, barcode: stock || itemType === ITEM_TYPE.NON_INVENTORY_PRODUCT ? dto.barcode : undefined,
+        brand: dto.brand, description: dto.description, salesDescription: dto.salesDescription, purchaseDescription: dto.purchaseDescription,
+        type: itemType, itemCategory: dto.itemCategory, categoryId: cat?.id, imageUrl: dto.imageUrl,
+        reorderLevel: stock ? (dto.reorderLevel ?? 0) : 0,
+        reorderQuantity: stock ? (dto.reorderQuantity ?? 0) : 0,
+        safetyStock: stock ? (dto.safetyStock ?? 0) : 0,
+        sellingPrice: dto.sellingPrice ?? 0, minSellingPrice: dto.minSellingPrice, purchaseCost: dto.purchaseCost ?? 0,
+        costingMethod: stock ? (dto.costingMethod || 'WEIGHTED_AVERAGE') : null,
+        trackBatch: stock ? (dto.trackBatch ?? false) : false,
+        trackSerial: stock ? (dto.trackSerial ?? false) : false,
+        trackExpiry: stock ? (dto.trackExpiry ?? false) : false,
+        salesTaxCode: dto.salesTaxCode ?? cat?.salesTaxCode, purchaseTaxCode: dto.purchaseTaxCode ?? cat?.purchaseTaxCode,
+        incomeAccountId: dto.incomeAccountId ?? cat?.incomeAccountId,
+        cogsAccountId: stock ? (dto.cogsAccountId ?? cat?.cogsAccountId) : undefined,
+        inventoryAssetAccountId: stock ? (dto.inventoryAssetAccountId ?? cat?.inventoryAssetAccountId) : undefined,
+        expenseAccountId: !stock ? (dto.expenseAccountId ?? cat?.expenseAccountId ?? dto.cogsAccountId) : (dto.expenseAccountId ?? cat?.expenseAccountId),
+        adjustmentAccountId: stock ? dto.adjustmentAccountId : undefined,
+        defaultWarehouseId: stock ? dto.defaultWarehouseId : undefined,
+        preferredSupplierId: dto.preferredSupplierId, supplierSku: dto.supplierSku, leadTimeDays: dto.leadTimeDays,
+        allowDiscount: dto.allowDiscount ?? true, active: dto.active ?? true,
+      },
+    });
+    await this.audit.log(companyId, req.user.sub, 'CREATE', 'InventoryItem', item.id, { sku, type: itemType });
     return item;
   }
   @Patch('items/:id') async updateItem(@Req() req: any, @Param('id') id: string, @Body() dto: Partial<ItemDto>) {
-    const existing = await this.prisma.inventoryItem.findFirst({ where: { id, companyId: companyIdOf(req.user) } });
+    const companyId = companyIdOf(req.user);
+    const existing = await this.prisma.inventoryItem.findFirst({
+      where: { id, companyId },
+      include: { _count: { select: { movements: true, reservations: true } } },
+    });
+    if (!existing) throw new BadRequestException('Item not found');
+    if (dto.sku && dto.sku !== existing.sku) {
+      const dup = await this.prisma.inventoryItem.findFirst({ where: { companyId, sku: dto.sku, NOT: { id } } });
+      if (dup) throw new BadRequestException('SKU already exists for this company');
+    }
+    // Master-data only — never accept quantity / on-hand fields.
+    const forbidden = ['onHand', 'quantityOnHand', 'quantity', 'available', 'reserved', 'value', 'avgCost'];
+    for (const k of forbidden) if ((dto as any)[k] !== undefined) throw new BadRequestException('Quantity on hand cannot be edited. Use Adjust Stock instead.');
+
     const data: any = { ...dto };
-    const res = await this.prisma.inventoryItem.updateMany({ where: { id, companyId: companyIdOf(req.user) }, data });
-    if (existing && dto.sellingPrice !== undefined && Number(dto.sellingPrice) !== Number(existing.sellingPrice)) await this.audit.log(companyIdOf(req.user), req.user.sub, 'PRICE_CHANGED', 'InventoryItem', id, { from: Number(existing.sellingPrice), to: Number(dto.sellingPrice) });
-    if (existing && dto.purchaseCost !== undefined && Number(dto.purchaseCost) !== Number(existing.purchaseCost)) await this.audit.log(companyIdOf(req.user), req.user.sub, 'PURCHASE_COST_CHANGED', 'InventoryItem', id, { from: Number(existing.purchaseCost), to: Number(dto.purchaseCost) });
-    return res;
+    if (dto.type !== undefined) {
+      const nextType = normalizeItemType(dto.type);
+      const prevType = normalizeItemType(existing.type);
+      if (nextType !== prevType) {
+        const hasHistory = await this.itemHasTransactionHistory(companyId, id, existing._count);
+        if (hasHistory) {
+          throw new BadRequestException("This item's type cannot be changed because it already has transaction history.");
+        }
+      }
+      data.type = nextType;
+      if (!isStockTracked(nextType)) {
+        data.reorderLevel = 0;
+        data.reorderQuantity = 0;
+        data.safetyStock = 0;
+        data.inventoryAssetAccountId = null;
+        data.defaultWarehouseId = null;
+        data.trackBatch = false;
+        data.trackSerial = false;
+        data.trackExpiry = false;
+        if (nextType === ITEM_TYPE.SERVICE) data.cogsAccountId = data.cogsAccountId ?? null;
+      }
+    }
+
+    await this.prisma.inventoryItem.updateMany({ where: { id, companyId }, data });
+    const changes: Record<string, { from: any; to: any }> = {};
+    for (const key of ['name', 'sku', 'barcode', 'sellingPrice', 'purchaseCost', 'categoryId', 'unit', 'active', 'reorderLevel', 'description', 'type'] as const) {
+      if ((dto as any)[key] !== undefined && String((dto as any)[key] ?? '') !== String((existing as any)[key] ?? '')) {
+        changes[key] = { from: (existing as any)[key], to: key === 'type' ? data.type : (dto as any)[key] };
+      }
+    }
+    if (Object.keys(changes).length) {
+      await this.audit.log(companyId, req.user.sub, 'ITEM_UPDATED', 'InventoryItem', id, { module: 'inventory', metadata: changes });
+    }
+    return this.prisma.inventoryItem.findFirst({ where: { id, companyId } });
   }
+
+  /** Stock movements, reservations, or document lines referencing this item. */
+  private async itemHasTransactionHistory(companyId: string, itemId: string, counts?: { movements: number; reservations: number }) {
+    if (counts && (counts.movements > 0 || counts.reservations > 0)) return true;
+    const [inv, quote, so, po, bill, cn, del] = await Promise.all([
+      this.prisma.salesInvoiceLine.count({ where: { itemId, invoice: { companyId } } }),
+      this.prisma.quotationLine.count({ where: { itemId, quotation: { companyId } } }),
+      this.prisma.salesOrderLine.count({ where: { itemId, salesOrder: { companyId } } }),
+      this.prisma.purchaseOrderLine.count({ where: { itemId, purchaseOrder: { companyId } } }),
+      this.prisma.supplierInvoiceLine.count({ where: { itemId, supplierInvoice: { companyId } } }).catch(() => 0),
+      this.prisma.creditNoteLine.count({ where: { itemId, creditNote: { companyId } } }).catch(() => 0),
+      this.prisma.deliveryLine.count({ where: { itemId, deliveryNote: { companyId } } }).catch(() => 0),
+    ]);
+    return inv + quote + so + po + bill + cn + del > 0;
+  }
+
+  @Post('items/:id/archive')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('inventory.adjust')
+  async archiveItem(@Req() req: any, @Param('id') id: string) {
+    const companyId = companyIdOf(req.user);
+    const item = await this.prisma.inventoryItem.findFirst({ where: { id, companyId } });
+    if (!item) throw new BadRequestException('Item not found');
+    const bal = await this.itemBalance(companyId, id);
+    if (Math.abs(bal.onHand) > 0.0001) {
+      throw new BadRequestException(`Cannot archive while stock on hand is ${bal.onHand}. Adjust or transfer stock to zero first.`);
+    }
+    await this.prisma.inventoryItem.updateMany({ where: { id, companyId }, data: { active: false } });
+    await this.audit.log(companyId, req.user.sub, 'ARCHIVE', 'InventoryItem', id, { module: 'inventory', metadata: { sku: item.sku } });
+    return this.prisma.inventoryItem.findFirst({ where: { id, companyId } });
+  }
+
+  @Post('items/:id/restore')
+  async restoreItem(@Req() req: any, @Param('id') id: string) {
+    const companyId = companyIdOf(req.user);
+    await this.prisma.inventoryItem.updateMany({ where: { id, companyId }, data: { active: true } });
+    await this.audit.log(companyId, req.user.sub, 'RESTORE', 'InventoryItem', id, { module: 'inventory' });
+    return this.prisma.inventoryItem.findFirst({ where: { id, companyId } });
+  }
+
   @Delete('items/:id') async deleteItem(@Req() req: any, @Param('id') id: string) {
     const companyId = companyIdOf(req.user);
-    const item = await this.prisma.inventoryItem.findFirst({ where: { id, companyId }, include: { _count: { select: { movements: true } } } });
-    if (item && item._count.movements) throw new BadRequestException('This item has stock movement history and cannot be deleted. Deactivate it instead.');
+    const item = await this.prisma.inventoryItem.findFirst({
+      where: { id, companyId },
+      include: { _count: { select: { movements: true, reservations: true, priceListItems: true } } },
+    });
+    if (!item) throw new BadRequestException('Item not found');
+    const bal = await this.itemBalance(companyId, id);
+    if (Math.abs(bal.onHand) > 0.0001) {
+      throw new BadRequestException(`Cannot delete: quantity on hand is ${bal.onHand}. Adjust/transfer to zero, then archive.`);
+    }
+    const hasHistory = item._count.movements > 0 || item._count.reservations > 0;
+    if (hasHistory) {
+      throw new BadRequestException('Cannot delete this item because it has transaction history. You can archive it instead.');
+    }
     await this.prisma.inventoryItem.deleteMany({ where: { id, companyId } });
+    await this.audit.log(companyId, req.user.sub, 'DELETE', 'InventoryItem', id, { module: 'inventory', metadata: { sku: item.sku } });
     return { ok: true };
   }
 
@@ -177,7 +350,23 @@ export class InventoryController {
     const stock = [];
     for (const w of warehouses) { const b = await this.itemBalance(companyId, id, w.id); stock.push({ warehouseId: w.id, warehouse: w.name, onHand: b.onHand, reserved: b.reserved, available: b.available, unitCost: b.avgCost, value: b.value }); }
     const total = await this.itemBalance(companyId, id);
-    return { item, stock, total, movements, priceListItems, reservations };
+    const typeLocked = await this.itemHasTransactionHistory(companyId, id, {
+      movements: movements.length,
+      reservations: reservations.length,
+    });
+    return {
+      item: { ...item, type: normalizeItemType(item.type), trackingStatus: trackingStatus(item.type) },
+      stock: isStockTracked(item.type) ? stock : [],
+      total: isStockTracked(item.type) ? total : { onHand: 0, reserved: 0, available: 0, avgCost: 0, value: 0 },
+      movements: isStockTracked(item.type) ? movements : [],
+      priceListItems,
+      reservations,
+      typeLocked,
+      incoming: isStockTracked(item.type)
+        ? (await this.prisma.purchaseOrderLine.findMany({ where: { itemId: id, purchaseOrder: { companyId, status: { in: ['APPROVED', 'PART_RECEIVED'] } } } }))
+            .reduce((s, p) => s + Math.max(0, Number(p.quantity) - Number(p.receivedQty)), 0)
+        : null,
+    };
   }
 
   // ----- Warehouses -----
@@ -193,7 +382,10 @@ export class InventoryController {
     return this.prisma.warehouse.updateMany({ where: { id, companyId: companyIdOf(req.user) }, data: dto });
   }
   @Delete('warehouses/:id') async deleteWarehouse(@Req() req: any, @Param('id') id: string) {
-    await this.prisma.warehouse.deleteMany({ where: { id, companyId: companyIdOf(req.user) } });
+    const companyId = companyIdOf(req.user);
+    const moves = await this.prisma.stockMovement.count({ where: { warehouseId: id, warehouse: { companyId } } });
+    if (moves) throw new BadRequestException('Cannot delete a warehouse with stock movement history.');
+    await this.prisma.warehouse.deleteMany({ where: { id, companyId } });
     return { ok: true };
   }
 
@@ -208,8 +400,9 @@ export class InventoryController {
       const incoming = openPOs.filter((p) => p.itemId === i.id).reduce((s, p) => s + Math.max(0, Number(p.quantity) - Number(p.receivedQty)), 0);
       for (const w of warehouses) {
         const b = await this.itemBalance(companyId, i.id, w.id);
-        const status = i.type === 'SERVICE' ? 'ACTIVE' : (b.onHand <= 0 ? 'OUT OF STOCK' : b.available <= Number(i.reorderLevel) ? 'LOW STOCK' : b.onHand > Number(i.reorderLevel) * 4 ? 'OVERSTOCK' : 'IN STOCK');
-        rows.push({ id: `${i.id}__${w.id}`, itemId: i.id, sku: i.sku, name: i.name, unit: i.unit, type: i.type, warehouseId: w.id, warehouse: w.name, onHand: b.onHand, reserved: b.reserved, available: b.available, incoming, reorderLevel: Number(i.reorderLevel), unitCost: b.avgCost, value: b.value, status });
+        const status = !isStockTracked(i.type) ? 'N/A' : (b.onHand <= 0 ? 'OUT OF STOCK' : b.available <= Number(i.reorderLevel) ? 'LOW STOCK' : b.onHand > Number(i.reorderLevel) * 4 ? 'OVERSTOCK' : 'IN STOCK');
+        if (!isStockTracked(i.type)) continue;
+        rows.push({ id: `${i.id}__${w.id}`, itemId: i.id, sku: i.sku, name: i.name, unit: i.unit, type: normalizeItemType(i.type), warehouseId: w.id, warehouse: w.name, onHand: b.onHand, reserved: b.reserved, available: b.available, incoming, reorderLevel: Number(i.reorderLevel), unitCost: b.avgCost, value: b.value, status });
       }
     }
     return rows;
@@ -219,65 +412,234 @@ export class InventoryController {
     return this.prisma.stockMovement.findMany({ where: { warehouse: { companyId: companyIdOf(req.user) } }, include: { item: true, warehouse: { include: { branch: true } } }, orderBy: { occurredAt: 'desc' }, take: 200 });
   }
 
-  @Post('movements') async createMovement(@Req() req: any, @Body() dto: CreateMovementDto) {
+  /** Stock movement ledger is immutable — create only. Corrections must be new reversing movements. */
+  @Post('movements')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('inventory.adjust')
+  async createMovement(@Req() req: any, @Body() dto: CreateMovementDto) {
     const companyId = companyIdOf(req.user);
     return this.movementService.create(companyId, dto, req.user.sub);
   }
 
-  @Post('transfers') async transfer(@Req() req: any, @Body() dto: TransferDto) {
+  @Post('transfers')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('inventory.transfer')
+  async transfer(@Req() req: any, @Body() dto: TransferDto) {
     const companyId = companyIdOf(req.user);
     const [from, to] = await Promise.all([
       this.prisma.warehouse.findFirst({ where: { id: dto.fromWarehouseId, companyId } }),
       this.prisma.warehouse.findFirst({ where: { id: dto.toWarehouseId, companyId } }),
     ]);
-    if (!from || !to) throw new Error('Warehouse not found');
-    if (dto.fromWarehouseId === dto.toWarehouseId) throw new Error('Source and destination warehouses must differ');
+    if (!from || !to) throw new BadRequestException('Warehouse not found');
+    if (dto.fromWarehouseId === dto.toWarehouseId) throw new BadRequestException('Source and destination warehouses must differ');
+    const date = dto.date ? new Date(dto.date) : new Date();
+    await this.movementService.assertPeriodOpen(companyId, date);
+    const bal = await this.movementService.balance(companyId, dto.itemId, from.id);
+    const unitCost = bal.avgCost;
     const ref = dto.reference || await this.numbering.next(companyId, 'TRF');
     const results = await this.prisma.$transaction(async (tx) => {
-      const out = await this.movementService.create(companyId, { warehouseId: from.id, itemId: dto.itemId, type: 'TRANSFER_OUT', quantity: Number(dto.quantity), unitCost: 0, reference: ref }, req.user.sub, tx);
-      const inn = await this.movementService.create(companyId, { warehouseId: to.id, itemId: dto.itemId, type: 'TRANSFER_IN', quantity: Number(dto.quantity), unitCost: 0, reference: ref }, req.user.sub, tx);
+      const out = await this.movementService.create(companyId, {
+        warehouseId: from.id, itemId: dto.itemId, type: 'TRANSFER_OUT', quantity: Number(dto.quantity),
+        unitCost, reference: ref, notes: dto.notes, occurredAt: date,
+      }, req.user.sub, tx);
+      const inn = await this.movementService.create(companyId, {
+        warehouseId: to.id, itemId: dto.itemId, type: 'TRANSFER_IN', quantity: Number(dto.quantity),
+        unitCost, reference: ref, notes: dto.notes, occurredAt: date,
+      }, req.user.sub, tx);
       return [out, inn];
     });
-    await this.audit.log(companyId, req.user.sub, 'TRANSFER', 'StockMovement', results[0].id, { ref });
+    await this.audit.log(companyId, req.user.sub, 'TRANSFER', 'StockMovement', results[0].id, {
+      module: 'inventory',
+      metadata: { ref, from: from.id, to: to.id, qty: dto.quantity, unitCost, notes: dto.notes },
+    });
     return results;
+  }
+
+  /**
+   * Proper stock adjustment workflow.
+   * Never edits quantityOnHand — creates an immutable movement (+ optional GL).
+   */
+  @Post('adjustments')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('inventory.adjust')
+  async createAdjustment(@Req() req: any, @Body() dto: CreateAdjustmentDto) {
+    const companyId = companyIdOf(req.user);
+    const item = await this.prisma.inventoryItem.findFirst({ where: { id: dto.itemId, companyId } });
+    if (!item) throw new BadRequestException('Item not found');
+    if (!isStockTracked(item.type)) throw new BadRequestException('Only Inventory Products can be stock-adjusted');
+    const warehouse = await this.prisma.warehouse.findFirst({ where: { id: dto.warehouseId, companyId } });
+    if (!warehouse) throw new BadRequestException('Warehouse not found');
+
+    const date = dto.date ? new Date(dto.date) : new Date();
+    await this.movementService.assertPeriodOpen(companyId, date);
+    const before = await this.movementService.balance(companyId, item.id, warehouse.id);
+
+    let delta = 0;
+    if (dto.mode === 'set') {
+      if (dto.countedQty === undefined || dto.countedQty === null) throw new BadRequestException('countedQty is required for set mode');
+      delta = Number((Number(dto.countedQty) - before.onHand).toFixed(4));
+    } else {
+      if (dto.quantity === undefined || dto.quantity === null) throw new BadRequestException('quantity is required for delta mode');
+      delta = Number(dto.quantity);
+      if (dto.reason === 'QUANTITY_DECREASE' || ['DAMAGED', 'LOST', 'EXPIRED'].includes(dto.reason)) {
+        delta = -Math.abs(delta);
+      } else if (dto.reason === 'QUANTITY_INCREASE' || dto.reason === 'FOUND' || dto.reason === 'OPENING_BALANCE') {
+        delta = Math.abs(delta);
+      }
+    }
+    if (Math.abs(delta) < 0.0001) throw new BadRequestException('No quantity difference to adjust');
+
+    const type = this.adjustmentMovementType(dto.reason, delta);
+    const qty = Math.abs(delta);
+    const unitCost = dto.unitCost !== undefined && dto.unitCost !== null
+      ? Number(dto.unitCost)
+      : (type === 'RECEIPT' || type === 'ADJUSTMENT_IN'
+        ? (before.avgCost || Number(item.purchaseCost) || 0)
+        : before.avgCost);
+    const ref = dto.reference || await this.numbering.next(companyId, 'ADJ');
+    const noteText = dto.notes?.trim() || undefined;
+    const journalNote = [dto.reason, noteText].filter(Boolean).join(': ');
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const movement = await this.movementService.create(companyId, {
+        warehouseId: warehouse.id,
+        itemId: item.id,
+        type,
+        quantity: qty,
+        unitCost,
+        reference: ref,
+        notes: noteText,
+        occurredAt: date,
+      }, req.user.sub, tx);
+
+      let journal: any = null;
+      const shouldPost = dto.postJournal !== false && isStockTracked(item.type) && Number(unitCost) * qty > 0.0001;
+      if (shouldPost) {
+        const { assetCode, adjCode } = await this.resolveInventoryAccounts(companyId, item);
+        const amount = Number((qty * Number(unitCost)).toFixed(2));
+        // Opening balance capitalizes against equity (3000); other gains/losses use adjustment P&L.
+        const offsetCode = dto.reason === 'OPENING_BALANCE' ? '3000' : adjCode;
+        const lines = delta > 0
+          ? [
+              { code: assetCode, debit: amount, credit: 0, description: `Stock increase ${item.sku}` },
+              { code: offsetCode, debit: 0, credit: amount, description: journalNote || (dto.reason === 'OPENING_BALANCE' ? `Opening stock ${ref}` : `Adjustment gain ${ref}`) },
+            ]
+          : [
+              { code: adjCode, debit: amount, credit: 0, description: journalNote || `Adjustment loss ${ref}` },
+              { code: assetCode, debit: 0, credit: amount, description: `Stock decrease ${item.sku}` },
+            ];
+        journal = await this.posting.postJournal(companyId, {
+          date,
+          description: `Stock adjustment ${ref} (${dto.reason})${noteText ? `: ${noteText}` : ''}`,
+          reference: ref,
+          sourceType: 'STOCK_ADJUSTMENT',
+          sourceId: movement.id,
+          lines,
+          userId: req.user.sub,
+        }, tx);
+      }
+      return { movement, journal };
+    });
+
+    const after = await this.movementService.balance(companyId, item.id, warehouse.id);
+    await this.audit.log(companyId, req.user.sub, 'STOCK_ADJUSTMENT', 'StockMovement', result.movement.id, {
+      module: 'inventory',
+      metadata: {
+        reason: dto.reason, mode: dto.mode, beforeQty: before.onHand, afterQty: after.onHand, delta,
+        unitCost, reference: ref, notes: noteText, journalId: result.journal?.id,
+      },
+    });
+    return {
+      ...result,
+      beforeQty: before.onHand,
+      afterQty: after.onHand,
+      delta,
+      unitCost: Number(result.movement.unitCost),
+      reference: ref,
+    };
   }
 
   // ----- Stock counts -----
   @Get('counts') counts(@Req() req: any) {
     return this.prisma.stockCount.findMany({ where: { companyId: companyIdOf(req.user) }, include: { warehouse: true, lines: true }, orderBy: { createdAt: 'desc' } });
   }
-  @Post('counts') async createCount(@Req() req: any, @Body() dto: CreateCountDto) {
+  @Post('counts')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('inventory.adjust')
+  async createCount(@Req() req: any, @Body() dto: CreateCountDto) {
     const companyId = companyIdOf(req.user);
     const countNo = await this.numbering.next(companyId, 'SC');
+    const lines = [];
+    for (const l of dto.lines) {
+      const bal = await this.movementService.balance(companyId, l.itemId, dto.warehouseId);
+      const variance = Number((Number(l.countedQty) - bal.onHand).toFixed(4));
+      lines.push({ itemId: l.itemId, systemQty: bal.onHand, countedQty: l.countedQty, variance });
+    }
     const count = await this.prisma.stockCount.create({
-      data: { companyId, warehouseId: dto.warehouseId, countNo, lines: { create: dto.lines.map((l: CountLineDto) => ({ itemId: l.itemId, systemQty: 0, countedQty: l.countedQty, variance: 0 })) } },
+      data: { companyId, warehouseId: dto.warehouseId, countNo, lines: { create: lines } },
       include: { lines: true },
     });
     await this.audit.log(companyId, req.user.sub, 'CREATE', 'StockCount', count.id, { countNo });
     return count;
   }
-  @Post('counts/:id/post') async postCount(@Req() req: any, @Param('id') id: string) {
+  @Post('counts/:id/post')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('inventory.adjust')
+  async postCount(@Req() req: any, @Param('id') id: string) {
     const companyId = companyIdOf(req.user);
     const count = await this.prisma.stockCount.findFirst({ where: { id, companyId }, include: { lines: true, warehouse: true } });
-    if (!count) throw new Error('Stock count not found');
+    if (!count) throw new BadRequestException('Stock count not found');
     if (count.status !== 'DRAFT') return count;
-    const movements: any[] = [];
-    for (const line of count.lines) {
-      const movementsAll = await this.prisma.stockMovement.findMany({ where: { warehouseId: count.warehouseId, itemId: line.itemId } });
-      const onHand = movementsAll.reduce((s, m) => s + (Number((m as any).signedQuantity) || (['RECEIPT', 'TRANSFER_IN', 'ADJUSTMENT_IN', 'RETURN_IN'].includes(m.type) ? Number(m.quantity) : -Number(m.quantity))), 0);
-      const variance = Number(line.countedQty) - onHand;
-      await this.prisma.stockCountLine.update({ where: { id: line.id }, data: { systemQty: onHand, variance } });
-      if (Math.abs(variance) > 0.0001) {
-        movements.push({ warehouseId: count.warehouseId, itemId: line.itemId, type: variance > 0 ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT', quantity: Math.abs(variance), signedQuantity: variance, unitCost: 0, reference: count.countNo, occurredAt: count.countDate });
+    await this.movementService.assertPeriodOpen(companyId, count.countDate);
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const line of count.lines) {
+        const bal = await this.movementService.balance(companyId, line.itemId, count.warehouseId, tx);
+        const variance = Number((Number(line.countedQty) - bal.onHand).toFixed(4));
+        await tx.stockCountLine.update({ where: { id: line.id }, data: { systemQty: bal.onHand, variance } });
+        if (Math.abs(variance) < 0.0001) continue;
+        const item = await tx.inventoryItem.findFirst({ where: { id: line.itemId, companyId } });
+        if (!item || !isStockTracked(item.type)) continue;
+        const type = variance > 0 ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT';
+        const qty = Math.abs(variance);
+        const movement = await this.movementService.create(companyId, {
+          warehouseId: count.warehouseId,
+          itemId: line.itemId,
+          type,
+          quantity: qty,
+          unitCost: bal.avgCost,
+          reference: count.countNo,
+          occurredAt: count.countDate,
+        }, req.user.sub, tx);
+        if (isStockTracked(item.type) && bal.avgCost * qty > 0.0001) {
+          const { assetCode, adjCode } = await this.resolveInventoryAccounts(companyId, item);
+          const amount = Number((qty * bal.avgCost).toFixed(2));
+          const lines = variance > 0
+            ? [{ code: assetCode, debit: amount, credit: 0 }, { code: adjCode, debit: 0, credit: amount }]
+            : [{ code: adjCode, debit: amount, credit: 0 }, { code: assetCode, debit: 0, credit: amount }];
+          await this.posting.postJournal(companyId, {
+            date: count.countDate,
+            description: `Stock count ${count.countNo}`,
+            reference: count.countNo,
+            sourceType: 'STOCK_COUNT',
+            sourceId: `${count.id}:${line.id}`,
+            lines,
+            userId: req.user.sub,
+          }, tx);
+          void movement;
+        }
       }
-    }
-    if (movements.length) await this.prisma.stockMovement.createMany({ data: movements });
-    await this.prisma.stockCount.update({ where: { id: count.id }, data: { status: 'POSTED' } });
+      await tx.stockCount.update({ where: { id: count.id }, data: { status: 'POSTED' } });
+    });
     await this.audit.log(companyId, req.user.sub, 'POST', 'StockCount', count.id, { countNo: count.countNo });
     return this.prisma.stockCount.findUnique({ where: { id: count.id }, include: { lines: true } });
   }
   @Delete('counts/:id') async deleteCount(@Req() req: any, @Param('id') id: string) {
-    await this.prisma.stockCount.deleteMany({ where: { id, companyId: companyIdOf(req.user) } });
+    const companyId = companyIdOf(req.user);
+    const count = await this.prisma.stockCount.findFirst({ where: { id, companyId } });
+    if (!count) throw new BadRequestException('Stock count not found');
+    if (count.status !== 'DRAFT') throw new BadRequestException('Posted stock counts cannot be deleted. Create a reversing adjustment instead.');
+    await this.prisma.stockCount.deleteMany({ where: { id, companyId } });
     return { ok: true };
   }
 
@@ -287,9 +649,10 @@ export class InventoryController {
     const items = await this.prisma.inventoryItem.findMany({ where: { companyId, ...(q.type ? { type: q.type } : {}) } });
     const rows = [];
     for (const i of items) {
+      if (!isStockTracked(i.type)) continue;
       const movements = await this.prisma.stockMovement.findMany({ where: { itemId: i.id, warehouse: { companyId } } });
       const b = this.wac(movements);
-      rows.push({ id: i.id, sku: i.sku, name: i.name, unit: i.unit, type: i.type, onHand: b.onHand, avgCost: b.avgCost, value: b.value, inventoryAccount: i.inventoryAssetAccountId || null });
+      rows.push({ id: i.id, sku: i.sku, name: i.name, unit: i.unit, type: normalizeItemType(i.type), onHand: b.onHand, avgCost: b.avgCost, value: b.value, inventoryAccount: i.inventoryAssetAccountId || null });
     }
     return { rows, totalValue: Number(rows.reduce((s, r) => s + r.value, 0).toFixed(2)) };
   }
@@ -332,6 +695,7 @@ export class InventoryController {
     const byWh: Record<string, { warehouseId: string; name: string; items: number; units: number; value: number }> = {};
     const byCat: Record<string, { categoryId: string | null; name: string; items: number; units: number; value: number; pct: number }> = {};
     for (const it of items) {
+      if (!isStockTracked(it.type)) continue;
       if (q.categoryId && it.categoryId !== q.categoryId) continue;
       const ms = byItem[it.id] || [];
       const s = this.simCost(ms, from, to);
@@ -378,10 +742,11 @@ export class InventoryController {
 
   @Get('reorder') async reorder(@Req() req: any) {
     const companyId = companyIdOf(req.user);
-    const items = await this.prisma.inventoryItem.findMany({ where: { companyId, active: true, type: { not: 'SERVICE' } } });
+    const items = await this.prisma.inventoryItem.findMany({ where: { companyId, active: true } });
     const warehouses = await this.prisma.warehouse.findMany({ where: { companyId } });
     const rows: any[] = [];
     for (const it of items) {
+      if (!isStockTracked(it.type)) continue;
       for (const w of warehouses) {
         const b = await this.itemBalance(companyId, it.id, w.id);
         if (b.available <= Number(it.reorderLevel)) {
@@ -487,7 +852,7 @@ export class InventoryController {
     for (const l of lines) {
       if (!l.itemId) continue;
       const it = itemMap.get(l.itemId);
-      const a = (agg[l.itemId] ||= { itemId: l.itemId, sku: it?.sku, name: it?.name, category: it?.category?.name || 'Uncategorised', qty: 0, net: 0, invoiceCount: 0, lastSale: null, sales: [] });
+      const a = (agg[l.itemId] ||= { itemId: l.itemId, sku: it?.sku, name: it?.name, type: normalizeItemType(it?.type), category: it?.category?.name || 'Uncategorised', qty: 0, net: 0, invoiceCount: 0, lastSale: null, sales: [] });
       a.qty += Number(l.quantity);
       a.net += Number(l.lineTotal);
       a.invoiceCount += 1;
@@ -498,7 +863,10 @@ export class InventoryController {
     return Object.values(agg).map((a: any) => { a.qty = Number(a.qty.toFixed(2)); a.net = Number(a.net.toFixed(2)); return a; });
   }
   @Get('reports/sales-by-item') async salesByItemReport(@Req() req: any, @Query() q: any) {
-    const rows = await this.salesByItem(companyIdOf(req.user), q);
+    let rows = await this.salesByItem(companyIdOf(req.user), q);
+    if (q.itemType) rows = rows.filter((r: any) => normalizeItemType(r.type) === normalizeItemType(q.itemType));
+    if (q.kind === 'product') rows = rows.filter((r: any) => !isService(r.type));
+    if (q.kind === 'service') rows = rows.filter((r: any) => isService(r.type));
     return rows.sort((a: any, b: any) => b.net - a.net);
   }
   @Get('reports/best-sellers') async bestSellers(@Req() req: any, @Query() q: any) {
@@ -515,6 +883,7 @@ export class InventoryController {
     const items = await this.prisma.inventoryItem.findMany({ where: { companyId } });
     const rows = [];
     for (const i of items) {
+      if (!isStockTracked(i.type)) continue;
       const b = await this.itemBalance(companyId, i.id);
       const s = saleMap[i.id] || { qty: 0, lastSale: null };
       if (b.onHand > 0 && Number(s.qty) < Number(q.threshold ?? 1)) rows.push({ id: i.id, sku: i.sku, name: i.name, category: i.categoryId || null, onHand: b.onHand, value: b.value, avgCost: b.avgCost, lastSale: s.lastSale, qtySold30d: Number(s.qty) });
@@ -528,6 +897,7 @@ export class InventoryController {
     const items = await this.prisma.inventoryItem.findMany({ where: { companyId } });
     const rows = [];
     for (const i of items) {
+      if (!isStockTracked(i.type)) continue;
       const b = await this.itemBalance(companyId, i.id);
       const s = saleMap[i.id] || { qty: 0, lastSale: null };
       if (b.onHand > 0 && Number(s.qty) <= 0) rows.push({ id: i.id, sku: i.sku, name: i.name, onHand: b.onHand, avgCost: b.avgCost, value: b.value, lastSale: s.lastSale, daysIdle: s.lastSale ? Math.floor((Date.now() - new Date(s.lastSale).getTime()) / 86400000) : days });
@@ -559,7 +929,7 @@ export class InventoryController {
     const cats = await this.prisma.inventoryCategory.findMany({ where: { companyId } });
     const rows: Record<string, any> = {};
     for (const i of items) {
-      if (i.type === 'SERVICE') continue;
+      if (!isStockTracked(i.type)) continue;
       const b = await this.itemBalance(companyId, i.id);
       const key = i.categoryId || 'uncat';
       const a = (rows[key] ||= { categoryId: i.categoryId, category: (i.categoryId ? cats.find((c) => c.id === i.categoryId)?.name : null) || 'Uncategorised', items: 0, units: 0, value: 0, lowStock: 0, outOfStock: 0 });

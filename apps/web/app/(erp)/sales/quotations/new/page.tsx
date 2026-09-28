@@ -8,7 +8,7 @@ export default function NewQuotePage() {
   const customerId = sp.get('customer') || undefined;
   const projectId = sp.get('project') || undefined;
   return (
-    <div className="nex-fade max-w-[1024px] mx-auto">
+    <div className="nex-fade">
       <QuoteForm initial={customerId || projectId ? { customerId, projectId } : undefined} onSaved={(id) => router.replace(id ? `/sales/quotations/${id}/edit` : '/sales/quotations')} />
     </div>
   );

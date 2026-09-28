@@ -13,7 +13,7 @@ export default function NewSalesOrderPage() {
   const router = useRouter();
   const { customerId, sourceQuoteId } = useQp();
   return (
-    <div className="nex-fade max-w-[1024px] mx-auto">
+    <div className="nex-fade">
       <SalesOrderForm onSaved={(id) => router.push(`/sales/orders/${id}/edit`)} initial={{ customerId, sourceQuoteId }} />
     </div>
   );

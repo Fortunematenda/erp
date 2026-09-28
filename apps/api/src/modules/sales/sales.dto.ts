@@ -13,7 +13,7 @@ export class InvoiceLineDto {
 }
 
 export class CreateInvoiceDto {
-  @IsString() branchId!: string;
+  @IsOptional() @IsString() branchId?: string;
   @IsOptional() @IsString() customerId?: string;
   @IsOptional() @IsString() invoiceNo?: string;
   @IsOptional() @IsString() currency?: string;

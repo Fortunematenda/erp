@@ -22,7 +22,7 @@ export function DashboardKpiCard({ title, value, trend, subtitle, icon, color, s
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-[20px] font-semibold leading-[1.2] tracking-[-0.01em] text-[#1f2937] truncate">{value}</span>
+            <span className="text-[13px] font-semibold leading-tight tracking-[-0.01em] text-[#1f2937] truncate tabular-nums">{value}</span>
             <span className="text-[13px] font-semibold shrink-0" style={{ color: trendTone }}>{up ? '↑' : down ? '↓' : ''}{tr}</span>
           </div>
           <div className="text-[14px] font-medium text-[#667085] mt-1 truncate">{title}</div>

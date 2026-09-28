@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Drawer, Form, Input, InputNumber, Popconfirm, Select, Switch, Table, Tabs, message } from 'antd';
+import { App, Button, Drawer, Form, Input, InputNumber, Popconfirm, Select, Switch, Table, Tabs } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -24,6 +24,7 @@ import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
 const COUNTRIES = ['United States', 'Canada', 'United Kingdom', 'Zimbabwe', 'South Africa', 'Australia', 'Germany', 'France', 'India', 'China', 'Japan', 'Brazil', 'United Arab Emirates', 'Nigeria', 'Kenya'];
 
 export default function CustomerCenter() {
+  const { message } = App.useApp();
   const qc = useQueryClient();
   const router = useRouter();
   const meta = useMeta();
@@ -210,12 +211,14 @@ export default function CustomerCenter() {
           <Form.Item label="Account Status" name="status" className="!mb-3 md:col-span-3" valuePropName="checked" getValueFromEvent={(checked: boolean) => (checked ? 'ACTIVE' : 'INACTIVE')} getValueProps={(v: string | undefined) => ({ checked: v !== 'INACTIVE' })}>
             <Switch checkedChildren="Active" unCheckedChildren="Inactive" />
           </Form.Item>
+          <div className="md:col-span-3">
+            <FormSection title="Tax Settings" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Form.Item label="Tax Status" name="taxStatus" className="!mb-2"><Select options={['Taxable', 'Tax Exempt'].map((s) => ({ label: s, value: s }))} /></Form.Item>
+              <Form.Item label="Default Tax Rate" name="defaultTaxRate" className="!mb-2"><Select showSearch optionFilterProp="label" placeholder="Select tax rate" options={(meta.data?.taxRates || []).map((t: any) => ({ label: `${t.name} (${Number(t.rate)}%)`, value: Number(t.rate) }))} /></Form.Item>
+            </div>
+          </div>
         </Form>
-        <FormSection title="Tax Settings" />
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Form.Item label="Tax Status" name="taxStatus" className="!mb-2"><Select options={['Taxable', 'Tax Exempt'].map((s) => ({ label: s, value: s }))} /></Form.Item>
-          <Form.Item label="Default Tax Rate" name="defaultTaxRate" className="!mb-2"><Select showSearch optionFilterProp="label" placeholder="Select tax rate" options={(meta.data?.taxRates || []).map((t: any) => ({ label: `${t.name} (${Number(t.rate)}%)`, value: Number(t.rate) }))} /></Form.Item>
-        </div>
       </Drawer>
 
       <InvoiceFormDrawer open={!!invoiceCustomer} presetCustomerId={invoiceCustomer || undefined} onClose={() => setInvoiceCustomer(null)} />

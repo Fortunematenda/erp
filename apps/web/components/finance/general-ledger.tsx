@@ -181,8 +181,8 @@ export function GeneralLedger() {
 function LedgerCard({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: string }) {
   return (
     <div className="nex-card p-4 rounded-[12px] min-h-[92px]">
-      <div className="text-[12px] font-semibold text-[#667085]">{label}</div>
-      <div className={`text-[20px] font-semibold leading-[1.2] tracking-[-0.01em] mt-1 ${tone === 'red' ? 'text-[#d64545]' : 'text-[#475467]'}`}>{value}</div>
+      <div className="text-[11px] font-semibold text-[#667085]">{label}</div>
+      <div className={`text-[13px] font-semibold leading-tight tracking-[-0.01em] mt-0.5 tabular-nums ${tone === 'red' ? 'text-[#d64545]' : 'text-[#475467]'}`}>{value}</div>
       {sub && <div className="text-[11.5px] text-[#98A2B3] mt-1">{sub}</div>}
     </div>
   );

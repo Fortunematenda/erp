@@ -90,7 +90,7 @@ function Summary({ icon, label, value, color }: { icon: any; label: string; valu
     <Col xs={12} md={6}>
       <div className="rounded-lg border border-[#f1f5f9] bg-white p-3" style={{ borderTop: `3px solid ${color}` }}>
         <div className="flex items-center gap-1.5 text-[11px] text-[#94a3b8]"><span style={{ color }}>{icon}</span>{label}</div>
-        <div className="text-[20px] font-semibold text-[#171a2e]">{fmtMoney(value || 0)}</div>
+        <div className="text-[13px] font-semibold text-[#171a2e] tabular-nums mt-0.5">{fmtMoney(value || 0)}</div>
       </div>
     </Col>
   );
@@ -132,7 +132,7 @@ function AddPaymentDrawer({ open, onClose, customerId, outstanding, accounts, on
         <Field label="Payment Method *"><Select className="w-full" value={method} onChange={setMethod} options={METHODS.map((m) => ({ label: m, value: m }))} /></Field>
         <Field label="Reference / Check #"><Input value={reference} onChange={(e) => setReference(e.target.value)} placeholder={method === 'CHECK' ? 'Check Number' : method === 'BANK' || method === 'ACH' ? 'Transaction Reference' : 'Reference'} /></Field>
         <Field label="Deposit To *"><Select className="w-full" allowClear value={depositId} onChange={setDepositId} placeholder="Bank / Cash account" options={accounts.map((a: any) => ({ label: `${a.code} — ${a.name}`, value: a.id }))} /></Field>
-        <Field label="Memo"><Input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="Customer settlement…" /></Field>
+        <Field label="Notes"><Input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="Optional notes" /></Field>
       </div>
       <div className="flex items-center justify-between mb-2">
         <div className="text-[13px] font-semibold text-[#171a2e]">Outstanding Invoices</div>
@@ -168,7 +168,7 @@ function PaymentDetails({ payment, onClose, onReverse, reverseLoading, onApply }
               { title: 'Remaining', align: 'right', render: (_v, r: any) => fmtMoney(Math.max(0, Number(r.invoice?.total) - Number(r.amountApplied))) },
             ]} locale={{ emptyText: 'Nothing applied yet' }} />
           </div>
-          {p.memo && <div><div className="text-[11px] text-[#94a3b8]">Memo</div><div className="text-[13px] text-[#344054]">{p.memo}</div></div>}
+          {p.memo && <div><div className="text-[11px] text-[#94a3b8]">Notes</div><div className="text-[13px] text-[#344054]">{p.memo}</div></div>}
           <div className="flex gap-2 pt-2">
             {Number(p.unapplied) > 0 && <Button type="primary" icon={<CheckOutlined />} onClick={onApply}>Apply Credit</Button>}
             {p.status !== 'REVERSED' && <Button danger icon={<UndoOutlined />} loading={reverseLoading} onClick={() => onReverse(p.id)}>Reverse Payment</Button>}

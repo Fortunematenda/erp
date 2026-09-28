@@ -165,8 +165,8 @@ export function ChartOfAccounts() {
               <div className="flex items-center gap-4">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-lg" style={{ background: cfg.color, boxShadow: `0 6px 14px ${cfg.color}55` }}>{cfg.icon}</div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[12px] font-medium text-[#8a90ad]">{cfg.label} <span className="text-[#c3c7dc]">· {s?.count || 0}</span></div>
-                  <div className="text-[18px] font-bold text-[#171a2e] truncate">{fmtMoney(s?.balance || 0)}</div>
+                  <div className="text-[11px] font-medium text-[#8a90ad]">{cfg.label} <span className="text-[#c3c7dc]">· {s?.count || 0}</span></div>
+                  <div className="text-[13px] font-semibold text-[#171a2e] truncate tabular-nums">{fmtMoney(s?.balance || 0)}</div>
                 </div>
               </div>
             </div>

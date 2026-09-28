@@ -3,8 +3,9 @@ import { Button, Form, Input, InputNumber, Select, Space, Tooltip } from 'antd';
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { AccountSelector } from '@/components/account-selector';
 import { fmtMoney } from '@/lib/format';
+import { itemSelectorSubtitle } from '@/lib/item-type';
 
-type ItemOpt = { label: string; value: string | number; price: number; name: string };
+type ItemOpt = { label: string; value: string | number; price: number; name: string; searchLabel: string; typeBadge: string };
 
 function buildItemOptions(items: any[], priceKey: string): ItemOpt[] {
   return (Array.isArray(items) ? items : [])
@@ -15,17 +16,23 @@ function buildItemOptions(items: any[], priceKey: string): ItemOpt[] {
           value: i.value ?? i.id,
           price: Number(i.price ?? i[priceKey] ?? i.sellingPrice ?? i.purchaseCost ?? 0) || 0,
           name: String(i.itemName || ''),
+          searchLabel: String(i.label),
+          typeBadge: '',
         };
       }
       const sku = i?.sku ?? i?.code ?? '';
       const name = i?.name ?? i?.description ?? '';
       const value = i?.id ?? i?.value;
       if (value == null) return null;
+      const label = [sku, name].filter(Boolean).join(' — ') || 'Untitled item';
+      const typeBadge = itemSelectorSubtitle(i?.type);
       return {
-        label: [sku, name].filter(Boolean).join(' — ') || 'Untitled item',
+        label,
         value,
         price: Number(i?.[priceKey] ?? i?.sellingPrice ?? i?.purchaseCost ?? 0) || 0,
         name: String(name || ''),
+        searchLabel: `${label} ${typeBadge}`,
+        typeBadge,
       };
     })
     .filter((o): o is ItemOpt => !!o);
@@ -60,7 +67,7 @@ export function LineItems({
   const itemMeta = buildItemOptions(items, priceKey);
   // Select options must be plain {label,value} only — extra fields on options can
   // leak into Form store clones and trigger Ant Design "circular references" warnings.
-  const selectOptions = itemMeta.map(({ label, value }) => ({ label, value }));
+  const selectOptions = itemMeta.map(({ label, value, searchLabel, typeBadge }) => ({ label, value, searchLabel, typeBadge }));
   const metaById = new Map(itemMeta.map((o) => [o.value, o]));
 
   function applyItemDefaults(rowIndex: number, itemId: string | number | null | undefined) {
@@ -92,14 +99,20 @@ export function LineItems({
               >
                 <Input placeholder="Description" />
               </Form.Item>
-              <Form.Item {...restField} name={[name, 'itemId']} className="!mb-0 w-40">
+              <Form.Item {...restField} name={[name, 'itemId']} className="!mb-0 w-56">
                 <Select
                   allowClear
                   showSearch
-                  optionFilterProp="label"
+                  optionFilterProp="searchLabel"
                   placeholder="Item"
                   options={selectOptions}
                   onChange={(v) => applyItemDefaults(name, v)}
+                  optionRender={(ori) => (
+                    <div className="flex flex-col py-0.5">
+                      <span className="truncate text-[13px]">{ori.data.label}</span>
+                      {ori.data.typeBadge ? <span className="text-[10px] text-[#64748b]">{ori.data.typeBadge}</span> : null}
+                    </div>
+                  )}
                 />
               </Form.Item>
               <Form.Item {...restField} name={[name, 'quantity']} rules={[{ required: true }]} className="!mb-0">

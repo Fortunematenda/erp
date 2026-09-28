@@ -135,7 +135,7 @@ function PaySupplierDrawer({ open, onClose, onSaved, bills, initialIds }: { open
         </div>
       ); })}
       <div className="nex-card mt-4 px-4 py-3 !rounded-xl">
-        <div className="flex items-center justify-between py-1"><span className="text-[12px] text-[#64748b]">Payment Amount</span><span className="text-[18px] font-bold">{fmtMoney(amount)}</span></div>
+        <div className="flex items-center justify-between py-1"><span className="text-[12px] text-[#64748b]">Payment Amount</span><span className="text-[13px] font-semibold tabular-nums">{fmtMoney(amount)}</span></div>
         <div className="flex items-center justify-between py-1"><span className="text-[12px] text-[#64748b]">Total Applied</span><span className="text-[14px] font-semibold text-[#16a34a]">{fmtMoney(applied)}</span></div>
         <div className="flex items-center justify-between py-1"><span className="text-[12px] text-[#64748b]">Unapplied / Advance</span><span className="text-[14px] font-semibold text-[#8b5cf6]">{fmtMoney(Number(advance))}</span></div>
         <div className="flex items-center justify-between py-1 pt-2 border-t"><span className="text-[12px] text-[#64748b]">Add to Advance</span><InputNumber className="!w-32" prefix="$" min={0} value={advance} onChange={(v) => setAdvance(v || 0)} /></div>

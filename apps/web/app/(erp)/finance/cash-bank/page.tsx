@@ -87,7 +87,7 @@ function AccountDrawer({ open, bank, bookBalance, extAccount, onClose, onRefresh
   );
 }
 
-function MiniStat({ label, value }: { label: string; value: string }) { return <div className="nex-card rounded-lg p-3.5" style={{ border: '1px solid #e9edf2' }}><div className="text-[12px] text-[#667085]">{label}</div><div className="text-[19px] font-semibold text-[#1f2937] mt-1 tabular-nums">{value}</div></div>; }
+function MiniStat({ label, value }: { label: string; value: string }) { return <div className="nex-card rounded-lg p-3.5 text-center" style={{ border: '1px solid #e9edf2' }}><div className="text-[11px] text-[#667085]">{label}</div><div className="text-[13px] font-semibold text-[#1f2937] mt-0.5 tabular-nums">{value}</div></div>; }
 function Field({ k, v }: { k: string; v: string }) { return <div><div className="text-[12px] text-[#98A2B3]">{k}</div><div className="font-medium text-[#334155]">{v}</div></div>; }
 function Row({ l, v, bold }: { l: string; v: string; bold?: boolean }) { return <div className="flex items-center justify-between py-1.5 text-[13px]"><span style={{ color: '#475467' }}>{l}</span><span className={`tabular-nums ${bold ? 'font-bold text-[#1f2937]' : 'text-[#334155]'}`}>{v}</span></div>; }
 

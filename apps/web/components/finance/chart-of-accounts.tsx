@@ -233,7 +233,7 @@ export function ChartOfAccounts() {
           <button key={c.category} onClick={() => setCategory(category === c.category ? '' : c.category)} title="Click to filter accounts"
             className={`nex-card text-left p-3.5 rounded-[12px] cursor-pointer transition-shadow hover:shadow-md hover:border-[#0b4a8f33] ${category === c.category ? 'border-[#0b4a8f] ring-1 ring-[#0b4a8f40]' : ''}`}>
             <div className="text-[12px] font-semibold text-[#667085]">{subtypeLabel(c.category)}</div>
-            <div className="text-[18px] font-semibold text-[#475467] mt-1 leading-tight">{fmtMoney(c.balance)}</div>
+            <div className="text-[13px] font-semibold text-[#475467] mt-0.5 leading-tight tabular-nums">{fmtMoney(c.balance)}</div>
             <div className="text-[11px] text-[#98A2B3] mt-1">{c.count} {c.count === 1 ? 'account' : 'accounts'}</div>
           </button>
         ))}
