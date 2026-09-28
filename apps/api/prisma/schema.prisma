@@ -871,6 +871,8 @@ model InventoryItem {
   sku                     String
   name                    String
   unit                    String             @default("EA")
+  purchaseUnit            String?
+  salesUnit               String?
   hsCode                  String?
   barcode                 String?
   brand                   String?

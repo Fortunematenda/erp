@@ -227,6 +227,7 @@ export class InventoryController {
     const stock = isStockTracked(itemType);
     const data: any = {
       companyId, sku, name: dto.name, unit: dto.unit || (itemType === ITEM_TYPE.SERVICE ? 'Hour' : 'EA'),
+      purchaseUnit: dto.purchaseUnit, salesUnit: dto.salesUnit,
       hsCode: dto.hsCode, barcode: stock || itemType === ITEM_TYPE.NON_INVENTORY_PRODUCT ? dto.barcode : undefined,
       brand: dto.brand, description: dto.description, salesDescription: dto.salesDescription, purchaseDescription: dto.purchaseDescription,
       type: itemType, itemCategory: dto.itemCategory, categoryId: cat?.id, imageUrl: dto.imageUrl,

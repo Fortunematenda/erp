@@ -75,11 +75,20 @@ async function main() {
   console.log(`P0 regression → ${BASE}\n`);
   const admin = await login('admin@demo.local');
   const me = await req('/auth/me', { token: admin }).catch(() => ({ status: 0, json: null }));
-  const companies = await prisma.company.findMany({ take: 2, include: { tenant: true } });
-  const company = companies[0];
+  const companies = await prisma.company.findMany({ include: { tenant: true } });
+  let company = companies.find((c) => /demo/i.test(c.legalName || '')) || companies[0];
   if (!company) throw new Error('No company in database — run db:seed');
-  const branch = await prisma.branch.findFirst({ where: { companyId: company.id } });
-  const warehouse = await prisma.warehouse.findFirst({ where: { companyId: company.id } });
+  let branch = await prisma.branch.findFirst({ where: { companyId: company.id } });
+  let warehouse = await prisma.warehouse.findFirst({ where: { companyId: company.id } });
+  // Fall back to any company that is fully seeded (branch + warehouse), so the
+  // suite is not sensitive to unrelated companies in a shared dev database.
+  if (!branch || !warehouse) {
+    for (const c of companies) {
+      const b = await prisma.branch.findFirst({ where: { companyId: c.id } });
+      const w = await prisma.warehouse.findFirst({ where: { companyId: c.id } });
+      if (b && w) { company = c; branch = b; warehouse = w; break; }
+    }
+  }
   if (!branch || !warehouse) throw new Error('Seed branch/warehouse missing');
 
   await ensureClerk(company.id, company.tenantId);

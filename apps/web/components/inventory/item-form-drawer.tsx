@@ -1,6 +1,6 @@
 'use client';
 import { useEffect } from 'react';
-import { Alert, App, Button, Checkbox, Divider, Drawer, Form, Input, InputNumber, Radio, Select, Space } from 'antd';
+import { Alert, App, Button, Checkbox, Collapse, Divider, Drawer, Form, Input, InputNumber, Radio, Select, Space } from 'antd';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useMeta } from '@/lib/meta';
@@ -9,6 +9,7 @@ import { ITEM_TYPE, ITEM_TYPE_LABELS, TRACKING_HINTS, TRACKING_LABELS, isStockTr
 import { MetricStrip } from '@/components/metric-strip';
 
 const SERVICE_UNITS = ['Each', 'Hour', 'Day', 'Job', 'Month', 'Project'];
+const UNIT_OPTIONS = ['EA', 'Each', 'Box', 'Pack', 'Set', 'Kg', 'g', 'Litre', 'Metre', 'Hour', 'Day', 'Job', 'Month', 'Project', 'Unit'];
 
 type Props = {
   open: boolean;
@@ -37,6 +38,7 @@ export function ItemFormDrawer({ open, itemId, initial, onClose, onSaved }: Prop
   const itemType = normalizeItemType(typeWatch || item?.type);
   const stock = isStockTracked(itemType);
   const isSvc = itemType === ITEM_TYPE.SERVICE;
+  const isNew = !item?.id;
   const typeLocked = !!(item?.id && (detail.data?.typeLocked || initial?.typeLocked || Number(item?.onHand) > 0 || (detail.data?.movements || []).length > 0));
 
   useEffect(() => {
@@ -74,10 +76,25 @@ export function ItemFormDrawer({ open, itemId, initial, onClose, onSaved }: Prop
   async function save() {
     try {
       const v = await form.validateFields();
-      const payload = { ...v, type: normalizeItemType(v.type), categoryId: v.categoryId || undefined };
+      const { initialQuantity, ...rest } = v;
+      const payload = { ...rest, type: normalizeItemType(v.type), categoryId: v.categoryId || undefined };
       const saved = item?.id
         ? await api(`/inventory/items/${item.id}`, { method: 'PATCH', body: JSON.stringify(payload) })
         : await api('/inventory/items', { method: 'POST', body: JSON.stringify(payload) });
+
+      // Opening stock must be an explicit, auditable stock movement (never an editable field).
+      if (isNew && stock && Number(initialQuantity) > 0) {
+        const warehouseId = v.defaultWarehouseId || (meta.data?.warehouses || [])[0]?.id;
+        if (!warehouseId) {
+          message.warning('Item created, but opening stock was not recorded because no warehouse is configured.');
+        } else {
+          await api('/inventory/adjustments', {
+            method: 'POST',
+            body: JSON.stringify({ warehouseId, itemId: saved.id, mode: 'delta', quantity: Number(initialQuantity), reason: 'OPENING_BALANCE', unitCost: Number(v.purchaseCost || 0), reference: 'Opening balance' }),
+          });
+        }
+      }
+
       message.success(item?.id ? 'Item updated' : 'Item created');
       qc.invalidateQueries({ queryKey: ['/inventory/items'] });
       qc.invalidateQueries({ queryKey: ['meta'] });
@@ -89,7 +106,23 @@ export function ItemFormDrawer({ open, itemId, initial, onClose, onSaved }: Prop
     }
   }
 
-  const accounts = (meta.data?.accounts || []).map((a: any) => ({ label: `${a.code} — ${a.name}`, value: a.id }));
+  const accountOptions = (types: string[]) =>
+    (meta.data?.accounts || [])
+      .filter((a: any) => types.includes(String(a.type || '').toUpperCase()))
+      .map((a: any) => ({ label: `${a.code} — ${a.name}`, value: a.id }));
+
+  const categoryOptions = (() => {
+    const list: any[] = categories.data || [];
+    const parents = list.filter((c) => !c.parentId);
+    const orphans = list.filter((c) => c.parentId && !list.some((p) => p.id === c.parentId));
+    const grouped = parents.map((p) => {
+      const children = list.filter((c) => c.parentId === p.id);
+      return children.length ? { label: p.name, options: children.map((c) => ({ label: c.name, value: c.id })) } : { label: p.name, value: p.id };
+    });
+    return [...grouped, ...orphans.map((c) => ({ label: c.name, value: c.id }))];
+  })();
+
+  const unitSelect = <Select showSearch options={UNIT_OPTIONS.map((u) => ({ label: u, value: u }))} />;
 
   return (
     <Drawer
@@ -98,7 +131,7 @@ export function ItemFormDrawer({ open, itemId, initial, onClose, onSaved }: Prop
       width={720}
       title={item?.id ? `Edit ${ITEM_TYPE_LABELS[itemType]}` : 'New Product or Service'}
       destroyOnHidden
-      footer={<Space className="w-full justify-end"><Button onClick={onClose}>Cancel</Button><Button type="primary" onClick={save}>{item?.id ? 'Save' : 'Create'}</Button></Space>}
+      footer={<Space className="w-full justify-end"><Button onClick={onClose}>Cancel</Button><Button type="primary" loading={detail.isLoading} onClick={save}>{item?.id ? 'Save' : 'Create'}</Button></Space>}
     >
       <Form form={form} layout="vertical">
         <Form.Item label="Item Type" name="type" rules={[{ required: true, message: 'Select an item type' }]} className="mb-2">
@@ -140,13 +173,13 @@ export function ItemFormDrawer({ open, itemId, initial, onClose, onSaved }: Prop
 
         <Divider orientation="left" plain>General</Divider>
         <div className="grid grid-cols-2 gap-4">
-          <Form.Item label={isSvc ? 'Service Code / SKU' : 'SKU'} name="sku">
+          <Form.Item label={isSvc ? 'Service Code / SKU' : 'SKU'} name="sku" extra="Company-unique. Auto-generated if blank.">
             <Input placeholder="Auto if blank" />
           </Form.Item>
           {!isSvc && (
             <Form.Item label="Barcode" name="barcode"><Input /></Form.Item>
           )}
-          <Form.Item label={isSvc ? 'Service Name' : 'Item Name'} name="name" rules={[{ required: true }]} className="col-span-2">
+          <Form.Item label={isSvc ? 'Service Name' : 'Item Name'} name="name" rules={[{ required: true, message: 'Item name is required' }]} className="col-span-2">
             <Input />
           </Form.Item>
           <Form.Item label={isSvc ? 'Service Unit' : 'Unit of Measure'} name="unit">
@@ -156,8 +189,8 @@ export function ItemFormDrawer({ open, itemId, initial, onClose, onSaved }: Prop
               <Input />
             )}
           </Form.Item>
-          <Form.Item label="Category" name="categoryId">
-            <Select allowClear showSearch optionFilterProp="label" options={(categories.data || []).map((c: any) => ({ label: c.name, value: c.id }))} />
+          <Form.Item label="Category / Subcategory" name="categoryId">
+            <Select allowClear showSearch optionFilterProp="label" options={categoryOptions} placeholder="Select category" />
           </Form.Item>
           <Form.Item label="Description" name="description" className="col-span-2"><Input.TextArea rows={2} /></Form.Item>
           {!isSvc && (
@@ -170,16 +203,14 @@ export function ItemFormDrawer({ open, itemId, initial, onClose, onSaved }: Prop
 
         <Divider orientation="left" plain>Sales</Divider>
         <div className="grid grid-cols-2 gap-4">
-          <Form.Item label={isSvc ? 'Service Rate' : 'Sales Price (default)'} name="sellingPrice" extra="Does not change historical invoices">
+          <Form.Item label={isSvc ? 'Service Rate' : 'Sales Price (default)'} name="sellingPrice" extra="Does not change historical invoices" rules={[{ type: 'number', min: 0, message: 'Price cannot be negative' }]}>
             <InputNumber prefix="$" className="w-full" min={0} />
           </Form.Item>
           {!isSvc && (
-            <Form.Item label="Min Selling Price" name="minSellingPrice"><InputNumber prefix="$" className="w-full" min={0} /></Form.Item>
+            <Form.Item label="Min Selling Price" name="minSellingPrice" rules={[{ type: 'number', min: 0, message: 'Price cannot be negative' }]}><InputNumber prefix="$" className="w-full" min={0} /></Form.Item>
           )}
           <Form.Item label="Sales Tax Code" name="salesTaxCode"><Input /></Form.Item>
-          <Form.Item label={isSvc ? 'Service Revenue Account' : 'Income / Sales Account'} name="incomeAccountId">
-            <Select allowClear showSearch optionFilterProp="label" options={accounts} />
-          </Form.Item>
+          <Form.Item label="Default Sales Unit" name="salesUnit">{unitSelect}</Form.Item>
           <Form.Item label="Sales Description" name="salesDescription" className="col-span-2"><Input.TextArea rows={2} /></Form.Item>
         </div>
 
@@ -189,6 +220,7 @@ export function ItemFormDrawer({ open, itemId, initial, onClose, onSaved }: Prop
             label={isSvc ? 'Subcontractor / Purchase Cost' : 'Default Purchase Price'}
             name="purchaseCost"
             extra={stock ? 'Default for new POs only — not live stock cost' : undefined}
+            rules={[{ type: 'number', min: 0, message: 'Cost cannot be negative' }]}
           >
             <InputNumber prefix="$" className="w-full" min={0} />
           </Form.Item>
@@ -196,15 +228,43 @@ export function ItemFormDrawer({ open, itemId, initial, onClose, onSaved }: Prop
             <Select allowClear showSearch optionFilterProp="label" options={(meta.data?.suppliers || []).map((s: any) => ({ label: s.name, value: s.id }))} />
           </Form.Item>
           <Form.Item label="Purchase Tax Code" name="purchaseTaxCode"><Input /></Form.Item>
-          {!isSvc && <Form.Item label="Supplier SKU" name="supplierSku"><Input /></Form.Item>}
-          <Form.Item
-            label={stock ? 'COGS Account' : isSvc ? 'Service Expense Account' : 'Purchase / Expense Account'}
-            name={stock ? 'cogsAccountId' : 'expenseAccountId'}
-          >
-            <Select allowClear showSearch optionFilterProp="label" options={accounts} />
-          </Form.Item>
+          <Form.Item label="Default Purchase Unit" name="purchaseUnit">{unitSelect}</Form.Item>
+          {!isSvc && <Form.Item label="Vendor Item Number" name="supplierSku" extra="Vendor's own code for this item"><Input /></Form.Item>}
           <Form.Item label="Purchase Description" name="purchaseDescription" className="col-span-2"><Input.TextArea rows={2} /></Form.Item>
         </div>
+
+        <Collapse
+          ghost
+          className="!mt-2"
+          items={[{
+            key: 'accounting',
+            label: <span className="text-[13px] font-semibold text-[#171a2e]">Accounting (Chart of Accounts mappings)</span>,
+            children: (
+              <div className="grid grid-cols-2 gap-4">
+                <Form.Item label={isSvc ? 'Service Revenue Account' : 'Income / Sales Account'} name="incomeAccountId" extra="Credited on sale (REVENUE account)">
+                  <Select allowClear showSearch optionFilterProp="label" options={accountOptions(['REVENUE'])} placeholder="Revenue accounts" />
+                </Form.Item>
+                {stock ? (
+                  <>
+                    <Form.Item label="Inventory Asset Account" name="inventoryAssetAccountId" extra="Asset account (ASSET)">
+                      <Select allowClear showSearch optionFilterProp="label" options={accountOptions(['ASSET'])} placeholder="Asset accounts" />
+                    </Form.Item>
+                    <Form.Item label="COGS Account" name="cogsAccountId" extra="Debited when stock is issued (EXPENSE)">
+                      <Select allowClear showSearch optionFilterProp="label" options={accountOptions(['EXPENSE'])} placeholder="Expense accounts" />
+                    </Form.Item>
+                    <Form.Item label="Adjustment Account" name="adjustmentAccountId" extra="P&L account for stock gains/losses">
+                      <Select allowClear showSearch optionFilterProp="label" options={accountOptions(['EXPENSE', 'REVENUE'])} placeholder="Expense / revenue accounts" />
+                    </Form.Item>
+                  </>
+                ) : (
+                  <Form.Item label={isSvc ? 'Service Expense Account' : 'Purchase / Expense Account'} name="expenseAccountId" extra="Debited on purchase (EXPENSE)">
+                    <Select allowClear showSearch optionFilterProp="label" options={accountOptions(['EXPENSE'])} placeholder="Expense accounts" />
+                  </Form.Item>
+                )}
+              </div>
+            ),
+          }]}
+        />
 
         {stock && (
           <>
@@ -218,10 +278,14 @@ export function ItemFormDrawer({ open, itemId, initial, onClose, onSaved }: Prop
               </Form.Item>
               <Form.Item label="Reorder Level" name="reorderLevel"><InputNumber className="w-full" min={0} /></Form.Item>
               <Form.Item label="Reorder Quantity" name="reorderQuantity"><InputNumber className="w-full" min={0} /></Form.Item>
-              <Form.Item label="Inventory Asset Account" name="inventoryAssetAccountId"><Select allowClear showSearch optionFilterProp="label" options={accounts} /></Form.Item>
-              <Form.Item label="Adjustment Account" name="adjustmentAccountId" extra="P&L account for stock gains/losses"><Select allowClear showSearch optionFilterProp="label" options={accounts} /></Form.Item>
               <Form.Item label="Track Batch" name="trackBatch" valuePropName="checked"><Checkbox /></Form.Item>
               <Form.Item label="Track Serial" name="trackSerial" valuePropName="checked"><Checkbox /></Form.Item>
+              <Form.Item label="Track Expiry" name="trackExpiry" valuePropName="checked"><Checkbox /></Form.Item>
+              {isNew && (
+                <Form.Item label="Initial Quantity (Opening Stock)" name="initialQuantity" extra="Creates an explicit opening-balance stock movement" rules={[{ type: 'number', min: 0, message: 'Quantity cannot be negative' }]}>
+                  <InputNumber className="w-full" min={0} />
+                </Form.Item>
+              )}
             </div>
           </>
         )}

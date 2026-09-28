@@ -124,6 +124,32 @@ async function main() {
     await prisma.company.delete({ where: { id: companyB.id } });
   }
 
+  // --- 8. Feature 02: units, defaults, opening stock, account persistence ---
+  const warehouses: any[] = meta.json?.warehouses || [];
+  const inv2 = await mk({ sku: `T-INV2-${stamp}`, name: 'Units Widget', type: 'INVENTORY_PRODUCT', unit: 'EA', purchaseUnit: 'Box', salesUnit: 'EA', purchaseCost: 20, sellingPrice: 35, minSellingPrice: 25, salesTaxCode: 'VAT15', purchaseTaxCode: 'VAT15', trackExpiry: true, incomeAccountId: revenue?.id, cogsAccountId: expense?.id, inventoryAssetAccountId: asset?.id, defaultWarehouseId: warehouses[0]?.id });
+  check('create with purchase/sales units + expiry', inv2.status === 201 && inv2.json?.purchaseUnit === 'Box' && inv2.json?.salesUnit === 'EA' && inv2.json?.trackExpiry === true);
+  if (inv2.json?.id) {
+    const reopen = await req(`/inventory/items/${inv2.json.id}`, auth);
+    const it = reopen.json?.item;
+    check('reopen preserves units, tax, accounts', it?.purchaseUnit === 'Box' && it?.salesUnit === 'EA' && it?.salesTaxCode === 'VAT15' && it?.incomeAccountId === revenue?.id && it?.cogsAccountId === expense?.id);
+    if (warehouses[0]?.id) {
+      const open = await req('/inventory/adjustments', { method: 'POST', ...auth, body: { warehouseId: warehouses[0].id, itemId: inv2.json.id, mode: 'delta', quantity: 10, reason: 'OPENING_BALANCE', unitCost: 20 } });
+      check('opening stock adjustment accepted', open.status === 201 || open.status === 200, `status=${open.status}`);
+      const after = await req(`/inventory/items/${inv2.json.id}`, auth);
+      check('opening stock increases on-hand to 10', Number(after.json?.total?.onHand) === 10, `onHand=${after.json?.total?.onHand}`);
+    }
+    const newIncome = accounts.filter((a) => a.type === 'REVENUE')[1];
+    if (newIncome) {
+      const upd = await req(`/inventory/items/${inv2.json.id}`, { method: 'PATCH', ...auth, body: { incomeAccountId: newIncome.id } });
+      const reopened = await req(`/inventory/items/${inv2.json.id}`, auth);
+      check('master account change persists', upd.status === 200 && reopened.json?.item?.incomeAccountId === newIncome.id);
+    }
+  }
+  const negPrice = await req('/inventory/items', { method: 'POST', ...auth, body: { sku: `T-NEG-${stamp}`, name: 'Negative', type: 'SERVICE', sellingPrice: -5 } });
+  check('negative selling price rejected', negPrice.status === 400, `status=${negPrice.status}`);
+  const negCost = await req('/inventory/items', { method: 'POST', ...auth, body: { sku: `T-NEG2-${stamp}`, name: 'Negative cost', type: 'NON_INVENTORY_PRODUCT', purchaseCost: -1 } });
+  check('negative purchase cost rejected', negCost.status === 400, `status=${negCost.status}`);
+
   // --- Cleanup ---
   for (const id of created) await prisma.inventoryItem.delete({ where: { id } }).catch(() => {});
 
