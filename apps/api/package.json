@@ -19,7 +19,8 @@
     "test:receiving": "tsx scripts/receiving-tests.ts",
     "test:po-billing": "tsx scripts/po-billing-tests.ts",
     "test:match": "tsx scripts/three-way-match-tests.ts",
-    "test:ap-payment": "tsx scripts/ap-payment-tests.ts"
+    "test:ap-payment": "tsx scripts/ap-payment-tests.ts",
+    "test:inventory-sales": "tsx scripts/inventory-sales-tests.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
