@@ -5,6 +5,7 @@ import { App as AntApp, ConfigProvider, theme } from 'antd';
 import { useState } from 'react';
 import { Toaster } from 'sonner';
 import { AuthProvider } from '@/components/auth-provider';
+import { GlobalLoadingOverlay } from '@/components/global-loading-overlay';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(() => new QueryClient({ defaultOptions: { queries: { staleTime: 15_000, refetchOnWindowFocus: false, retry: 1 } } }));
@@ -64,6 +65,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           />
         </AntApp>
       </ConfigProvider>
+      <GlobalLoadingOverlay />
     </QueryClientProvider>
   );
 }

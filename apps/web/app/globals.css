@@ -373,6 +373,52 @@ body {
   100% { transform: translateX(340%); width: 40%; }
 }
 
+/* ---------- Global blocking loading overlay ---------- */
+.nex-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.18);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  animation: nexOverlayIn 0.18s ease;
+  cursor: progress;
+}
+.nex-loading-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #ffffff;
+  border: 1px solid #e6e9f2;
+  border-radius: 14px;
+  padding: 14px 22px;
+  box-shadow: 0 18px 50px rgba(23, 26, 46, 0.20);
+  animation: nexCardIn 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.nex-spinner {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 3px solid rgba(0, 51, 102, 0.18);
+  border-top-color: #003366;
+  animation: nexSpin 0.7s linear infinite;
+}
+.nex-loading-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: #003366;
+  letter-spacing: 0.01em;
+}
+@keyframes nexSpin { to { transform: rotate(360deg); } }
+@keyframes nexOverlayIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes nexCardIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 /* ---------- Global tab alignment (NexusERP design system) ----------
    Main module tabs that sit directly inside a card get a consistent 24px
    horizontal inset so the first label aligns with page headings, filters and
