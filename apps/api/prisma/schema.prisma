@@ -117,9 +117,11 @@ enum ItemType {
 
 enum PurchaseOrderStatus {
   DRAFT
+  OPEN
   APPROVED
   PART_RECEIVED
   RECEIVED
+  CLOSED
   CANCELLED
 }
 
@@ -836,6 +838,7 @@ model PurchaseOrder {
   paymentTerms       String?
   supplierReference  String?
   shipTo             String?
+  warehouseId        String?
   memo               String?
   subtotal           Decimal             @default(0) @db.Decimal(18, 2)
   discount           Decimal             @default(0) @db.Decimal(18, 2)

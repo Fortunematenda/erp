@@ -4,7 +4,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { PermissionsGuard, RequirePermissions } from '../auth/permissions.guard';
 import { companyIdOf } from '../../core/context';
-import { CreateGrnDto, CreatePurchaseOrderDto, CreateRequisitionDto, CreateSupplierInvoiceDto, CreateSupplierPaymentDto, SupplierDto } from './procurement.dto';
+import { CreateGrnDto, CreatePurchaseOrderDto, CreateRequisitionDto, CreateSupplierInvoiceDto, CreateSupplierPaymentDto, SupplierDto, UpdatePurchaseOrderDto } from './procurement.dto';
 import { NumberingService } from '../../core/common/numbering.service';
 import { AuditService } from '../../core/common/audit.service';
 import { PostingService } from '../finance/posting.service';
@@ -169,27 +169,133 @@ export class ProcurementController {
   }
 
   // ----- Purchase orders -----
-  @Get('purchase-orders') orders(@Req() req: any) {
-    return this.prisma.purchaseOrder.findMany({ where: { companyId: companyIdOf(req.user) }, include: { supplier: true, lines: true, goodsReceivedNotes: true, supplierInvoices: true }, orderBy: { createdAt: 'desc' } });
+  private r2 = (n: any) => Number(Number(n || 0).toFixed(2));
+
+  /** Item id -> is-stock-tracked, for one or many POs (batched). */
+  private async stockMap(companyId: string, lines: any[]) {
+    const ids = [...new Set(lines.map((l) => l.itemId).filter(Boolean))] as string[];
+    if (!ids.length) return new Map<string, boolean>();
+    const items = await this.prisma.inventoryItem.findMany({ where: { id: { in: ids }, companyId }, select: { id: true, type: true } });
+    return new Map(items.map((i) => [i.id, isStockTracked(i.type)]));
+  }
+
+  /**
+   * Independent receipt + billing progress. Receiving and billing are separate
+   * dimensions; this never collapses them into one contradictory status. Stock
+   * lines are billable only up to what was received; non-stock (service) lines
+   * skip receiving and are billable in full.
+   */
+  private poProgress(po: any, stockByItem: Map<string, boolean>) {
+    const posted = (po.goodsReceivedNotes || []).filter((g: any) => g.status === 'POSTED');
+    const receivedRows = posted.flatMap((g: any) => g.lines || []);
+    const invoiceRows = (po.supplierInvoices || []).filter((si: any) => si.status !== 'VOID').flatMap((si: any) => si.lines || []);
+    const recvOf = (itemId?: string | null) => (itemId ? receivedRows.filter((l: any) => l.itemId === itemId).reduce((s: number, l: any) => s + Number(l.quantity), 0) : 0);
+    const billOf = (itemId?: string | null) => (itemId ? invoiceRows.filter((l: any) => l.itemId === itemId).reduce((s: number, l: any) => s + Number(l.quantity), 0) : 0);
+    let ordered = 0, received = 0, billed = 0, remainingToReceive = 0, remainingToBill = 0, receivingRequired = false;
+    for (const l of po.lines || []) {
+      const qty = Number(l.quantity);
+      const isStock = l.itemId ? (stockByItem.get(l.itemId) ?? true) : true;
+      if (isStock) receivingRequired = true;
+      const r = isStock ? Math.min(recvOf(l.itemId), qty) : 0;
+      const billable = isStock ? r : qty;
+      ordered += qty; received += r; billed += Math.min(billOf(l.itemId), billable);
+      remainingToReceive += Math.max(0, qty - r);
+      remainingToBill += Math.max(0, billable - billOf(l.itemId));
+    }
+    return { ordered: this.r2(ordered), received: this.r2(received), billed: this.r2(billed), remainingToReceive: this.r2(remainingToReceive), remainingToBill: this.r2(remainingToBill), receivingRequired };
+  }
+
+  private async assertPoEditable(companyId: string, po: any, action: string) {
+    const status = String(po.status || '').toUpperCase();
+    if (['CANCELLED', 'CLOSED'].includes(status)) throw new BadRequestException(`Cannot ${action} a ${status} purchase order.`);
+    const postedGrn = (po.goodsReceivedNotes || []).filter((g: any) => g.status === 'POSTED').length;
+    const bills = (po.supplierInvoices || []).filter((si: any) => si.status !== 'VOID').length;
+    if (postedGrn || bills) throw new BadRequestException(`Cannot ${action} this purchase order: it has ${postedGrn} posted receipt(s) and ${bills} bill(s). Use a return or credit instead.`);
+    if (action === 'edit' && !['DRAFT', 'OPEN', 'APPROVED'].includes(status)) throw new BadRequestException('Only draft or approved purchase orders can be edited.');
+  }
+
+  @Get('purchase-orders') async orders(@Req() req: any) {
+    const companyId = companyIdOf(req.user);
+    const pos = await this.prisma.purchaseOrder.findMany({ where: { companyId }, include: { supplier: true, lines: true, goodsReceivedNotes: { include: { lines: true } }, supplierInvoices: { include: { lines: true } } }, orderBy: { createdAt: 'desc' } });
+    const stockByItem = await this.stockMap(companyId, pos.flatMap((p) => p.lines));
+    return pos.map((p) => ({ ...p, progress: this.poProgress(p, stockByItem) }));
   }
   @Post('purchase-orders') async createOrder(@Req() req: any, @Body() dto: CreatePurchaseOrderDto) {
     const companyId = companyIdOf(req.user);
-    const { mapped, total } = this.computeLines(dto.lines);
+    const supplier = await this.prisma.supplier.findFirst({ where: { id: dto.supplierId, companyId } });
+    if (!supplier) throw new BadRequestException('Supplier not found for this company');
+    await this.items.applyPurchaseDefaults(companyId, dto.lines as any[]);
+    const { mapped, subtotal, taxTotal, total } = this.computeLines(dto.lines);
+    const discount = mapped.reduce((s: number, l: any) => s + Number(l.quantity) * Number(l.unitPrice) * Number(l.discount || 0) / 100, 0);
     const poNo = await this.numbering.next(companyId, 'PO');
-    const po = await this.prisma.purchaseOrder.create({ data: { companyId, supplierId: dto.supplierId, poNo, orderDate: dto.orderDate ? new Date(dto.orderDate) : new Date(), currency: dto.currency || 'USD', total, lines: { create: mapped.map((l: any) => ({ description: l.description, itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice, lineTotal: l.lineTotal })) } }, include: { lines: true } });
+    const po = await this.prisma.purchaseOrder.create({ data: { companyId, supplierId: dto.supplierId, requisitionId: dto.requisitionId, poNo, orderDate: dto.orderDate ? new Date(dto.orderDate) : new Date(), expectedDate: dto.expectedDate ? new Date(dto.expectedDate) : null, currency: dto.currency || 'USD', paymentTerms: dto.paymentTerms, supplierReference: dto.supplierReference, shipTo: dto.shipTo, warehouseId: dto.warehouseId, memo: dto.memo, subtotal, discount: this.r2(discount), taxTotal, total, lines: { create: mapped.map((l: any) => ({ description: l.description, itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice, lineTotal: l.lineTotal })) } }, include: { lines: true } });
     await this.audit.log(companyId, req.user.sub, 'CREATE', 'PurchaseOrder', po.id, { poNo });
     return po;
   }
+  @Get('purchase-orders/:id') async orderDetail(@Req() req: any, @Param('id') id: string) {
+    const companyId = companyIdOf(req.user);
+    const po = await this.prisma.purchaseOrder.findFirst({ where: { id, companyId }, include: { supplier: true, lines: true, goodsReceivedNotes: { include: { lines: true } }, supplierInvoices: { include: { lines: true } } } });
+    if (!po) throw new BadRequestException('Purchase order not found');
+    const stockByItem = await this.stockMap(companyId, po.lines);
+    return { ...po, progress: this.poProgress(po, stockByItem) };
+  }
+  @Patch('purchase-orders/:id') async updateOrder(@Req() req: any, @Param('id') id: string, @Body() dto: UpdatePurchaseOrderDto) {
+    const companyId = companyIdOf(req.user);
+    const po = await this.prisma.purchaseOrder.findFirst({ where: { id, companyId }, include: { lines: true, goodsReceivedNotes: true, supplierInvoices: true } });
+    if (!po) throw new BadRequestException('Purchase order not found');
+    await this.assertPoEditable(companyId, po, 'edit');
+    if (dto.supplierId) { const s = await this.prisma.supplier.findFirst({ where: { id: dto.supplierId, companyId } }); if (!s) throw new BadRequestException('Supplier not found for this company'); }
+    const data: any = {};
+    if (dto.supplierId !== undefined) data.supplierId = dto.supplierId;
+    if (dto.orderDate !== undefined) data.orderDate = new Date(dto.orderDate);
+    if (dto.expectedDate !== undefined) data.expectedDate = dto.expectedDate ? new Date(dto.expectedDate) : null;
+    if (dto.currency !== undefined) data.currency = dto.currency;
+    if (dto.paymentTerms !== undefined) data.paymentTerms = dto.paymentTerms;
+    if (dto.supplierReference !== undefined) data.supplierReference = dto.supplierReference;
+    if (dto.shipTo !== undefined) data.shipTo = dto.shipTo;
+    if (dto.warehouseId !== undefined) data.warehouseId = dto.warehouseId;
+    if (dto.memo !== undefined) data.memo = dto.memo;
+    if (dto.lines) {
+      await this.items.applyPurchaseDefaults(companyId, dto.lines as any[]);
+      const { mapped, subtotal, taxTotal, total } = this.computeLines(dto.lines);
+      const discount = mapped.reduce((s: number, l: any) => s + Number(l.quantity) * Number(l.unitPrice) * Number(l.discount || 0) / 100, 0);
+      data.subtotal = subtotal; data.taxTotal = taxTotal; data.total = total; data.discount = this.r2(discount);
+      await this.prisma.purchaseOrderLine.deleteMany({ where: { purchaseOrderId: id } });
+      data.lines = { create: mapped.map((l: any) => ({ description: l.description, itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice, lineTotal: l.lineTotal })) };
+    }
+    const saved = await this.prisma.purchaseOrder.update({ where: { id }, data, include: { lines: true } });
+    await this.audit.log(companyId, req.user.sub, 'UPDATE', 'PurchaseOrder', id, { module: 'procurement', metadata: { fields: Object.keys(data) } });
+    return saved;
+  }
   @UseGuards(PermissionsGuard) @RequirePermissions('procurement.purchase_orders.approve')
-  @Patch('purchase-orders/:id/status') setOrderStatus(@Req() req: any, @Param('id') id: string, @Body() dto: StatusDto) {
-    return this.prisma.purchaseOrder.updateMany({ where: { id, companyId: companyIdOf(req.user) }, data: { status: dto.status as any } });
+  @Patch('purchase-orders/:id/status') async setOrderStatus(@Req() req: any, @Param('id') id: string, @Body() dto: StatusDto) {
+    const companyId = companyIdOf(req.user);
+    const po = await this.prisma.purchaseOrder.findFirst({ where: { id, companyId }, include: { goodsReceivedNotes: true, supplierInvoices: true } });
+    if (!po) throw new BadRequestException('Purchase order not found');
+    const target = String(dto.status || '').toUpperCase();
+    const current = String(po.status || '').toUpperCase();
+    const postedGrn = (po.goodsReceivedNotes || []).filter((g: any) => g.status === 'POSTED').length;
+    const bills = (po.supplierInvoices || []).filter((si: any) => si.status !== 'VOID').length;
+    const allowed: Record<string, string[]> = {
+      OPEN: ['DRAFT'],
+      APPROVED: ['DRAFT', 'OPEN', 'CLOSED'],
+      CLOSED: ['APPROVED', 'OPEN', 'PART_RECEIVED', 'RECEIVED'],
+      CANCELLED: ['DRAFT', 'OPEN', 'APPROVED'],
+      DRAFT: ['OPEN', 'APPROVED'],
+    };
+    if (!(allowed[target] || []).includes(current)) throw new BadRequestException(`Cannot change purchase order from ${current} to ${target}.`);
+    if (target === 'CANCELLED' && (postedGrn || bills)) throw new BadRequestException('Cannot cancel a purchase order that has posted receipts or bills.');
+    await this.prisma.purchaseOrder.update({ where: { id }, data: { status: target as any } });
+    await this.audit.log(companyId, req.user.sub, 'PO_STATUS_CHANGED', 'PurchaseOrder', id, { module: 'procurement', metadata: { from: current, to: target } });
+    return this.prisma.purchaseOrder.findFirst({ where: { id, companyId }, include: { lines: true } });
   }
   @Post('purchase-orders/:id/receive') async receiveOrder(@Req() req: any, @Param('id') id: string, @Body() dto: { warehouseId?: string; reference?: string; lines?: { quantity: number }[]; confirm?: boolean } = {}) {
     const companyId = companyIdOf(req.user);
     const po = await this.prisma.purchaseOrder.findFirst({ where: { id, companyId }, include: { lines: true } });
     if (!po) throw new BadRequestException('Purchase order not found');
+    if (['CANCELLED', 'CLOSED', 'DRAFT'].includes(String(po.status).toUpperCase())) throw new BadRequestException(`Cannot receive against a ${po.status} purchase order. Approve it first.`);
     const payload = dto || {};
-    const warehouseId = payload.warehouseId || (await this.prisma.warehouse.findFirst({ where: { companyId } }))?.id;
+    const warehouseId = payload.warehouseId || po.warehouseId || (await this.prisma.warehouse.findFirst({ where: { companyId } }))?.id;
     if (!warehouseId) throw new BadRequestException('Create a warehouse first');
     const grnNo = await this.numbering.next(companyId, 'GRN');
     const lines = payload.lines?.length
@@ -197,37 +303,36 @@ export class ProcurementController {
       : po.lines.map((l) => ({ itemId: l.itemId, quantity: l.quantity, unitCost: l.unitPrice, lineTotal: l.lineTotal }));
     const grn = await this.prisma.goodsReceivedNote.create({ data: { companyId, purchaseOrderId: po.id, supplierId: po.supplierId, warehouseId, grnNo, reference: payload.reference || po.poNo, status: 'DRAFT', lines: { create: lines } }, include: { lines: true } });
     await this.audit.log(companyId, req.user.sub, 'RECEIVE', 'PurchaseOrder', po.id, { grnNo });
-    // Automatic mode: Confirm Receipt in one step (inventory update). MANUAL keeps draft GRN.
     const mode = await getTransactionPostingMode(this.prisma, companyId);
     const shouldConfirm = payload.confirm !== false && mode !== 'MANUAL';
-    if (shouldConfirm) {
-      const confirmed = await this.confirmGrn(companyId, grn.id, req.user.sub);
-      return confirmed;
-    }
+    if (shouldConfirm) return this.confirmGrn(companyId, grn.id, req.user.sub);
     return grn;
   }
   @Get('purchase-orders/:id/match') async match(@Req() req: any, @Param('id') id: string) {
     const companyId = companyIdOf(req.user);
     const po = await this.prisma.purchaseOrder.findFirst({ where: { id, companyId }, include: { lines: true, goodsReceivedNotes: { include: { lines: true } }, supplierInvoices: { include: { lines: true } } } });
-    if (!po) throw new Error('Purchase order not found');
-    const poLines = po.lines;
-    const recv = (itemId?: string) => {
-      const rows = po.goodsReceivedNotes.filter((g: any) => g.status === 'POSTED').flatMap((g: any) => g.lines).filter((l: any) => l.itemId === itemId);
-      return rows.reduce((s: number, l: any) => s + Number(l.quantity), 0);
-    };
-    const inv = (itemId?: string) => {
-      const rows = po.supplierInvoices.flatMap((si: any) => si.lines).filter((l: any) => l.itemId === itemId);
-      return rows.reduce((s: number, l: any) => s + Number(l.quantity), 0);
-    };
-    return poLines.map((l) => {
+    if (!po) throw new BadRequestException('Purchase order not found');
+    const recv = (itemId?: string) => po.goodsReceivedNotes.filter((g: any) => g.status === 'POSTED').flatMap((g: any) => g.lines).filter((l: any) => l.itemId === itemId).reduce((s: number, l: any) => s + Number(l.quantity), 0);
+    const inv = (itemId?: string) => po.supplierInvoices.filter((si: any) => si.status !== 'VOID').flatMap((si: any) => si.lines).filter((l: any) => l.itemId === itemId).reduce((s: number, l: any) => s + Number(l.quantity), 0);
+    const stockByItem = await this.stockMap(companyId, po.lines);
+    return po.lines.map((l) => {
       const receivedQty = recv(l.itemId ?? undefined);
       const invoiceQty = inv(l.itemId ?? undefined);
+      const isStock = l.itemId ? (stockByItem.get(l.itemId) ?? true) : true;
+      const billable = isStock ? Math.min(receivedQty, Number(l.quantity)) : Number(l.quantity);
       const invoicePrice = po.supplierInvoices[0]?.lines.find((x: any) => x.itemId === l.itemId)?.unitPrice ?? l.unitPrice;
-      return { lineId: l.id, description: l.description, poQty: Number(l.quantity), receivedQty, invoiceQty, poPrice: Number(l.unitPrice), invoicePrice: Number(invoicePrice), variance: Number((Number(po.supplierInvoices[0]?.lines.find((x: any) => x.itemId === l.itemId)?.unitPrice ?? l.unitPrice) - Number(l.unitPrice)).toFixed(2)) };
+      return { lineId: l.id, description: l.description, poQty: Number(l.quantity), receivedQty, invoiceQty, remainingToReceive: Math.max(0, Number(l.quantity) - receivedQty), remainingToBill: Math.max(0, billable - invoiceQty), poPrice: Number(l.unitPrice), invoicePrice: Number(invoicePrice), variance: Number((Number(invoicePrice) - Number(l.unitPrice)).toFixed(2)) };
     });
   }
   @Delete('purchase-orders/:id') async deleteOrder(@Req() req: any, @Param('id') id: string) {
-    await this.prisma.purchaseOrder.deleteMany({ where: { id, companyId: companyIdOf(req.user) } });
+    const companyId = companyIdOf(req.user);
+    const po = await this.prisma.purchaseOrder.findFirst({ where: { id, companyId }, include: { goodsReceivedNotes: true, supplierInvoices: true } });
+    if (!po) throw new BadRequestException('Purchase order not found');
+    const postedGrn = (po.goodsReceivedNotes || []).filter((g: any) => g.status === 'POSTED').length;
+    const bills = (po.supplierInvoices || []).filter((si: any) => si.status !== 'VOID').length;
+    if (postedGrn || bills) throw new BadRequestException('Cannot delete a purchase order that has posted receipts or bills. Cancel it instead.');
+    await this.prisma.purchaseOrder.deleteMany({ where: { id, companyId } });
+    await this.audit.log(companyId, req.user.sub, 'DELETE', 'PurchaseOrder', id, {});
     return { ok: true };
   }
 

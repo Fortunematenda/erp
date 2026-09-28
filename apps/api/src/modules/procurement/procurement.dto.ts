@@ -30,7 +30,21 @@ export class CreatePurchaseOrderDto {
   @IsOptional() @IsString() shipTo?: string;
   @IsOptional() @IsString() memo?: string;
   @IsOptional() @IsString() requisitionId?: string;
+  @IsOptional() @IsString() warehouseId?: string;
   @IsArray() @ValidateNested({ each: true }) @Type(() => ReqLineDto) lines!: ReqLineDto[];
+}
+
+export class UpdatePurchaseOrderDto {
+  @IsOptional() @IsString() supplierId?: string;
+  @IsOptional() @IsString() orderDate?: string;
+  @IsOptional() @IsString() expectedDate?: string;
+  @IsOptional() @IsString() currency?: string;
+  @IsOptional() @IsString() paymentTerms?: string;
+  @IsOptional() @IsString() supplierReference?: string;
+  @IsOptional() @IsString() shipTo?: string;
+  @IsOptional() @IsString() memo?: string;
+  @IsOptional() @IsString() warehouseId?: string;
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => ReqLineDto) lines?: ReqLineDto[];
 }
 
 export class CreateGrnDto {
