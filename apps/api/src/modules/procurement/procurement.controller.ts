@@ -630,24 +630,21 @@ export class ProcurementController {
       if (dup) throw new BadRequestException(`This supplier invoice number (${dto.invoiceNo.trim()}) already exists for this supplier. Bill: ${dup.invoiceNo}`);
     }
     if (dto.purchaseOrderId) {
-      // Partial billing is bounded by what has been received (stock) or ordered (non-stock),
-      // checked per line so one PO can be billed across many bills without double-billing.
+      // Billing is bounded by the ORDERED quantity per line (never double-bill the same
+      // ordered units). Billing ahead of receipt is allowed but flagged by three-way
+      // matching (MISSING_RECEIPT) and governed by the missing-receipt policy.
       const po = await this.prisma.purchaseOrder.findFirst({ where: { id: dto.purchaseOrderId, companyId }, include: { lines: true, goodsReceivedNotes: { include: { lines: true } } } });
       if (!po) throw new BadRequestException('Purchase order not found');
-      const stockByItem = await this.stockMap(companyId, po.lines);
-      const receivedRows = po.goodsReceivedNotes.filter((g: any) => g.status === 'POSTED').flatMap((g: any) => g.lines || []);
-      const recvOf = (itemId?: string | null) => (itemId ? receivedRows.filter((r: any) => r.itemId === itemId).reduce((s: number, r: any) => s + Number(r.quantity), 0) : 0);
       for (const l of dto.lines) {
         const poLine = l.purchaseOrderLineId
           ? po.lines.find((p: any) => p.id === l.purchaseOrderLineId)
           : po.lines.find((p: any) => p.itemId && p.itemId === l.itemId);
         if (l.purchaseOrderLineId && !poLine) throw new BadRequestException('A bill line references a purchase order line that does not belong to this purchase order.');
         if (!poLine) continue;
-        const isStock = poLine.itemId ? (stockByItem.get(poLine.itemId) ?? true) : true;
-        const eligible = isStock ? Math.min(recvOf(poLine.itemId), Number(poLine.quantity)) : Number(poLine.quantity);
-        const remaining = eligible - Number(poLine.invoicedQty || 0);
+        const ordered = Number(poLine.quantity);
+        const remaining = ordered - Number(poLine.invoicedQty || 0);
         if (Number(l.quantity) > remaining + 0.001) {
-          throw new BadRequestException(`Cannot bill ${l.quantity} for "${poLine.description}": only ${remaining} remaining to bill (eligible ${eligible}, already billed ${Number(poLine.invoicedQty || 0)}).`);
+          throw new BadRequestException(`Cannot bill ${l.quantity} for "${poLine.description}": only ${remaining} remaining to bill (ordered ${ordered}, already billed ${Number(poLine.invoicedQty || 0)}).`);
         }
       }
     }
@@ -677,14 +674,98 @@ export class ProcurementController {
     return si;
   }
   @UseGuards(PermissionsGuard) @RequirePermissions('procurement.bills.manage')
-  @Post('supplier-invoices/:id/post') async postSupplierInvoice(@Req() req: any, @Param('id') id: string) {
+  @Post('supplier-invoices/:id/post') async postSupplierInvoice(@Req() req: any, @Param('id') id: string, @Body() body: { confirmMissingReceipt?: boolean; overrideReason?: string } = {}) {
     const companyId = companyIdOf(req.user);
     const si = await this.prisma.supplierInvoice.findFirst({ where: { id, companyId }, include: { lines: true } });
     if (!si) throw new BadRequestException('Supplier bill not found');
     await this.ensureBillReceipt(companyId, si, req.user.sub);
+    const match = await this.matchBill(companyId, id);
+    if (match.state === 'MISSING_RECEIPT') {
+      if (match.policy === 'BLOCK') {
+        throw new BadRequestException({ statusCode: 400, error: 'MISSING_RECEIPT', message: 'Posting blocked: this bill covers goods that have not been received. Receive the goods first (missing-receipt policy = BLOCK).', match });
+      }
+      if (body?.confirmMissingReceipt !== true) {
+        throw new BadRequestException({ statusCode: 400, error: 'MISSING_RECEIPT_CONFIRMATION', message: 'This bill bills goods that have not been received. Confirm to post it as a GRNI accrual (stock will not be shown until received).', match });
+      }
+    }
     const res = await this.posting.postSupplierInvoice(companyId, id);
-    await this.audit.log(companyId, req.user.sub, 'POSTED_AUTOMATICALLY', 'SupplierInvoice', id, { module: 'procurement', result: 'SUCCESS' });
-    return res;
+    await this.prisma.supplierInvoice.update({ where: { id }, data: { matchStatus: match.state } });
+    await this.audit.log(companyId, req.user.sub, 'POSTED_AUTOMATICALLY', 'SupplierInvoice', id, {
+      module: 'procurement', result: match.state,
+      reason: body?.overrideReason,
+      metadata: { matchState: match.state, missingReceipt: match.state === 'MISSING_RECEIPT', confirmed: body?.confirmMissingReceipt === true, overrideReason: body?.overrideReason || null },
+    });
+    return { ...res, matchStatus: match.state, match };
+  }
+
+  /** Configurable three-way-match tolerances and missing-receipt policy. */
+  private async matchingConfig(companyId: string) {
+    const cfg = await this.prisma.systemConfig.findFirst({ where: { companyId, key: 'cfg.procurement.matching' } });
+    const v: any = (cfg?.value as any)?.value ?? cfg?.value ?? {};
+    return {
+      qtyTolerancePct: Number(v.qtyTolerancePct ?? 0),
+      priceTolerancePct: Number(v.priceTolerancePct ?? 2),
+      missingReceiptPolicy: String(v.missingReceiptPolicy || 'WARN').toUpperCase() === 'BLOCK' ? 'BLOCK' : 'WARN',
+    };
+  }
+
+  /**
+   * Three-way match for a supplier bill against its PO and posted receipts.
+   * Returns a per-line breakdown plus an overall state:
+   * MATCHED | QUANTITY_VARIANCE | PRICE_VARIANCE | MISSING_RECEIPT | OTHER_EXCEPTION.
+   */
+  async matchBill(companyId: string, billId: string) {
+    const bill = await this.prisma.supplierInvoice.findFirst({ where: { id: billId, companyId }, include: { lines: true, purchaseOrder: { include: { lines: true } }, supplier: true } });
+    if (!bill) throw new BadRequestException('Supplier bill not found');
+    const cfg = await this.matchingConfig(companyId);
+    const po = bill.purchaseOrder;
+    const grns = po ? await this.prisma.goodsReceivedNote.findMany({ where: { companyId, purchaseOrderId: po.id, status: 'POSTED' }, include: { lines: true } }) : [];
+    const receivedRows = grns.flatMap((g) => g.lines);
+    const stockByItem = po ? await this.stockMap(companyId, po.lines) : new Map<string, boolean>();
+    const lines: any[] = [];
+    for (const l of bill.lines) {
+      const poLine = po ? (l.purchaseOrderLineId ? po.lines.find((p) => p.id === l.purchaseOrderLineId) : po.lines.find((p) => p.itemId && p.itemId === l.itemId)) : null;
+      const isStock = l.itemId ? (stockByItem.get(l.itemId) ?? true) : true;
+      const receivedQty = l.itemId ? receivedRows.filter((r) => r.itemId === l.itemId).reduce((s, r) => s + Number(r.quantity), 0) : 0;
+      const currentBilled = Number(l.quantity);
+      const totalBilled = poLine ? Number(poLine.invoicedQty || 0) : currentBilled;
+      const previouslyBilled = Math.max(0, totalBilled - currentBilled);
+      const ordered = poLine ? Number(poLine.quantity) : null;
+      const poPrice = poLine ? Number(poLine.unitPrice) : null;
+      const billPrice = Number(l.unitPrice);
+      const qtyTol = ordered != null ? ordered * cfg.qtyTolerancePct / 100 : 0;
+      const priceTol = poPrice != null ? poPrice * cfg.priceTolerancePct / 100 : 0;
+      const overBilledVsReceived = Math.max(0, totalBilled - receivedQty);
+      const overBilledVsOrdered = ordered != null ? Math.max(0, totalBilled - ordered - qtyTol) : 0;
+      const priceVariance = poPrice != null ? Number((billPrice - poPrice).toFixed(2)) : 0;
+      let state = 'MATCHED';
+      let reason = 'Matched to purchase order';
+      if (!po) { state = 'MATCHED'; reason = 'Direct bill (no purchase order)'; }
+      else if (!poLine) { state = 'OTHER_EXCEPTION'; reason = 'Bill line has no matching purchase order line'; }
+      else if (isStock && totalBilled > receivedQty + qtyTol + 0.001) {
+        state = 'MISSING_RECEIPT';
+        reason = `Ordered ${ordered}, received ${receivedQty}, billed ${totalBilled} — ${Number((totalBilled - receivedQty).toFixed(4))} not yet received`;
+      } else if (Math.abs(priceVariance) > priceTol + 0.001) {
+        state = 'PRICE_VARIANCE';
+        reason = `PO price ${poPrice}, billed ${billPrice} (variance ${priceVariance})`;
+      } else if (overBilledVsOrdered > 0.001) {
+        state = 'QUANTITY_VARIANCE';
+        reason = `Ordered ${ordered}, billed ${totalBilled} — ${Number(overBilledVsOrdered.toFixed(4))} over ordered`;
+      }
+      lines.push({ purchaseOrderLineId: poLine?.id ?? null, itemId: l.itemId, description: l.description, isStock, ordered, receivedQty, previouslyBilled, currentBilled, totalBilled, overBilledVsReceived, overBilledVsOrdered, poPrice, billPrice, priceVariance, state, reason });
+    }
+    const states = lines.map((l) => l.state);
+    const overall = states.includes('MISSING_RECEIPT') ? 'MISSING_RECEIPT'
+      : states.includes('OTHER_EXCEPTION') ? 'OTHER_EXCEPTION'
+      : states.includes('PRICE_VARIANCE') ? 'PRICE_VARIANCE'
+      : states.includes('QUANTITY_VARIANCE') ? 'QUANTITY_VARIANCE'
+      : 'MATCHED';
+    return { billId: bill.id, invoiceNo: bill.invoiceNo, purchaseOrderId: po?.id ?? null, poNo: po?.poNo ?? null, state: overall, policy: cfg.missingReceiptPolicy, tolerances: { qtyTolerancePct: cfg.qtyTolerancePct, priceTolerancePct: cfg.priceTolerancePct }, lines };
+  }
+
+  @UseGuards(PermissionsGuard) @RequirePermissions('procurement.bills.manage')
+  @Get('supplier-invoices/:id/match') matchBillRoute(@Req() req: any, @Param('id') id: string) {
+    return this.matchBill(companyIdOf(req.user), id);
   }
 
   /**
@@ -712,7 +793,7 @@ export class ProcurementController {
   }
   /** Save & Post / Submit for Approval — business finalize for supplier bills. */
   @UseGuards(PermissionsGuard) @RequirePermissions('procurement.bills.manage')
-  @Post('supplier-invoices/:id/finalize') async finalizeSupplierInvoice(@Req() req: any, @Param('id') id: string, @Body() body: { action?: 'POST' | 'SUBMIT' }) {
+  @Post('supplier-invoices/:id/finalize') async finalizeSupplierInvoice(@Req() req: any, @Param('id') id: string, @Body() body: { action?: 'POST' | 'SUBMIT'; confirmMissingReceipt?: boolean; overrideReason?: string }) {
     const companyId = companyIdOf(req.user);
     const action = (body?.action || 'POST').toUpperCase();
     const bill = await this.prisma.supplierInvoice.findFirst({ where: { id, companyId }, include: { lines: true } });
@@ -730,9 +811,15 @@ export class ProcurementController {
       return this.prisma.supplierInvoice.findUnique({ where: { id }, include: { lines: true } });
     }
     await this.ensureBillReceipt(companyId, bill, req.user.sub);
+    const match = await this.matchBill(companyId, id);
+    if (match.state === 'MISSING_RECEIPT') {
+      if (match.policy === 'BLOCK') throw new BadRequestException({ statusCode: 400, error: 'MISSING_RECEIPT', message: 'Posting blocked: this bill covers goods that have not been received (missing-receipt policy = BLOCK).', match });
+      if (body?.confirmMissingReceipt !== true) throw new BadRequestException({ statusCode: 400, error: 'MISSING_RECEIPT_CONFIRMATION', message: 'This bill bills goods that have not been received. Confirm to post it as a GRNI accrual.', match });
+    }
     const res = await this.posting.postSupplierInvoice(companyId, id);
-    await this.audit.log(companyId, req.user.sub, 'POSTED_AUTOMATICALLY', 'SupplierInvoice', id, {});
-    return res;
+    await this.prisma.supplierInvoice.update({ where: { id }, data: { matchStatus: match.state } });
+    await this.audit.log(companyId, req.user.sub, 'POSTED_AUTOMATICALLY', 'SupplierInvoice', id, { module: 'procurement', result: match.state, reason: body?.overrideReason, metadata: { matchState: match.state, overrideReason: body?.overrideReason || null } });
+    return { ...res, matchStatus: match.state, match };
   }
   @UseGuards(PermissionsGuard) @RequirePermissions('procurement.bills.manage')
   @Post('supplier-invoices/:id/attachments') async addBillAttachment(@Req() req: any, @Param('id') id: string, @Body() b: any) {

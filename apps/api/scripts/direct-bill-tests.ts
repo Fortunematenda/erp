@@ -116,7 +116,7 @@ async function main() {
   const dBefore = { grni: await acctNet(grniId), asset: await acctNet(assetId) };
   const billD = await mkBill({ supplierId: supplier.id, invoiceNo: `DBD-${stamp}`, lines: [{ itemId: inv2.json?.id, description: 'Bill-First Widget', quantity: 5, unitPrice: 20, taxRate: 0 }] });
   if (billD.json?.id) {
-    await req(`/procurement/supplier-invoices/${billD.json.id}/post`, { method: 'POST', ...auth });
+    await req(`/procurement/supplier-invoices/${billD.json.id}/post`, { method: 'POST', ...auth, body: { confirmMissingReceipt: true, overrideReason: 'bill-first test' } });
     check('bill-first debits GRNI 100', Math.abs((await acctNet(grniId)) - dBefore.grni - 100) < 0.01);
     check('bill-first does NOT capitalise Inventory', Math.abs((await acctNet(assetId)) - dBefore.asset) < 0.01);
     check('bill-first creates no stock (no phantom on-hand)', (await onHand(inv2.json.id)) === 0);
