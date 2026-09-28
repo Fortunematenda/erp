@@ -52,6 +52,8 @@ export class CreateSupplierInvoiceDto {
   @IsOptional() @IsString() currency?: string;
   @IsOptional() @IsString() ref?: string;
   @IsOptional() @IsString() memo?: string;
+  @IsOptional() @IsString() warehouseId?: string;
+  @IsOptional() @IsBoolean() receiveNow?: boolean;
   @IsArray() @ValidateNested({ each: true }) @Type(() => ReqLineDto) lines!: ReqLineDto[];
 }
 

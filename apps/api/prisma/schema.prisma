@@ -2350,6 +2350,13 @@ model SupplierInvoice {
   creditsApplied     Decimal                     @default(0) @db.Decimal(18, 2)
   ref                String?
   memo               String?
+  warehouseId        String?
+  /// Goods physically received when a direct (no-PO) bill is posted.
+  receiveNow         Boolean                     @default(false)
+  /// Idempotency guard: set once the direct-bill receipt movements exist.
+  stockReceivedAt    DateTime?
+  /// Tracked when a bill is posted before the goods are received (GRNI accrual).
+  unreceivedQty      Decimal?                    @db.Decimal(18, 4)
   lines              SupplierInvoiceLine[]
   payments           SupplierPayment[]
   paymentAllocations SupplierPaymentAllocation[]

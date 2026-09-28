@@ -251,6 +251,29 @@ export class PostingService {
     return receipt;
   }
 
+  /** GRNI clearing account (Goods Received Not Invoiced). Created on demand. */
+  private async ensureGrniAccount(companyId: string, db: Db = this.prisma) {
+    const existing = await db.ledgerAccount.findFirst({ where: { companyId, code: '2050' } });
+    if (existing) return existing.code;
+    await db.ledgerAccount.create({ data: { companyId, code: '2050', name: 'Goods Received Not Invoiced', type: 'LIABILITY' } });
+    return '2050';
+  }
+
+  /**
+   * Whether the goods on this bill have physically been received. True when the
+   * bill is a direct "receive now" bill, already received, or linked to a posted
+   * goods receipt. When false, inventory lines are accrued to GRNI (not Inventory
+   * Asset) so stock is never shown without a matching movement.
+   */
+  private async billGoodsReceived(companyId: string, si: any, db: Db = this.prisma) {
+    if (si.receiveNow || si.stockReceivedAt) return true;
+    if (si.purchaseOrderId) {
+      const posted = await db.goodsReceivedNote.count({ where: { companyId, purchaseOrderId: si.purchaseOrderId, status: 'POSTED' } });
+      return posted > 0;
+    }
+    return false;
+  }
+
   async postSupplierInvoice(companyId: string, supplierInvoiceId: string) {
     const si = await this.prisma.supplierInvoice.findFirst({ where: { id: supplierInvoiceId, companyId }, include: { lines: true } });
     if (!si) throw new BadRequestException('Supplier invoice not found');
@@ -259,10 +282,19 @@ export class PostingService {
       throw new BadRequestException(`Cannot post bill in status ${si.status}`);
     }
     if (!si.lines.length) throw new BadRequestException('Bill has no lines');
+
+    const received = await this.billGoodsReceived(companyId, si);
+    const grniCode = received ? null : await this.ensureGrniAccount(companyId);
     const byCode = await this.accountsByCode(companyId);
+
     const drLines: { code: string; debit: number; credit: number; description: string }[] = [];
+    let unreceived = 0;
     for (const l of si.lines) {
-      const code = await this.resolvePurchaseLineCode(companyId, l);
+      const item = l.itemId ? await this.prisma.inventoryItem.findFirst({ where: { id: l.itemId, companyId } }) : null;
+      const isInventory = !!item && normalizeItemType(item.type) === ITEM_TYPE.INVENTORY_PRODUCT;
+      // Goods not yet received: accrue to GRNI instead of capitalising Inventory.
+      const code = isInventory && !received ? grniCode! : await this.resolvePurchaseLineCode(companyId, l);
+      if (isInventory && !received) unreceived += Number(l.quantity);
       if (!byCode[code]) throw new BadRequestException(`Line account ${code} not found for "${l.description}". Add an account to every bill line.`);
       const net = Number(l.lineTotal) - Number(l.taxAmount || 0);
       drLines.push({ code, debit: Number(net.toFixed(2)), credit: 0, description: l.description });
@@ -292,11 +324,11 @@ export class PostingService {
         });
         matchStatus = diff ? 'EXCEPTION' : 'MATCHED';
       }
-      await tx.supplierInvoice.update({ where: { id: si.id }, data: { status: 'POSTED', paymentStatus: 'UNPAID', amountPaid: 0, balanceDue: Number(si.total), matchStatus } });
+      await tx.supplierInvoice.update({ where: { id: si.id }, data: { status: 'POSTED', paymentStatus: 'UNPAID', amountPaid: 0, balanceDue: Number(si.total), matchStatus, unreceivedQty: received ? 0 : unreceived } });
       if (po) {
         const invoiced = po.lines.reduce((s, l) => s + Number(l.invoicedQty || 0), 0);
-        const received = po.lines.reduce((s, l) => s + Number(l.receivedQty || 0), 0);
-        const bs = invoiced >= received - 0.001 ? 'BILLED' : invoiced > 0 ? 'PARTIALLY_BILLED' : 'NOT_BILLED';
+        const receivedQty = po.lines.reduce((s, l) => s + Number(l.receivedQty || 0), 0);
+        const bs = invoiced >= receivedQty - 0.001 ? 'BILLED' : invoiced > 0 ? 'PARTIALLY_BILLED' : 'NOT_BILLED';
         await tx.purchaseOrder.update({ where: { id: po.id }, data: { billingStatus: bs } });
       }
     });

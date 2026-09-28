@@ -470,7 +470,7 @@ export class ProcurementController {
     const { mapped, subtotal, taxTotal, total } = this.computeLines(dto.lines);
     for (const l of mapped) { if (l.accountId) { const v = await this.validateLineAccount(companyId, l.accountId); l.accountCode = v?.code; } }
     const invoiceNo = await this.numbering.next(companyId, 'PINV');
-    const si = await this.prisma.supplierInvoice.create({ data: { companyId, purchaseOrderId: dto.purchaseOrderId, supplierId: dto.supplierId, projectId: dto.projectId, invoiceNo, supplierInvoiceNo: dto.invoiceNo?.trim() || null, invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : new Date(), dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined, terms: dto.terms, currency: dto.currency || 'USD', ref: dto.ref, memo: dto.memo, subtotal, taxTotal, total, balanceDue: total, status: 'DRAFT', paymentStatus: 'UNPAID', matchStatus: 'NOT_MATCHED', lines: { create: mapped.map((l: any) => ({ description: l.description, itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice, discount: l.discount, taxRate: l.taxRate, taxAmount: l.taxAmount, lineTotal: l.lineTotal, accountId: l.accountId, accountCode: l.accountCode })) } }, include: { lines: true } });
+    const si = await this.prisma.supplierInvoice.create({ data: { companyId, purchaseOrderId: dto.purchaseOrderId, supplierId: dto.supplierId, projectId: dto.projectId, invoiceNo, supplierInvoiceNo: dto.invoiceNo?.trim() || null, invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : new Date(), dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined, terms: dto.terms, currency: dto.currency || 'USD', ref: dto.ref, memo: dto.memo, warehouseId: dto.warehouseId || null, receiveNow: dto.receiveNow ?? false, subtotal, taxTotal, total, balanceDue: total, status: 'DRAFT', paymentStatus: 'UNPAID', matchStatus: 'NOT_MATCHED', lines: { create: mapped.map((l: any) => ({ description: l.description, itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice, discount: l.discount, taxRate: l.taxRate, taxAmount: l.taxAmount, lineTotal: l.lineTotal, accountId: l.accountId, accountCode: l.accountCode })) } }, include: { lines: true } });
     if (dto.purchaseOrderId && si.id) {
       await this.prisma.$transaction(async (tx) => {
         for (const l of si.lines) {
@@ -490,16 +490,43 @@ export class ProcurementController {
   @UseGuards(PermissionsGuard) @RequirePermissions('procurement.bills.manage')
   @Post('supplier-invoices/:id/post') async postSupplierInvoice(@Req() req: any, @Param('id') id: string) {
     const companyId = companyIdOf(req.user);
+    const si = await this.prisma.supplierInvoice.findFirst({ where: { id, companyId }, include: { lines: true } });
+    if (!si) throw new BadRequestException('Supplier bill not found');
+    await this.ensureBillReceipt(companyId, si, req.user.sub);
     const res = await this.posting.postSupplierInvoice(companyId, id);
     await this.audit.log(companyId, req.user.sub, 'POSTED_AUTOMATICALLY', 'SupplierInvoice', id, { module: 'procurement', result: 'SUCCESS' });
     return res;
+  }
+
+  /**
+   * Direct (no-PO) bill with goods received now: create the goods receipt (stock
+   * movement) exactly once before the bill posts, so Inventory is capitalised
+   * against a real receipt and never double-counted. Idempotent via stockReceivedAt.
+   */
+  private async ensureBillReceipt(companyId: string, si: any, userId?: string) {
+    if (!si.receiveNow || si.stockReceivedAt) return si;
+    const warehouseId = si.warehouseId || (await this.prisma.warehouse.findFirst({ where: { companyId } }))?.id;
+    if (!warehouseId) throw new BadRequestException('A warehouse is required to receive goods on this bill.');
+    const stockLines: any[] = [];
+    for (const l of si.lines) {
+      if (!l.itemId) continue;
+      const item = await this.prisma.inventoryItem.findFirst({ where: { id: l.itemId, companyId } });
+      if (item && isStockTracked(item.type)) stockLines.push({ itemId: l.itemId, quantity: Number(l.quantity), unitCost: Number(l.unitPrice), lineTotal: Number(l.lineTotal) });
+    }
+    if (stockLines.length) {
+      const grnNo = await this.numbering.next(companyId, 'GRN');
+      const grn = await this.prisma.goodsReceivedNote.create({ data: { companyId, supplierId: si.supplierId, warehouseId, grnNo, reference: si.invoiceNo, status: 'DRAFT', lines: { create: stockLines } }, include: { lines: true } });
+      await this.confirmGrn(companyId, grn.id, userId);
+    }
+    await this.prisma.supplierInvoice.update({ where: { id: si.id }, data: { stockReceivedAt: new Date() } });
+    return this.prisma.supplierInvoice.findFirst({ where: { id: si.id }, include: { lines: true } });
   }
   /** Save & Post / Submit for Approval — business finalize for supplier bills. */
   @UseGuards(PermissionsGuard) @RequirePermissions('procurement.bills.manage')
   @Post('supplier-invoices/:id/finalize') async finalizeSupplierInvoice(@Req() req: any, @Param('id') id: string, @Body() body: { action?: 'POST' | 'SUBMIT' }) {
     const companyId = companyIdOf(req.user);
     const action = (body?.action || 'POST').toUpperCase();
-    const bill = await this.prisma.supplierInvoice.findFirst({ where: { id, companyId } });
+    const bill = await this.prisma.supplierInvoice.findFirst({ where: { id, companyId }, include: { lines: true } });
     if (!bill) throw new BadRequestException('Supplier bill not found');
     if (action === 'SUBMIT') {
       await this.prisma.supplierInvoice.update({ where: { id }, data: { status: 'AWAITING_APPROVAL' } });
@@ -513,6 +540,7 @@ export class ProcurementController {
       await this.audit.log(companyId, req.user.sub, 'SUBMITTED_FOR_APPROVAL', 'SupplierInvoice', id, {});
       return this.prisma.supplierInvoice.findUnique({ where: { id }, include: { lines: true } });
     }
+    await this.ensureBillReceipt(companyId, bill, req.user.sub);
     const res = await this.posting.postSupplierInvoice(companyId, id);
     await this.audit.log(companyId, req.user.sub, 'POSTED_AUTOMATICALLY', 'SupplierInvoice', id, {});
     return res;
