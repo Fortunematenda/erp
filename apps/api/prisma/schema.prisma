@@ -109,6 +109,12 @@ enum StockMovementType {
   RETURN_OUT
 }
 
+enum ItemType {
+  INVENTORY_PRODUCT
+  NON_INVENTORY_PRODUCT
+  SERVICE
+}
+
 enum PurchaseOrderStatus {
   DRAFT
   APPROVED
@@ -871,8 +877,8 @@ model InventoryItem {
   description             String?
   salesDescription        String?
   purchaseDescription     String?
-  /// INVENTORY_PRODUCT | NON_INVENTORY_PRODUCT | SERVICE
-  type                    String             @default("INVENTORY_PRODUCT")
+  /// Canonical item type — drives stock + accounting behaviour.
+  type                    ItemType           @default(INVENTORY_PRODUCT)
   itemCategory            String?
   categoryId              String?
   category                InventoryCategory? @relation(fields: [categoryId], references: [id])
@@ -909,6 +915,9 @@ model InventoryItem {
   priceListItems          PriceListItem[]
 
   @@unique([companyId, sku])
+  @@index([companyId])
+  @@index([companyId, type])
+  @@index([categoryId])
 }
 
 model InventoryCategory {
@@ -972,6 +981,9 @@ model StockMovement {
   batchNo        String?
   serialNo       String?
   occurredAt     DateTime          @default(now())
+
+  @@index([itemId, occurredAt])
+  @@index([warehouseId])
 }
 
 model StockReservation {

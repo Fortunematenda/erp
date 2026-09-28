@@ -89,6 +89,7 @@ export const PERMISSIONS: PermissionDef[] = [
   { code: 'procurement.payments.manage', name: 'Manage supplier payments', module: 'procurement' },
 
   { code: 'inventory.view', name: 'View inventory', module: 'inventory' },
+  { code: 'inventory.items.manage', name: 'Manage products & services', module: 'inventory' },
   { code: 'inventory.adjust', name: 'Adjust stock', module: 'inventory' },
   { code: 'inventory.transfer', name: 'Transfer stock', module: 'inventory' },
 

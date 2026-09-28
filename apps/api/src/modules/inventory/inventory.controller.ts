@@ -66,6 +66,33 @@ export class InventoryController {
     return 'ADJUSTMENT_OUT';
   }
 
+  /**
+   * Item account mappings must belong to the company and be of the correct type.
+   * This prevents silent fallback to a default (and wrong) account at posting.
+   */
+  private async validateItemAccounts(companyId: string, data: any) {
+    const rules: Array<{ field: string; label: string; allow: string[] }> = [
+      { field: 'incomeAccountId', label: 'Income / Sales account', allow: ['REVENUE'] },
+      { field: 'cogsAccountId', label: 'COGS account', allow: ['EXPENSE'] },
+      { field: 'inventoryAssetAccountId', label: 'Inventory Asset account', allow: ['ASSET'] },
+      { field: 'expenseAccountId', label: 'Expense account', allow: ['EXPENSE'] },
+      { field: 'adjustmentAccountId', label: 'Adjustment account', allow: ['EXPENSE', 'REVENUE'] },
+    ];
+    for (const r of rules) {
+      const id = data?.[r.field];
+      if (!id) continue;
+      const acc = await this.prisma.ledgerAccount.findFirst({ where: { id, companyId } });
+      if (!acc) throw new BadRequestException(`${r.label} was not found for this company.`);
+      if (!r.allow.includes(String(acc.type).toUpperCase())) {
+        throw new BadRequestException(`${r.label} must be a ${r.allow.join(' / ')} account (got ${acc.code} ${acc.name}).`);
+      }
+    }
+    if (data?.defaultWarehouseId) {
+      const wh = await this.prisma.warehouse.findFirst({ where: { id: data.defaultWarehouseId, companyId } });
+      if (!wh) throw new BadRequestException('Default warehouse was not found for this company.');
+    }
+  }
+
   // ----- Inventory categories -----
   private async ensureDefaultCategories(companyId: string) {
     const count = await this.prisma.inventoryCategory.count({ where: { companyId } });
@@ -142,14 +169,10 @@ export class InventoryController {
     const where: any = { companyId };
     if (q.q) where.OR = [{ sku: { contains: q.q, mode: 'insensitive' } }, { name: { contains: q.q, mode: 'insensitive' } }, { barcode: { contains: q.q, mode: 'insensitive' } }, { description: { contains: q.q, mode: 'insensitive' } }, { hsCode: { contains: q.q, mode: 'insensitive' } }];
     if (q.type) {
-      const nt = normalizeItemType(String(q.type));
-      // Accept legacy short codes in filters too
-      where.type = { in: [nt, ...(nt === ITEM_TYPE.INVENTORY_PRODUCT ? ['INVENTORY'] : nt === ITEM_TYPE.NON_INVENTORY_PRODUCT ? ['NON_INVENTORY'] : [])] };
+      where.type = normalizeItemType(String(q.type));
     } else if (q.tracking) {
       const fromTracking = itemTypeFromTracking(String(q.tracking));
-      if (fromTracking) {
-        where.type = { in: [fromTracking, ...(fromTracking === ITEM_TYPE.INVENTORY_PRODUCT ? ['INVENTORY'] : fromTracking === ITEM_TYPE.NON_INVENTORY_PRODUCT ? ['NON_INVENTORY'] : [])] };
-      }
+      if (fromTracking) where.type = fromTracking;
     }
     if (q.categoryId) where.categoryId = q.categoryId;
     if (q.active !== undefined) where.active = q.active === 'true' || q.active === true;
@@ -190,42 +213,50 @@ export class InventoryController {
     const pageSize = Math.max(1, Number(q.pageSize) || 25);
     return { rows: filtered.slice((page - 1) * pageSize, page * pageSize), total: filtered.length, page, pageSize };
   }
-  @Post('items') async createItem(@Req() req: any, @Body() dto: ItemDto) {
+  @Post('items')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('inventory.items.manage')
+  async createItem(@Req() req: any, @Body() dto: ItemDto) {
     const companyId = companyIdOf(req.user);
     const sku = dto.sku || await this.numbering.next(companyId, 'SKU');
+    const dupSku = await this.prisma.inventoryItem.findFirst({ where: { companyId, sku } });
+    if (dupSku) throw new BadRequestException(`SKU "${sku}" already exists for this company.`);
     let cat: any = null;
     if (dto.categoryId) cat = await this.prisma.inventoryCategory.findFirst({ where: { id: dto.categoryId, companyId } });
     const itemType = normalizeItemType(dto.type || ITEM_TYPE.INVENTORY_PRODUCT);
     const stock = isStockTracked(itemType);
-    const item = await this.prisma.inventoryItem.create({
-      data: {
-        companyId, sku, name: dto.name, unit: dto.unit || (itemType === ITEM_TYPE.SERVICE ? 'Hour' : 'EA'),
-        hsCode: dto.hsCode, barcode: stock || itemType === ITEM_TYPE.NON_INVENTORY_PRODUCT ? dto.barcode : undefined,
-        brand: dto.brand, description: dto.description, salesDescription: dto.salesDescription, purchaseDescription: dto.purchaseDescription,
-        type: itemType, itemCategory: dto.itemCategory, categoryId: cat?.id, imageUrl: dto.imageUrl,
-        reorderLevel: stock ? (dto.reorderLevel ?? 0) : 0,
-        reorderQuantity: stock ? (dto.reorderQuantity ?? 0) : 0,
-        safetyStock: stock ? (dto.safetyStock ?? 0) : 0,
-        sellingPrice: dto.sellingPrice ?? 0, minSellingPrice: dto.minSellingPrice, purchaseCost: dto.purchaseCost ?? 0,
-        costingMethod: stock ? (dto.costingMethod || 'WEIGHTED_AVERAGE') : null,
-        trackBatch: stock ? (dto.trackBatch ?? false) : false,
-        trackSerial: stock ? (dto.trackSerial ?? false) : false,
-        trackExpiry: stock ? (dto.trackExpiry ?? false) : false,
-        salesTaxCode: dto.salesTaxCode ?? cat?.salesTaxCode, purchaseTaxCode: dto.purchaseTaxCode ?? cat?.purchaseTaxCode,
-        incomeAccountId: dto.incomeAccountId ?? cat?.incomeAccountId,
-        cogsAccountId: stock ? (dto.cogsAccountId ?? cat?.cogsAccountId) : undefined,
-        inventoryAssetAccountId: stock ? (dto.inventoryAssetAccountId ?? cat?.inventoryAssetAccountId) : undefined,
-        expenseAccountId: !stock ? (dto.expenseAccountId ?? cat?.expenseAccountId ?? dto.cogsAccountId) : (dto.expenseAccountId ?? cat?.expenseAccountId),
-        adjustmentAccountId: stock ? dto.adjustmentAccountId : undefined,
-        defaultWarehouseId: stock ? dto.defaultWarehouseId : undefined,
-        preferredSupplierId: dto.preferredSupplierId, supplierSku: dto.supplierSku, leadTimeDays: dto.leadTimeDays,
-        allowDiscount: dto.allowDiscount ?? true, active: dto.active ?? true,
-      },
-    });
+    const data: any = {
+      companyId, sku, name: dto.name, unit: dto.unit || (itemType === ITEM_TYPE.SERVICE ? 'Hour' : 'EA'),
+      hsCode: dto.hsCode, barcode: stock || itemType === ITEM_TYPE.NON_INVENTORY_PRODUCT ? dto.barcode : undefined,
+      brand: dto.brand, description: dto.description, salesDescription: dto.salesDescription, purchaseDescription: dto.purchaseDescription,
+      type: itemType, itemCategory: dto.itemCategory, categoryId: cat?.id, imageUrl: dto.imageUrl,
+      reorderLevel: stock ? (dto.reorderLevel ?? 0) : 0,
+      reorderQuantity: stock ? (dto.reorderQuantity ?? 0) : 0,
+      safetyStock: stock ? (dto.safetyStock ?? 0) : 0,
+      sellingPrice: dto.sellingPrice ?? 0, minSellingPrice: dto.minSellingPrice, purchaseCost: dto.purchaseCost ?? 0,
+      costingMethod: stock ? (dto.costingMethod || 'WEIGHTED_AVERAGE') : null,
+      trackBatch: stock ? (dto.trackBatch ?? false) : false,
+      trackSerial: stock ? (dto.trackSerial ?? false) : false,
+      trackExpiry: stock ? (dto.trackExpiry ?? false) : false,
+      salesTaxCode: dto.salesTaxCode ?? cat?.salesTaxCode, purchaseTaxCode: dto.purchaseTaxCode ?? cat?.purchaseTaxCode,
+      incomeAccountId: dto.incomeAccountId ?? cat?.incomeAccountId,
+      cogsAccountId: stock ? (dto.cogsAccountId ?? cat?.cogsAccountId) : undefined,
+      inventoryAssetAccountId: stock ? (dto.inventoryAssetAccountId ?? cat?.inventoryAssetAccountId) : undefined,
+      expenseAccountId: !stock ? (dto.expenseAccountId ?? cat?.expenseAccountId ?? dto.cogsAccountId) : (dto.expenseAccountId ?? cat?.expenseAccountId),
+      adjustmentAccountId: stock ? dto.adjustmentAccountId : undefined,
+      defaultWarehouseId: stock ? dto.defaultWarehouseId : undefined,
+      preferredSupplierId: dto.preferredSupplierId, supplierSku: dto.supplierSku, leadTimeDays: dto.leadTimeDays,
+      allowDiscount: dto.allowDiscount ?? true, active: dto.active ?? true,
+    };
+    await this.validateItemAccounts(companyId, data);
+    const item = await this.prisma.inventoryItem.create({ data });
     await this.audit.log(companyId, req.user.sub, 'CREATE', 'InventoryItem', item.id, { sku, type: itemType });
     return item;
   }
-  @Patch('items/:id') async updateItem(@Req() req: any, @Param('id') id: string, @Body() dto: Partial<ItemDto>) {
+  @Patch('items/:id')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('inventory.items.manage')
+  async updateItem(@Req() req: any, @Param('id') id: string, @Body() dto: Partial<ItemDto>) {
     const companyId = companyIdOf(req.user);
     const existing = await this.prisma.inventoryItem.findFirst({
       where: { id, companyId },
@@ -264,6 +295,7 @@ export class InventoryController {
       }
     }
 
+    await this.validateItemAccounts(companyId, data);
     await this.prisma.inventoryItem.updateMany({ where: { id, companyId }, data });
     const changes: Record<string, { from: any; to: any }> = {};
     for (const key of ['name', 'sku', 'barcode', 'sellingPrice', 'purchaseCost', 'categoryId', 'unit', 'active', 'reorderLevel', 'description', 'type'] as const) {
@@ -309,6 +341,8 @@ export class InventoryController {
   }
 
   @Post('items/:id/restore')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('inventory.items.manage')
   async restoreItem(@Req() req: any, @Param('id') id: string) {
     const companyId = companyIdOf(req.user);
     await this.prisma.inventoryItem.updateMany({ where: { id, companyId }, data: { active: true } });
@@ -316,7 +350,10 @@ export class InventoryController {
     return this.prisma.inventoryItem.findFirst({ where: { id, companyId } });
   }
 
-  @Delete('items/:id') async deleteItem(@Req() req: any, @Param('id') id: string) {
+  @Delete('items/:id')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('inventory.items.manage')
+  async deleteItem(@Req() req: any, @Param('id') id: string) {
     const companyId = companyIdOf(req.user);
     const item = await this.prisma.inventoryItem.findFirst({
       where: { id, companyId },

@@ -11,7 +11,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "test:performance": "tsx scripts/performance-tests.ts",
     "test:p0": "tsx scripts/p0-regression.ts",
-    "test:fiscal": "tsx scripts/fiscalisation-tests.ts"
+    "test:fiscal": "tsx scripts/fiscalisation-tests.ts",
+    "test:items": "tsx scripts/item-types-tests.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
