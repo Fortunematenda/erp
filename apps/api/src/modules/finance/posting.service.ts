@@ -252,7 +252,7 @@ export class PostingService {
   }
 
   /** GRNI clearing account (Goods Received Not Invoiced). Created on demand. */
-  private async ensureGrniAccount(companyId: string, db: Db = this.prisma) {
+  async ensureGrniAccount(companyId: string, db: Db = this.prisma) {
     const existing = await db.ledgerAccount.findFirst({ where: { companyId, code: '2050' } });
     if (existing) return existing.code;
     await db.ledgerAccount.create({ data: { companyId, code: '2050', name: 'Goods Received Not Invoiced', type: 'LIABILITY' } });
@@ -260,10 +260,32 @@ export class PostingService {
   }
 
   /**
+   * Goods receipt capitalization (GRNI accrual): Dr Inventory Asset / Cr GRNI.
+   * The matching supplier bill later clears GRNI to Accounts Payable, so inventory
+   * is capitalized exactly once per received unit.
+   */
+  async postGoodsReceipt(companyId: string, opts: { date: Date; reference: string; sourceId: string; lines: { accountCode: string; amount: number }[]; userId?: string }, db?: Prisma.TransactionClient) {
+    const grni = await this.ensureGrniAccount(companyId, db || this.prisma);
+    const dr = opts.lines.filter((l) => Number(l.amount) > 0.004).map((l) => ({ code: l.accountCode, debit: Number(Number(l.amount).toFixed(2)), credit: 0, description: 'Inventory receipt' }));
+    const total = dr.reduce((s, l) => s + l.debit, 0);
+    if (total <= 0.004) return null;
+    dr.push({ code: grni, debit: 0, credit: Number(total.toFixed(2)), description: 'Goods received not invoiced' });
+    return this.postJournal(companyId, {
+      date: opts.date,
+      description: `Goods receipt ${opts.reference}`,
+      reference: opts.reference,
+      sourceType: 'GOODS_RECEIPT',
+      sourceId: opts.sourceId,
+      lines: dr,
+      userId: opts.userId,
+    }, db);
+  }
+
+  /**
    * Whether the goods on this bill have physically been received. True when the
    * bill is a direct "receive now" bill, already received, or linked to a posted
-   * goods receipt. When false, inventory lines are accrued to GRNI (not Inventory
-   * Asset) so stock is never shown without a matching movement.
+   * goods receipt. Inventory lines are always accrued to GRNI; the receipt is the
+   * event that capitalises Inventory Asset.
    */
   private async billGoodsReceived(companyId: string, si: any, db: Db = this.prisma) {
     if (si.receiveNow || si.stockReceivedAt) return true;
@@ -283,8 +305,10 @@ export class PostingService {
     }
     if (!si.lines.length) throw new BadRequestException('Bill has no lines');
 
+    // Inventory lines always clear GRNI (the receipt capitalised Inventory). Goods
+    // not yet received leave GRNI standing until the receipt arrives.
     const received = await this.billGoodsReceived(companyId, si);
-    const grniCode = received ? null : await this.ensureGrniAccount(companyId);
+    const grniCode = await this.ensureGrniAccount(companyId);
     const byCode = await this.accountsByCode(companyId);
 
     const drLines: { code: string; debit: number; credit: number; description: string }[] = [];
@@ -292,8 +316,7 @@ export class PostingService {
     for (const l of si.lines) {
       const item = l.itemId ? await this.prisma.inventoryItem.findFirst({ where: { id: l.itemId, companyId } }) : null;
       const isInventory = !!item && normalizeItemType(item.type) === ITEM_TYPE.INVENTORY_PRODUCT;
-      // Goods not yet received: accrue to GRNI instead of capitalising Inventory.
-      const code = isInventory && !received ? grniCode! : await this.resolvePurchaseLineCode(companyId, l);
+      const code = isInventory ? grniCode : await this.resolvePurchaseLineCode(companyId, l);
       if (isInventory && !received) unreceived += Number(l.quantity);
       if (!byCode[code]) throw new BadRequestException(`Line account ${code} not found for "${l.description}". Add an account to every bill line.`);
       const net = Number(l.lineTotal) - Number(l.taxAmount || 0);

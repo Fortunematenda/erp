@@ -15,7 +15,8 @@
     "test:items": "tsx scripts/item-types-tests.ts",
     "test:resolver": "tsx scripts/item-resolver-tests.ts",
     "test:direct-bill": "tsx scripts/direct-bill-tests.ts",
-    "test:po": "tsx scripts/po-lifecycle-tests.ts"
+    "test:po": "tsx scripts/po-lifecycle-tests.ts",
+    "test:receiving": "tsx scripts/receiving-tests.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

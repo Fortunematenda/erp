@@ -289,18 +289,41 @@ export class ProcurementController {
     await this.audit.log(companyId, req.user.sub, 'PO_STATUS_CHANGED', 'PurchaseOrder', id, { module: 'procurement', metadata: { from: current, to: target } });
     return this.prisma.purchaseOrder.findFirst({ where: { id, companyId }, include: { lines: true } });
   }
+  @Get('purchase-orders/:id/receiving') async receiving(@Req() req: any, @Param('id') id: string) {
+    const companyId = companyIdOf(req.user);
+    const po = await this.prisma.purchaseOrder.findFirst({ where: { id, companyId }, include: { lines: true, goodsReceivedNotes: { include: { lines: true } } } });
+    if (!po) throw new BadRequestException('Purchase order not found');
+    const stockByItem = await this.stockMap(companyId, po.lines);
+    const receivedRows = po.goodsReceivedNotes.filter((g: any) => g.status === 'POSTED').flatMap((g: any) => g.lines || []);
+    return {
+      poNo: po.poNo,
+      status: po.status,
+      warehouseId: po.warehouseId,
+      lines: po.lines.map((l) => {
+        const prev = receivedRows.filter((r: any) => r.itemId === l.itemId).reduce((s: number, r: any) => s + Number(r.quantity), 0);
+        const ordered = Number(l.quantity);
+        return { lineId: l.id, itemId: l.itemId, description: l.description, ordered, previouslyReceived: prev, remaining: Math.max(0, ordered - prev), unitCost: Number(l.unitPrice), stockTracked: l.itemId ? (stockByItem.get(l.itemId) ?? true) : true };
+      }),
+    };
+  }
   @Post('purchase-orders/:id/receive') async receiveOrder(@Req() req: any, @Param('id') id: string, @Body() dto: { warehouseId?: string; reference?: string; lines?: { quantity: number }[]; confirm?: boolean } = {}) {
     const companyId = companyIdOf(req.user);
     const po = await this.prisma.purchaseOrder.findFirst({ where: { id, companyId }, include: { lines: true } });
     if (!po) throw new BadRequestException('Purchase order not found');
     if (['CANCELLED', 'CLOSED', 'DRAFT'].includes(String(po.status).toUpperCase())) throw new BadRequestException(`Cannot receive against a ${po.status} purchase order. Approve it first.`);
     const payload = dto || {};
+    if (payload.lines?.some((x) => Number(x.quantity) < 0)) throw new BadRequestException('Receipt quantity cannot be negative');
     const warehouseId = payload.warehouseId || po.warehouseId || (await this.prisma.warehouse.findFirst({ where: { companyId } }))?.id;
     if (!warehouseId) throw new BadRequestException('Create a warehouse first');
+    const wh = await this.prisma.warehouse.findFirst({ where: { id: warehouseId, companyId } });
+    if (!wh) throw new BadRequestException('Warehouse not found for this company');
+    const requested = payload.lines?.length ? payload.lines : po.lines.map((l) => ({ quantity: Number(l.quantity) }));
+    const lines = po.lines
+      .map((l, i) => ({ itemId: l.itemId, quantity: Number(requested[i]?.quantity ?? l.quantity), unitCost: l.unitPrice }))
+      .filter((l) => l.quantity > 0)
+      .map((l) => ({ ...l, lineTotal: Number((Number(l.unitCost) * l.quantity).toFixed(2)) }));
+    if (!lines.length) throw new BadRequestException('Nothing to receive — enter a receipt quantity greater than zero.');
     const grnNo = await this.numbering.next(companyId, 'GRN');
-    const lines = payload.lines?.length
-      ? po.lines.map((l, i) => ({ itemId: l.itemId, quantity: payload.lines![i]?.quantity ?? l.quantity, unitCost: l.unitPrice, lineTotal: Number((Number(l.unitPrice) * (payload.lines![i]?.quantity ?? l.quantity)).toFixed(2)) }))
-      : po.lines.map((l) => ({ itemId: l.itemId, quantity: l.quantity, unitCost: l.unitPrice, lineTotal: l.lineTotal }));
     const grn = await this.prisma.goodsReceivedNote.create({ data: { companyId, purchaseOrderId: po.id, supplierId: po.supplierId, warehouseId, grnNo, reference: payload.reference || po.poNo, status: 'DRAFT', lines: { create: lines } }, include: { lines: true } });
     await this.audit.log(companyId, req.user.sub, 'RECEIVE', 'PurchaseOrder', po.id, { grnNo });
     const mode = await getTransactionPostingMode(this.prisma, companyId);
@@ -361,9 +384,13 @@ export class ProcurementController {
     if (!grn) throw new Error('GRN not found');
     if (grn.status !== 'DRAFT') return grn;
     if (!grn.warehouseId) throw new BadRequestException('GRN requires a warehouse');
+    const wh = await this.prisma.warehouse.findFirst({ where: { id: grn.warehouseId, companyId } });
+    if (!wh) throw new BadRequestException('Warehouse not found for this company');
     await this.prisma.$transaction(async (tx) => {
+      const receiptValueLines: { accountCode: string; amount: number }[] = [];
       for (const line of grn.lines) {
         if (!line.itemId) continue;
+        if (!(Number(line.quantity) > 0)) continue;
         const item = await tx.inventoryItem.findFirst({ where: { id: line.itemId, companyId } });
         // Only Inventory Products create stock receipts; services / non-inventory update PO received qty only.
         if (item && isStockTracked(item.type)) {
@@ -376,6 +403,13 @@ export class ProcurementController {
             reference: grn.grnNo,
             occurredAt: grn.receivedAt,
           }, userId, tx);
+          // Capitalise Inventory Asset / credit GRNI for the received value (GRNI accrual).
+          let accountCode = '1200';
+          if (item.inventoryAssetAccountId) {
+            const a = await tx.ledgerAccount.findFirst({ where: { id: item.inventoryAssetAccountId, companyId } });
+            if (a?.code) accountCode = a.code;
+          }
+          receiptValueLines.push({ accountCode, amount: Number(line.quantity) * Number(line.unitCost) });
         }
         const poi = grn.purchaseOrder?.lines.find((l: any) => l.itemId === line.itemId);
         if (poi) {
@@ -383,6 +417,9 @@ export class ProcurementController {
           if (newRecv > Number(poi.quantity) + 0.001) throw new BadRequestException(`Over-receipt blocked: received exceeds ordered for ${poi.description}`);
           await tx.purchaseOrderLine.update({ where: { id: poi.id }, data: { receivedQty: newRecv } });
         }
+      }
+      if (receiptValueLines.length) {
+        await this.posting.postGoodsReceipt(companyId, { date: grn.receivedAt, reference: grn.grnNo, sourceId: grn.id, lines: receiptValueLines, userId }, tx);
       }
       await tx.goodsReceivedNote.update({ where: { id: grn.id }, data: { status: 'POSTED' } });
       if (grn.purchaseOrderId) {

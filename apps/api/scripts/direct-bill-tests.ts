@@ -1,10 +1,10 @@
 /**
- * Direct Enter Bill without Purchase Order regression suite (Feature 04).
+ * Direct Enter Bill without Purchase Order regression suite (Feature 04, GRNI model).
  *   npm run test:direct-bill -w @nexuserp/api
  *
- * Verifies: direct inventory bill with goods received now (stock + Inventory once,
- * AP, no COGS), bill-first accrual to GRNI (no phantom stock), service bills
- * (expense/AP, no stock), duplicate-post idempotency and partial payment.
+ * GRNI accrual: the goods receipt capitalises Inventory (Dr Inventory / Cr GRNI);
+ * the supplier bill clears GRNI (Dr GRNI / Cr AP). Net for received goods is
+ * Dr Inventory / Cr AP, capitalised exactly once, with no COGS on purchase.
  */
 import { PrismaClient } from '@prisma/client';
 import { readFileSync } from 'fs';
@@ -42,7 +42,7 @@ async function req(path: string, opts: { method?: string; token?: string; body?:
 }
 
 async function main() {
-  console.log('Direct bill regression suite');
+  console.log('Direct bill regression suite (GRNI)');
   const login = await req('/auth/login', { method: 'POST', body: { email: 'admin@demo.local', password: 'Password123!' } });
   if (!login.json?.token) throw new Error('Login failed: ' + login.text);
   let token: string = login.json.token;
@@ -66,71 +66,69 @@ async function main() {
   async function mkItem(body: any) { const r = await req('/inventory/items', { method: 'POST', ...auth, body }); if (r.json?.id) items.push(r.json.id); return r; }
   async function mkBill(body: any) { const r = await req('/procurement/supplier-invoices', { method: 'POST', ...auth, body }); if (r.json?.id) bills.push(r.json.id); return r; }
   const acctId = async (code: string) => (await prisma.ledgerAccount.findFirst({ where: { companyId, code } }))?.id;
-  const journalNet = async (accountId: string | undefined, sourceId: string) => {
+  const acctNet = async (accountId?: string) => {
     if (!accountId) return 0;
-    const lines = await prisma.journalLine.findMany({ where: { accountId, journal: { companyId, sourceType: 'SUPPLIER_INVOICE', sourceId } } });
-    return lines.reduce((s, l) => s + Number(l.debit) - Number(l.credit), 0);
+    const rows = await prisma.journalLine.findMany({ where: { accountId, journal: { companyId } } });
+    return rows.reduce((s, l) => s + Number(l.debit) - Number(l.credit), 0);
   };
-  const onHand = async (itemId: string) => {
-    const rows = await prisma.stockMovement.findMany({ where: { itemId }, select: { signedQuantity: true, quantity: true, type: true } });
-    return rows.reduce((s, r) => s + Number(r.signedQuantity || 0), 0);
-  };
+  const onHand = async (itemId: string) => (await prisma.stockMovement.findMany({ where: { itemId }, select: { signedQuantity: true } })).reduce((s, r) => s + Number(r.signedQuantity || 0), 0);
+
+  const assetId = await acctId('1200');
+  const apId = await acctId('2000');
+  const grniId = await acctId('2050');
 
   // ---- A. Direct inventory bill, goods received now ----
-  const inv = await mkItem({ sku: `DB-INV-${stamp}`, name: 'Direct Widget', type: 'INVENTORY_PRODUCT', purchaseCost: 20, sellingPrice: 35, incomeAccountId: accounts.find((a) => a.code === '4000')?.id, cogsAccountId: expense?.id, inventoryAssetAccountId: await acctId('1200') });
+  const inv = await mkItem({ sku: `DB-INV-${stamp}`, name: 'Direct Widget', type: 'INVENTORY_PRODUCT', purchaseCost: 20, sellingPrice: 35, incomeAccountId: accounts.find((a) => a.code === '4000')?.id, cogsAccountId: expense?.id, inventoryAssetAccountId: assetId });
+  const before = { asset: await acctNet(assetId), ap: await acctNet(apId), grni: await acctNet(grniId), cogs: await acctNet(expense?.id) };
   const billA = await mkBill({ supplierId: supplier.id, invoiceNo: `DBA-${stamp}`, warehouseId: warehouse?.id, receiveNow: true, lines: [{ itemId: inv.json?.id, description: 'Direct Widget', quantity: 10, unitPrice: 20, taxRate: 0 }] });
   check('direct inventory bill created (receive now)', billA.status === 201 && billA.json?.receiveNow === true, `status=${billA.status}`);
   if (billA.json?.id) {
     const post = await req(`/procurement/supplier-invoices/${billA.json.id}/post`, { method: 'POST', ...auth });
     check('bill posted', post.status === 201 || post.status === 200, `status=${post.status}`);
     check('stock on hand = 10', Math.abs((await onHand(inv.json.id)) - 10) < 0.001, `onHand=${await onHand(inv.json.id)}`);
-    check('Inventory Asset debited 200 once', Math.abs((await journalNet(await acctId('1200'), billA.json.id)) - 200) < 0.01);
-    check('Accounts Payable credited 200', Math.abs((await journalNet(await acctId('2000'), billA.json.id)) + 200) < 0.01);
-    const cogsNet = await journalNet(expense?.id, billA.json.id);
-    check('NO COGS posted on purchase', Math.abs(cogsNet) < 0.01, `cogs=${cogsNet}`);
+    check('Inventory Asset capitalised 200 once', Math.abs((await acctNet(assetId)) - before.asset - 200) < 0.01, `delta=${(await acctNet(assetId)) - before.asset}`);
+    check('Accounts Payable credited 200', Math.abs((await acctNet(apId)) - before.ap + 200) < 0.01, `delta=${(await acctNet(apId)) - before.ap}`);
+    check('GRNI clears to zero', Math.abs((await acctNet(grniId)) - before.grni) < 0.01, `delta=${(await acctNet(grniId)) - before.grni}`);
+    check('NO COGS posted on purchase', Math.abs((await acctNet(expense?.id)) - before.cogs) < 0.01);
 
-    // Duplicate post idempotency
     await req(`/procurement/supplier-invoices/${billA.json.id}/post`, { method: 'POST', ...auth });
-    const moves = await prisma.stockMovement.count({ where: { itemId: inv.json.id } });
-    check('duplicate post does not double stock', moves === 1, `movements=${moves}`);
-    const invNet2 = await journalNet(await acctId('1200'), billA.json.id);
-    check('duplicate post does not double Inventory', Math.abs(invNet2 - 200) < 0.01);
+    check('duplicate post does not double stock', (await prisma.stockMovement.count({ where: { itemId: inv.json.id } })) === 1);
+    check('duplicate post does not double Inventory', Math.abs((await acctNet(assetId)) - before.asset - 200) < 0.01);
 
-    // ---- E. Partial payment ----
     const pay = await req('/procurement/supplier-payments', { method: 'POST', ...auth, body: { supplierId: supplier.id, amount: 100, method: 'BANK', allocations: [{ supplierInvoiceId: billA.json.id, amount: 100 }] } });
     check('partial payment accepted', pay.status === 201 || pay.status === 200, `status=${pay.status}`);
     const afterPay = await prisma.supplierInvoice.findUnique({ where: { id: billA.json.id } });
-    check('bill balance 100 PARTIALLY_PAID', Number(afterPay?.balanceDue) === 100 && afterPay?.paymentStatus === 'PARTIALLY_PAID', `bal=${afterPay?.balanceDue} status=${afterPay?.paymentStatus}`);
+    check('bill balance 100 PARTIALLY_PAID', Number(afterPay?.balanceDue) === 100 && afterPay?.paymentStatus === 'PARTIALLY_PAID');
   }
 
   // ---- C. Direct service bill (expense/AP, no stock) ----
   const svc = await mkItem({ sku: `DB-SVC-${stamp}`, name: 'Direct Service', type: 'SERVICE', sellingPrice: 100, expenseAccountId: expense?.id });
+  const svcBefore = await acctNet(expense?.id);
   const billC = await mkBill({ supplierId: supplier.id, invoiceNo: `DBC-${stamp}`, lines: [{ itemId: svc.json?.id, description: 'Direct Service', quantity: 1, unitPrice: 150, taxRate: 0 }] });
   if (billC.json?.id) {
     await req(`/procurement/supplier-invoices/${billC.json.id}/post`, { method: 'POST', ...auth });
-    check('service bill debits Expense 150', Math.abs((await journalNet(expense?.id, billC.json.id)) - 150) < 0.01);
-    const svcMoves = await prisma.stockMovement.count({ where: { itemId: svc.json.id } });
-    check('service bill creates NO stock movement', svcMoves === 0, `movements=${svcMoves}`);
+    check('service bill debits Expense 150', Math.abs((await acctNet(expense?.id)) - svcBefore - 150) < 0.01);
+    check('service bill creates NO stock movement', (await prisma.stockMovement.count({ where: { itemId: svc.json.id } })) === 0);
   }
 
   // ---- D. Bill before goods (no receiveNow) → GRNI accrual, no phantom stock ----
-  const inv2 = await mkItem({ sku: `DB-INV2-${stamp}`, name: 'Bill-First Widget', type: 'INVENTORY_PRODUCT', purchaseCost: 20, sellingPrice: 35, inventoryAssetAccountId: await acctId('1200') });
+  const inv2 = await mkItem({ sku: `DB-INV2-${stamp}`, name: 'Bill-First Widget', type: 'INVENTORY_PRODUCT', purchaseCost: 20, sellingPrice: 35, inventoryAssetAccountId: assetId });
+  const dBefore = { grni: await acctNet(grniId), asset: await acctNet(assetId) };
   const billD = await mkBill({ supplierId: supplier.id, invoiceNo: `DBD-${stamp}`, lines: [{ itemId: inv2.json?.id, description: 'Bill-First Widget', quantity: 5, unitPrice: 20, taxRate: 0 }] });
   if (billD.json?.id) {
     await req(`/procurement/supplier-invoices/${billD.json.id}/post`, { method: 'POST', ...auth });
-    const grniId = await acctId('2050');
-    check('GRNI account created', !!grniId);
-    check('bill-first debits GRNI 100', Math.abs((await journalNet(grniId, billD.json.id)) - 100) < 0.01, `grni=${await journalNet(grniId, billD.json.id)}`);
-    check('bill-first does NOT debit Inventory', Math.abs(await journalNet(await acctId('1200'), billD.json.id)) < 0.01);
-    check('bill-first creates no stock (no phantom on-hand)', (await onHand(inv2.json.id)) === 0, `onHand=${await onHand(inv2.json.id)}`);
+    check('bill-first debits GRNI 100', Math.abs((await acctNet(grniId)) - dBefore.grni - 100) < 0.01);
+    check('bill-first does NOT capitalise Inventory', Math.abs((await acctNet(assetId)) - dBefore.asset) < 0.01);
+    check('bill-first creates no stock (no phantom on-hand)', (await onHand(inv2.json.id)) === 0);
     const d = await prisma.supplierInvoice.findUnique({ where: { id: billD.json.id } });
-    check('unreceived quantity tracked', Number(d?.unreceivedQty) === 5, `unreceived=${d?.unreceivedQty}`);
+    check('unreceived quantity tracked', Number(d?.unreceivedQty) === 5);
   }
 
-  // ---- Cleanup test data ----
+  // ---- Cleanup ----
   const grnRows = await prisma.goodsReceivedNote.findMany({ where: { companyId, supplierId: supplier.id } });
   for (const g of grnRows) grns.push(g.id);
   await prisma.journalEntry.deleteMany({ where: { companyId, sourceType: 'SUPPLIER_INVOICE', sourceId: { in: bills } } });
+  await prisma.journalEntry.deleteMany({ where: { companyId, sourceType: 'GOODS_RECEIPT', sourceId: { in: grns } } });
   await prisma.journalEntry.deleteMany({ where: { companyId, sourceType: 'SUPPLIER_PAYMENT' } });
   await prisma.stockMovement.deleteMany({ where: { itemId: { in: items } } });
   await prisma.goodsReceivedNoteLine.deleteMany({ where: { grnId: { in: grns } } });
