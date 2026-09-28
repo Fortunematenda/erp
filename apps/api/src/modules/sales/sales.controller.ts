@@ -17,6 +17,7 @@ import { PricingService } from './pricing.service';
 import { QuotationStatusService } from './quotation-status.service';
 import { POSTED_INVOICE_EDIT_MESSAGE, SalesIntegrityService } from './sales-integrity.service';
 import { InventoryMovementService } from '../inventory/inventory-movement.service';
+import { ItemResolverService } from '../inventory/item-resolver.service';
 import { getTransactionPostingMode } from '../finance/transaction-mode';
 import { isStockTracked } from '../inventory/item-type';
 
@@ -35,6 +36,7 @@ export class SalesController {
     private quoteStatus: QuotationStatusService,
     private integrity: SalesIntegrityService,
     private stock: InventoryMovementService,
+    private itemResolver: ItemResolverService,
   ) {}
 
   /**
@@ -526,6 +528,8 @@ export class SalesController {
     await this.integrity.assertCustomer(companyId, dto.customerId);
     await this.integrity.assertProducts(companyId, dto.lines);
     await this.integrity.assertCurrency(companyId, dto.currency || 'USD');
+    // Shared resolver: fill item-master sales description/unit/tax when omitted.
+    await this.itemResolver.applySalesDefaults(companyId, { customerId: dto.customerId, currency: dto.currency || 'USD', lines: dto.lines as any[] });
     await this.integrity.applyPricing(companyId, { customerId: dto.customerId, currency: dto.currency || 'USD', lines: dto.lines as any[] });
     const { mapped, subtotal, taxTotal, total } = this.computeLines(dto.lines);
     const invoiceNo = dto.invoiceNo || await this.numbering.next(companyId, 'INV');

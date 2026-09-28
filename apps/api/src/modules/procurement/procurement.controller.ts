@@ -12,11 +12,12 @@ import { StatusDto } from '../sales/sales.dto';
 import { getTransactionPostingMode } from '../finance/transaction-mode';
 import { ApprovalService } from '../approvals/approval.service';
 import { InventoryMovementService } from '../inventory/inventory-movement.service';
+import { ItemResolverService } from '../inventory/item-resolver.service';
 import { isStockTracked, normalizeItemType, ITEM_TYPE } from '../inventory/item-type';
 
 @ApiTags('Procurement') @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Controller('procurement')
 export class ProcurementController {
-  constructor(private prisma: PrismaService, private numbering: NumberingService, private audit: AuditService, private posting: PostingService, private approvals: ApprovalService, private stock: InventoryMovementService) {}
+  constructor(private prisma: PrismaService, private numbering: NumberingService, private audit: AuditService, private posting: PostingService, private approvals: ApprovalService, private stock: InventoryMovementService, private items: ItemResolverService) {}
 
   private async accountByCode(companyId: string, id?: string) {
     if (!id) return { code: '1000', name: 'Cash / Bank' };
@@ -463,6 +464,9 @@ export class ProcurementController {
       const alreadyInvoiced = po.lines.reduce((s, l) => s + Number(l.invoicedQty || 0), 0);
       if (totalInv > received - alreadyInvoiced + 0.001) throw new BadRequestException(`Cannot bill more than remaining received quantity (received ${received}, already billed ${alreadyInvoiced}, this bill ${totalInv})`);
     }
+    // Resolve item-master defaults (description, cost, account mapping) for item lines
+    // — applies equally to direct bills and PO-linked bills. Line values win.
+    await this.items.applyPurchaseDefaults(companyId, dto.lines as any[]);
     const { mapped, subtotal, taxTotal, total } = this.computeLines(dto.lines);
     for (const l of mapped) { if (l.accountId) { const v = await this.validateLineAccount(companyId, l.accountId); l.accountCode = v?.code; } }
     const invoiceNo = await this.numbering.next(companyId, 'PINV');

@@ -8,6 +8,7 @@ import { CountLineDto, CreateAdjustmentDto, CreateCountDto, CreateMovementDto, I
 import { NumberingService } from '../../core/common/numbering.service';
 import { AuditService } from '../../core/common/audit.service';
 import { InventoryMovementService } from './inventory-movement.service';
+import { ItemResolverService } from './item-resolver.service';
 import { PostingService } from '../finance/posting.service';
 import { ITEM_TYPE, isService, isStockTracked, normalizeItemType, trackingStatus, itemTypeFromTracking } from './item-type';
 
@@ -19,6 +20,7 @@ export class InventoryController {
     private audit: AuditService,
     private movementService: InventoryMovementService,
     private posting: PostingService,
+    private itemResolver: ItemResolverService,
   ) {}
 
   private sign = (t: string) => ['RECEIPT', 'TRANSFER_IN', 'ADJUSTMENT_IN', 'RETURN_IN'].includes(t) ? 1 : -1;
@@ -375,6 +377,14 @@ export class InventoryController {
   }
 
   // ----- Item detail 360 -----
+  /** Resolve item purchase/sale defaults (shared resolver) for document prefill. */
+  @Get('items/:id/resolve') async resolveItem(@Req() req: any, @Param('id') id: string, @Query() q: any) {
+    const companyId = companyIdOf(req.user);
+    if (String(q.purpose || 'purchase').toLowerCase() === 'sale') {
+      return this.itemResolver.resolveForSale(companyId, id, { customerId: q.customerId, currency: q.currency, quantity: q.quantity ? Number(q.quantity) : undefined });
+    }
+    return this.itemResolver.resolveForPurchase(companyId, id);
+  }
   @Get('items/:id') async itemDetail(@Req() req: any, @Param('id') id: string) {
     const companyId = companyIdOf(req.user);
     const item = await this.prisma.inventoryItem.findFirst({ where: { id, companyId } });
