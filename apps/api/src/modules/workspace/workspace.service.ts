@@ -80,7 +80,7 @@ export class WorkspaceService {
     const now = new Date();
     const quoteLimit = new Date(now.getTime() + 7 * 86400000);
 
-    const [overdueInvoices, approvals, fiscalFailures, perfNotifications, expiringQuotes, reorderItems, movementGroups] = await Promise.all([
+    const [overdueInvoices, approvals, fiscalFailures, perfNotifications, expiringQuotes, reorderItems, movementGroups, fiscalDevices, fiscalProfile] = await Promise.all([
       this.prisma.salesInvoice.findMany({
         where: { companyId, dueDate: { lt: now }, balanceDue: { gt: 0 }, status: { notIn: ['PAID', 'VOID'] } },
         include: { customer: { select: { name: true } } }, orderBy: { dueDate: 'asc' }, take: 8,
@@ -106,6 +106,11 @@ export class WorkspaceService {
         where: { item: { companyId } },
         _sum: { quantity: true },
       }),
+      this.prisma.fiscalDevice.findMany({
+        where: { branch: { companyId }, certificateExpiresAt: { not: null } },
+        include: { branch: { select: { name: true } } },
+      }),
+      this.prisma.fiscalisationProfile.findUnique({ where: { companyId } }),
     ]);
 
     const stock = new Map<string, number>();
@@ -127,6 +132,9 @@ export class WorkspaceService {
       ...lowStock.map((r) => ({ id: `stock:${r.id}`, kind: 'LOW_STOCK', severity: 'warning' as const, title: `${r.name} is low on stock`, description: `${r.sku} · ${r.onHand.toFixed(2)} on hand · reorder level ${Number(r.reorderLevel).toFixed(2)}`, href: `/inventory?itemId=${r.id}`, sourceId: r.id, sourceType: 'InventoryItem' })),
       ...expiringQuotes.map((r) => ({ id: `quote:${r.id}`, kind: 'QUOTE_EXPIRING', severity: 'info' as const, title: `${r.quotationNo} expires soon`, description: `${r.customer?.name || 'Customer'} · valid until ${r.validUntil?.toISOString().slice(0, 10)}`, href: `/sales/quotations?quotationId=${r.id}`, createdAt: r.validUntil, sourceId: r.id, sourceType: 'Quotation' })),
       ...perfNotifications.map((r) => ({ id: `performance:${r.id}`, kind: 'PERFORMANCE', severity: 'info' as const, title: r.title, description: r.body, href: r.link || '/performance', createdAt: r.createdAt, sourceId: r.id, sourceType: 'PerformanceNotification' })),
+      ...fiscalDevices.filter((d) => d.certificateExpiresAt && d.certificateExpiresAt.getTime() < now.getTime()).map((d) => ({ id: `fiscal-cert-expired:${d.id}`, kind: 'FISCAL_CERTIFICATE', severity: 'critical' as const, title: `Fiscal certificate expired — ${d.name}`, description: `${d.branch?.name || ''} · expired ${d.certificateExpiresAt?.toISOString().slice(0, 10)}`, href: '/fiscalisation?tab=setup', createdAt: d.certificateExpiresAt, sourceId: d.id, sourceType: 'FiscalDevice' })),
+      ...fiscalDevices.filter((d) => d.certificateExpiresAt && d.certificateExpiresAt.getTime() >= now.getTime() && d.certificateExpiresAt.getTime() <= now.getTime() + 30 * 86400000).map((d) => ({ id: `fiscal-cert-expiring:${d.id}`, kind: 'FISCAL_CERTIFICATE', severity: 'warning' as const, title: `Fiscal certificate expiring soon — ${d.name}`, description: `${d.branch?.name || ''} · expires ${d.certificateExpiresAt?.toISOString().slice(0, 10)}`, href: '/fiscalisation?tab=setup', createdAt: d.certificateExpiresAt, sourceId: d.id, sourceType: 'FiscalDevice' })),
+      ...(fiscalProfile && fiscalProfile.environment !== 'PRODUCTION' && !fiscalProfile.productionApprovalRef ? [{ id: `fiscal-approval:${fiscalProfile.id}`, kind: 'FISCAL_APPROVAL', severity: 'info' as const, title: 'ZIMRA production approval outstanding', description: 'Complete sandbox testing and record ZIMRA production approval before activating production fiscalisation.', href: '/fiscalisation?tab=setup', createdAt: fiscalProfile.updatedAt, sourceId: fiscalProfile.id, sourceType: 'FiscalisationProfile' }] : []),
     ];
 
     const rank = { critical: 0, warning: 1, info: 2, success: 3 } as const;
@@ -139,6 +147,7 @@ export class WorkspaceService {
         overdueInvoices: overdueInvoices.length,
         approvals: approvals.length,
         fiscalFailures: fiscalFailures.length,
+        fiscalCertificates: fiscalDevices.filter((d) => d.certificateExpiresAt && d.certificateExpiresAt.getTime() <= now.getTime() + 30 * 86400000).length,
         lowStock: lowStock.length,
         expiringQuotes: expiringQuotes.length,
         performance: perfNotifications.length,

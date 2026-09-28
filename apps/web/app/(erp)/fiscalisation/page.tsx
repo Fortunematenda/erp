@@ -9,10 +9,12 @@ import {
   SyncOutlined, VerticalAlignTopOutlined, DownloadOutlined, WalletOutlined,
 } from '@ant-design/icons';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import dayjs from 'dayjs';
 import { api } from '@/lib/api';
 import { StatusPill, EmptyState } from '@/components/sales-ui';
 import { StatCard } from '@/components/stat-card';
+import { FiscalisationSetup } from '@/components/fiscalisation-setup';
 import { fmtDate, fmtDateTime, fmtMoney } from '@/lib/format';
 
 const { RangePicker } = DatePicker;
@@ -33,7 +35,8 @@ export default function Fiscalisation() {
   const reconciliation = useQuery({ queryKey: ['fiscal-recon'], queryFn: () => api('/fiscalisation/reconciliation') });
   const currencies = useQuery({ queryKey: ['currencies'], queryFn: () => api('/finance/currencies') });
 
-  const [tab, setTab] = useState('dashboard');
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState(searchParams.get('tab') || 'setup');
   const [busy, setBusy] = useState(false);
   const [selReceipt, setSelReceipt] = useState<any>(null);
   const [selDay, setSelDay] = useState<any>(null);
@@ -194,6 +197,7 @@ export default function Fiscalisation() {
       )}
 
       <Tabs activeKey={tab} onChange={setTab} items={[
+        { key: 'setup', label: 'Setup & Readiness', children: <FiscalisationSetup /> },
         { key: 'dashboard', label: 'Dashboard', children: (
           <div className="space-y-5">
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

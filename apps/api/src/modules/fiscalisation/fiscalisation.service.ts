@@ -1,13 +1,23 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { AuditService } from '../../core/common/audit.service';
 import { FiscalProviderFactory } from './providers/provider.factory';
+import { FiscalisationReadinessService } from './fiscalisation-readiness.service';
+import { FiscalCertificateService } from './fiscal-certificate.service';
+import { encryptSecret, decryptSecret, maskSecret, hasSecret } from './fiscal-crypto';
 import { createHash } from 'crypto';
 
 const round2 = (n: number) => Number(n.toFixed(2));
 
 @Injectable()
 export class FiscalisationService {
-  constructor(private prisma: PrismaService, private factory: FiscalProviderFactory) {}
+  constructor(
+    private prisma: PrismaService,
+    private factory: FiscalProviderFactory,
+    private audit: AuditService,
+    private readinessSvc: FiscalisationReadinessService,
+    private certSvc: FiscalCertificateService,
+  ) {}
 
   private _simulateNextFailure = false;
   simulateFailure(on: boolean) { this._simulateNextFailure = on; }
@@ -16,17 +26,26 @@ export class FiscalisationService {
   private companyOf(req: any) { return req.user?.companyId; }
 
   async listDevices(companyId: string) {
-    return this.prisma.fiscalDevice.findMany({ where: { branch: { companyId } }, include: { branch: true, fiscalDays: { orderBy: { dayNo: 'desc' }, take: 3 } } });
+    const devices = await this.prisma.fiscalDevice.findMany({ where: { branch: { companyId } }, include: { branch: true, fiscalDays: { orderBy: { dayNo: 'desc' }, take: 3 } } });
+    return devices.map((d) => this.sanitizeDevice(d));
+  }
+
+  private sanitizeDevice(d: any) {
+    const { activationKeyEnc, ...rest } = d;
+    return { ...rest, activationKeyMasked: maskSecret(activationKeyEnc), hasActivationKey: hasSecret(activationKeyEnc) };
   }
 
   async register(companyId: string, deviceId: string) {
     const d = await this.prisma.fiscalDevice.findFirst({ where: { id: deviceId, branch: { companyId } }, include: { branch: { include: { company: true } } } });
     if (!d) throw new BadRequestException('Device not found');
+    if (!d.branch.company.tin) throw new BadRequestException('Company TIN is required before device registration.');
     const p = this.factory.get();
     const verified = await p.verifyTaxpayer({ tin: d.branch.company.tin, vatNumber: d.branch.company.vatNumber });
-    const res = await p.registerDevice({ serialNumber: d.serialNumber, company: verified });
-    await this.prisma.fiscalIntegrationLog.create({ data: { deviceId: d.id, operation: 'registerDevice', status: 'OK', request: { serialNumber: d.serialNumber }, response: res } });
-    return this.prisma.fiscalDevice.update({ where: { id: d.id }, data: { status: 'ACTIVE', zimraDeviceId: res.zimraDeviceId, certificateRef: res.certificateRef, certificateExpiresAt: new Date(res.expiresAt) } });
+    const res = await p.registerDevice({ serialNumber: d.serialNumber, modelName: d.modelName, modelVersion: d.modelVersion, company: verified });
+    await this.prisma.fiscalIntegrationLog.create({ data: { deviceId: d.id, operation: 'registerDevice', status: 'OK', environment: d.environment, request: { serialNumber: d.serialNumber }, response: res } });
+    const updated = await this.prisma.fiscalDevice.update({ where: { id: d.id }, data: { status: 'ACTIVE', zimraDeviceId: res.zimraDeviceId, certificateRef: res.certificateRef, certificateThumbprint: res.certificateThumbprint, certificateExpiresAt: new Date(res.expiresAt), registeredAt: new Date(), activationKeyEnc: res.activationKey ? encryptSecret(res.activationKey) : d.activationKeyEnc } });
+    await this.audit.log(companyId, undefined, 'fiscal.device.register', 'FiscalDevice', d.id, { module: 'fiscalisation', metadata: { environment: d.environment, serialNumber: d.serialNumber } });
+    return updated;
   }
 
   async openDay(companyId: string, deviceId: string) {
@@ -35,9 +54,9 @@ export class FiscalisationService {
     if (d.status !== 'ACTIVE') throw new BadRequestException('Register device first');
     if (d.dayStatus === 'OPEN') throw new BadRequestException('Fiscal day already open');
     const dayNo = d.fiscalDayNo + 1;
-    const res = await this.factory.get().openDay({ dayNo });
+    const res = await this.factory.getForEnvironment(d.environment).openDay({ dayNo });
     return this.prisma.$transaction(async (tx) => {
-      await tx.fiscalIntegrationLog.create({ data: { deviceId: d.id, operation: 'openDay', status: 'OK', response: res } });
+      await tx.fiscalIntegrationLog.create({ data: { deviceId: d.id, operation: 'openDay', status: 'OK', environment: d.environment, response: res } });
       await tx.fiscalDay.create({ data: { deviceId: d.id, dayNo, status: 'OPEN', openedAt: new Date() } });
       return tx.fiscalDevice.update({ where: { id: d.id }, data: { fiscalDayNo: dayNo, receiptCounter: 0, dayStatus: 'OPEN' } });
     });
@@ -49,17 +68,17 @@ export class FiscalisationService {
     return rows[0];
   }
 
-  private async providerSubmit(payload: any) {
-    if (this.mode() === 'mock' && this._simulateNextFailure) {
+  private async providerSubmit(payload: any, environment: string) {
+    if (environment === 'MOCK' && this._simulateNextFailure) {
       this._simulateNextFailure = false;
       throw new Error('SIMULATED_PROVIDER_FAILURE: fiscal provider rejected the request (mock).');
     }
-    return this.factory.get().submitReceipt({ ...payload, receiptHash: payload.receiptHash });
+    return this.factory.getForEnvironment(environment).submitReceipt({ ...payload, receiptHash: payload.receiptHash });
   }
 
-  private async submitAndLink(a: { deviceId: string; zimraDeviceId: string | null; fiscalDayNo: number; receiptCounter: number; globalReceiptNo: number; receiptType: string; payload: any; receiptId: string; link: { invoiceId?: string; creditNoteId?: string; debitNoteId?: string } }) {
+  private async submitAndLink(a: { deviceId: string; zimraDeviceId: string | null; environment: string; fiscalDayNo: number; receiptCounter: number; globalReceiptNo: number; receiptType: string; payload: any; receiptId: string; link: { invoiceId?: string; creditNoteId?: string; debitNoteId?: string } }) {
     try {
-      const res = await this.providerSubmit(a.payload);
+      const res = await this.providerSubmit(a.payload, a.environment);
       await this.prisma.$transaction(async (tx) => {
         await tx.fiscalReceipt.update({ where: { id: a.receiptId }, data: { status: 'FISCALISED', zimraReceiptId: res.receiptID, serverSignature: res.receiptServerSignature, rawResponse: res, submittedAt: new Date(), attemptCount: { increment: 1 }, lastAttemptAt: new Date() } });
         const target: any = {};
@@ -67,7 +86,7 @@ export class FiscalisationService {
         if (a.link.creditNoteId) target.creditNote = { update: { fiscalStatus: 'FISCALISED' } };
         if (a.link.debitNoteId) target.debitNote = { update: { fiscalStatus: 'FISCALISED' } };
         await tx.fiscalDay.update({ where: { deviceId_dayNo: { deviceId: a.deviceId, dayNo: a.fiscalDayNo } }, data: { receiptCount: { increment: 1 }, grossTotal: { increment: a.payload.total }, taxTotal: { increment: a.payload.tax } } });
-        await tx.fiscalIntegrationLog.create({ data: { deviceId: a.deviceId, operation: 'submitReceipt', status: 'OK', request: a.payload, response: res } });
+        await tx.fiscalIntegrationLog.create({ data: { deviceId: a.deviceId, operation: 'submitReceipt', status: 'OK', environment: a.environment as any, request: a.payload, response: res } });
       });
       return this.prisma.fiscalReceipt.findUnique({ where: { id: a.receiptId } });
     } catch (e: any) {
@@ -81,6 +100,7 @@ export class FiscalisationService {
     if (!inv) throw new BadRequestException('Invoice not found');
     if (inv.status === 'DRAFT') throw new BadRequestException('Post invoice before fiscalisation');
     if (!inv.fiscalRequired) throw new BadRequestException('Invoice does not require fiscalisation');
+    await this.assertTaxMapped(companyId, deviceId, inv.lines);
     if (inv.fiscalReceipt) return inv.fiscalReceipt;
     const d = await this.prisma.fiscalDevice.findFirst({ where: { id: deviceId, branch: { companyId } } });
     if (!d || d.dayStatus !== 'OPEN') throw new BadRequestException('Fiscal day is not open');
@@ -88,8 +108,8 @@ export class FiscalisationService {
     const payment = await this.derivePayment(companyId, inv);
     const payload = { deviceID: d.zimraDeviceId, fiscalDayNo: allocated.fiscalDayNo, receiptCounter: allocated.receiptCounter, globalReceiptNo: allocated.globalReceiptNo, receiptType: 'FiscalInvoice', invoiceNo: inv.invoiceNo, currency: inv.currency, total: Number(inv.total), tax: Number(inv.taxTotal), paymentMethod: payment.method, payments: payment.payments, buyer: { name: inv.customer?.name, tin: inv.customer?.tin, vatNumber: inv.customer?.vatNumber, address: inv.billingAddress || inv.customer?.address1 }, lines: inv.lines.map((l) => ({ name: l.description, qty: Number(l.quantity), unitPrice: Number(l.unitPrice), taxRate: Number(l.taxRate), taxAmount: Number(l.taxAmount), total: Number(l.lineTotal), hsCode: l.hsCode })) };
     const hash = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
-    const receipt = await this.prisma.fiscalReceipt.create({ data: { deviceId: d.id, invoiceId: inv.id, fiscalDayNo: allocated.fiscalDayNo, receiptCounter: allocated.receiptCounter, globalReceiptNo: allocated.globalReceiptNo, receiptHash: hash, rawRequest: payload, status: 'PENDING', customerName: inv.customer?.name, paymentMethod: payment.method, total: Number(inv.total), tax: Number(inv.taxTotal), currency: inv.currency } });
-    return this.submitAndLink({ deviceId: d.id, zimraDeviceId: d.zimraDeviceId, fiscalDayNo: allocated.fiscalDayNo, receiptCounter: allocated.receiptCounter, globalReceiptNo: allocated.globalReceiptNo, receiptType: 'FiscalInvoice', payload: { ...payload, receiptHash: hash }, receiptId: receipt.id, link: { invoiceId: inv.id } });
+    const receipt = await this.prisma.fiscalReceipt.create({ data: { deviceId: d.id, environment: d.environment, invoiceId: inv.id, fiscalDayNo: allocated.fiscalDayNo, receiptCounter: allocated.receiptCounter, globalReceiptNo: allocated.globalReceiptNo, receiptHash: hash, rawRequest: payload, status: 'PENDING', customerName: inv.customer?.name, paymentMethod: payment.method, total: Number(inv.total), tax: Number(inv.taxTotal), currency: inv.currency } });
+    return this.submitAndLink({ deviceId: d.id, zimraDeviceId: d.zimraDeviceId, environment: d.environment, fiscalDayNo: allocated.fiscalDayNo, receiptCounter: allocated.receiptCounter, globalReceiptNo: allocated.globalReceiptNo, receiptType: 'FiscalInvoice', payload: { ...payload, receiptHash: hash }, receiptId: receipt.id, link: { invoiceId: inv.id } });
   }
 
   async fiscaliseCreditNote(companyId: string, deviceId: string, creditNoteId: string) {
@@ -97,6 +117,7 @@ export class FiscalisationService {
     if (!cn) throw new BadRequestException('Credit note not found');
     if (cn.status === 'DRAFT') throw new BadRequestException('Post credit note before fiscalisation');
     if (cn.fiscalReceipt) throw new BadRequestException('Credit note already has fiscal receipt');
+    await this.assertTaxMapped(companyId, deviceId, cn.lines);
     const original = cn.invoice?.fiscalReceipt;
     if (!cn.invoice || !original) throw new BadRequestException('Credit note must reference a fiscalised invoice');
     const d = await this.prisma.fiscalDevice.findFirst({ where: { id: deviceId, branch: { companyId } } });
@@ -104,8 +125,8 @@ export class FiscalisationService {
     const allocated = await this.allocate(deviceId);
     const payload = { deviceID: d.zimraDeviceId, fiscalDayNo: allocated.fiscalDayNo, receiptCounter: allocated.receiptCounter, globalReceiptNo: allocated.globalReceiptNo, receiptType: 'FiscalCreditNote', referenceReceipt: original.zimraReceiptId || original.globalReceiptNo, creditNoteNo: cn.creditNoteNo, currency: cn.invoice.currency, total: -Number(cn.total), tax: -Number(cn.taxTotal), buyer: { name: cn.customer?.name, tin: cn.customer?.tin, vatNumber: cn.customer?.vatNumber }, lines: cn.lines.map((l) => ({ name: l.description, qty: Number(l.quantity), unitPrice: Number(l.unitPrice), taxRate: Number(l.taxRate), taxAmount: -Number(l.taxAmount), total: -Number(l.lineTotal) })) };
     const hash = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
-    const receipt = await this.prisma.fiscalReceipt.create({ data: { deviceId: d.id, creditNoteId: cn.id, fiscalDayNo: allocated.fiscalDayNo, receiptCounter: allocated.receiptCounter, globalReceiptNo: allocated.globalReceiptNo, receiptType: 'FiscalCreditNote', receiptHash: hash, rawRequest: payload, status: 'PENDING', customerName: cn.customer?.name, paymentMethod: cn.invoice.currency ? 'CREDIT' : 'CASH', currency: cn.invoice.currency, total: -Number(cn.total), tax: -Number(cn.taxTotal) } });
-    return this.submitAndLink({ deviceId: d.id, zimraDeviceId: d.zimraDeviceId, fiscalDayNo: allocated.fiscalDayNo, receiptCounter: allocated.receiptCounter, globalReceiptNo: allocated.globalReceiptNo, receiptType: 'FiscalCreditNote', payload: { ...payload, receiptHash: hash }, receiptId: receipt.id, link: { creditNoteId: cn.id } });
+    const receipt = await this.prisma.fiscalReceipt.create({ data: { deviceId: d.id, environment: d.environment, creditNoteId: cn.id, fiscalDayNo: allocated.fiscalDayNo, receiptCounter: allocated.receiptCounter, globalReceiptNo: allocated.globalReceiptNo, receiptType: 'FiscalCreditNote', receiptHash: hash, rawRequest: payload, status: 'PENDING', customerName: cn.customer?.name, paymentMethod: cn.invoice.currency ? 'CREDIT' : 'CASH', currency: cn.invoice.currency, total: -Number(cn.total), tax: -Number(cn.taxTotal) } });
+    return this.submitAndLink({ deviceId: d.id, zimraDeviceId: d.zimraDeviceId, environment: d.environment, fiscalDayNo: allocated.fiscalDayNo, receiptCounter: allocated.receiptCounter, globalReceiptNo: allocated.globalReceiptNo, receiptType: 'FiscalCreditNote', payload: { ...payload, receiptHash: hash }, receiptId: receipt.id, link: { creditNoteId: cn.id } });
   }
 
   async fiscaliseDebitNote(companyId: string, deviceId: string, debitNoteId: string) {
@@ -113,14 +134,15 @@ export class FiscalisationService {
     if (!dn) throw new BadRequestException('Debit note not found');
     if (dn.status === 'DRAFT') throw new BadRequestException('Post debit note before fiscalisation');
     if (dn.fiscalReceipt) throw new BadRequestException('Debit note already has fiscal receipt');
+    await this.assertTaxMapped(companyId, deviceId, dn.lines);
     const d = await this.prisma.fiscalDevice.findFirst({ where: { id: deviceId, branch: { companyId } } });
     if (!d || d.dayStatus !== 'OPEN') throw new BadRequestException('Fiscal day is not open');
     const allocated = await this.allocate(deviceId);
     const currency = dn.invoice?.currency || 'USD';
     const payload = { deviceID: d.zimraDeviceId, fiscalDayNo: allocated.fiscalDayNo, receiptCounter: allocated.receiptCounter, globalReceiptNo: allocated.globalReceiptNo, receiptType: 'FiscalDebitNote', referenceReceipt: dn.invoice?.fiscalReceipt?.zimraReceiptId || dn.invoice?.fiscalReceipt?.globalReceiptNo, debitNoteNo: dn.debitNoteNo, currency, total: Number(dn.total), tax: Number(dn.taxTotal), buyer: { name: dn.customer?.name, tin: dn.customer?.tin, vatNumber: dn.customer?.vatNumber }, lines: dn.lines.map((l) => ({ name: l.description, qty: Number(l.quantity), unitPrice: Number(l.unitPrice), taxRate: Number(l.taxRate), taxAmount: Number(l.taxAmount), total: Number(l.lineTotal) })) };
     const hash = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
-    const receipt = await this.prisma.fiscalReceipt.create({ data: { deviceId: d.id, debitNoteId: dn.id, fiscalDayNo: allocated.fiscalDayNo, receiptCounter: allocated.receiptCounter, globalReceiptNo: allocated.globalReceiptNo, receiptType: 'FiscalDebitNote', receiptHash: hash, rawRequest: payload, status: 'PENDING', customerName: dn.customer?.name, paymentMethod: 'CREDIT', currency, total: Number(dn.total), tax: Number(dn.taxTotal) } });
-    return this.submitAndLink({ deviceId: d.id, zimraDeviceId: d.zimraDeviceId, fiscalDayNo: allocated.fiscalDayNo, receiptCounter: allocated.receiptCounter, globalReceiptNo: allocated.globalReceiptNo, receiptType: 'FiscalDebitNote', payload: { ...payload, receiptHash: hash }, receiptId: receipt.id, link: { debitNoteId: dn.id } });
+    const receipt = await this.prisma.fiscalReceipt.create({ data: { deviceId: d.id, environment: d.environment, debitNoteId: dn.id, fiscalDayNo: allocated.fiscalDayNo, receiptCounter: allocated.receiptCounter, globalReceiptNo: allocated.globalReceiptNo, receiptType: 'FiscalDebitNote', receiptHash: hash, rawRequest: payload, status: 'PENDING', customerName: dn.customer?.name, paymentMethod: 'CREDIT', currency, total: Number(dn.total), tax: Number(dn.taxTotal) } });
+    return this.submitAndLink({ deviceId: d.id, zimraDeviceId: d.zimraDeviceId, environment: d.environment, fiscalDayNo: allocated.fiscalDayNo, receiptCounter: allocated.receiptCounter, globalReceiptNo: allocated.globalReceiptNo, receiptType: 'FiscalDebitNote', payload: { ...payload, receiptHash: hash }, receiptId: receipt.id, link: { debitNoteId: dn.id } });
   }
 
   async retryFiscalReceipts(companyId: string) {
@@ -128,13 +150,13 @@ export class FiscalisationService {
     let done = 0;
     for (const r of receipts) {
       try {
-        const res = await this.providerSubmit(r.rawRequest as any);
+        const res = await this.providerSubmit(r.rawRequest as any, r.device.environment);
         await this.prisma.$transaction(async (tx) => {
           await tx.fiscalReceipt.update({ where: { id: r.id }, data: { status: 'FISCALISED', zimraReceiptId: res.receiptID, serverSignature: res.receiptServerSignature, rawResponse: res, submittedAt: new Date(), lastError: null } });
           if (r.invoiceId) await tx.salesInvoice.update({ where: { id: r.invoiceId }, data: { fiscalStatus: 'FISCALISED' } });
           if (r.creditNoteId) await tx.creditNote.update({ where: { id: r.creditNoteId }, data: { fiscalStatus: 'FISCALISED' } });
           if (r.debitNoteId) await tx.debitNote.update({ where: { id: r.debitNoteId }, data: { fiscalStatus: 'FISCALISED' } });
-          await tx.fiscalIntegrationLog.create({ data: { deviceId: r.deviceId, operation: 'retrySubmit', status: 'OK', request: r.rawRequest as any, response: res } });
+          await tx.fiscalIntegrationLog.create({ data: { deviceId: r.deviceId, operation: 'retrySubmit', status: 'OK', environment: r.device.environment, request: r.rawRequest as any, response: res } });
         });
         done++;
       } catch (e: any) {
@@ -148,10 +170,10 @@ export class FiscalisationService {
     const d = await this.prisma.fiscalDevice.findFirst({ where: { id: deviceId, branch: { companyId } } });
     if (!d || d.dayStatus !== 'OPEN') throw new BadRequestException('No open fiscal day');
     const day = await this.prisma.fiscalDay.findUnique({ where: { deviceId_dayNo: { deviceId: d.id, dayNo: d.fiscalDayNo } } });
-    const res = await this.factory.get().closeDay({ deviceId: d.zimraDeviceId, dayNo: d.fiscalDayNo, receiptCount: day?.receiptCount, grossTotal: Number(day?.grossTotal || 0), taxTotal: Number(day?.taxTotal || 0) });
+    const res = await this.factory.getForEnvironment(d.environment).closeDay({ deviceId: d.zimraDeviceId, dayNo: d.fiscalDayNo, receiptCount: day?.receiptCount, grossTotal: Number(day?.grossTotal || 0), taxTotal: Number(day?.taxTotal || 0) });
     return this.prisma.$transaction(async (tx) => {
       await tx.fiscalDay.update({ where: { deviceId_dayNo: { deviceId: d.id, dayNo: d.fiscalDayNo } }, data: { status: 'CLOSED', closedAt: new Date() } });
-      await tx.fiscalIntegrationLog.create({ data: { deviceId: d.id, operation: 'closeDay', status: 'OK', response: res } });
+      await tx.fiscalIntegrationLog.create({ data: { deviceId: d.id, operation: 'closeDay', status: 'OK', environment: d.environment, response: res } });
       return tx.fiscalDevice.update({ where: { id: d.id }, data: { dayStatus: 'CLOSED' } });
     });
   }
@@ -172,6 +194,80 @@ export class FiscalisationService {
     // unpaid / credit-sale treatment (do not falsely report Cash)
     if (Number(inv.paymentStatus === 'PAID')) return { method: 'CASH', payments: [{ method: 'CASH', amount: Number(inv.total) }], paid: Number(inv.total) };
     return { method: 'CREDIT', payments: [{ method: 'CREDIT', amount: Number(inv.balanceDue ?? 0) }], paid: 0 };
+  }
+
+  // ---------- Tax mapping enforcement ----------
+  private async assertTaxMapped(companyId: string, deviceId: string, lines: any[]) {
+    const device = await this.prisma.fiscalDevice.findUnique({ where: { id: deviceId }, select: { environment: true } });
+    if (!device || device.environment === 'MOCK') return; // mock mode does not require ZIMRA tax mappings
+    const [rates, mappings] = await Promise.all([
+      this.prisma.taxRate.findMany({ where: { companyId, active: true } }),
+      this.prisma.fiscalTaxMapping.findMany({ where: { companyId, active: true } }),
+    ]);
+    const mappedCodes = new Set(mappings.filter((m) => m.fdmsTaxId).map((m) => m.erpTaxCode));
+    const mappedRates = new Set(rates.filter((r) => mappedCodes.has(r.code)).map((r) => Number(r.rate)));
+    const unmapped = [...new Set((lines || []).map((l) => Number(l.taxRate)))].filter((rate) => rate !== 0 && !mappedRates.has(rate));
+    if (unmapped.length) {
+      throw new BadRequestException(`Fiscalisation blocked: tax rate(s) ${unmapped.join('%, ')}% have no valid FDMS tax mapping. Configure tax mapping before submitting to ZIMRA.`);
+    }
+  }
+
+  // ---------- Certificate lifecycle ----------
+  async generateCsr(companyId: string, userId: string | undefined, deviceId: string) {
+    const d = await this.prisma.fiscalDevice.findFirst({ where: { id: deviceId, branch: { companyId } }, include: { branch: { include: { company: true } } } });
+    if (!d) throw new BadRequestException('Device not found');
+    const { privateKeyPem, csrPem } = this.certSvc.generateKeyAndCsr({
+      commonName: d.serialNumber,
+      organisation: d.branch.company.legalName,
+      country: 'ZW',
+      serialNumber: d.serialNumber,
+    });
+    const saved = await this.prisma.fiscalDevice.update({
+      where: { id: d.id },
+      data: { privateKeyEnc: encryptSecret(privateKeyPem), csrPem, certificatePem: null, certificateRef: null, certificateThumbprint: null, certificateExpiresAt: null, certificateIssuedAt: null, status: 'UNREGISTERED' },
+    });
+    await this.audit.log(companyId, userId, 'fiscal.certificate.csr', 'FiscalDevice', d.id, { module: 'fiscalisation' });
+    return { deviceId: d.id, csrPem, hasPrivateKey: !!saved.privateKeyEnc };
+  }
+
+  async installCertificate(companyId: string, userId: string | undefined, deviceId: string, certificatePem: string) {
+    const d = await this.prisma.fiscalDevice.findFirst({ where: { id: deviceId, branch: { companyId } } });
+    if (!d) throw new BadRequestException('Device not found');
+    const privateKeyPem = decryptSecret(d.privateKeyEnc);
+    if (!privateKeyPem) throw new BadRequestException('Generate a CSR and private key before installing a certificate.');
+    const cert = this.certSvc.validateCertificate(certificatePem, privateKeyPem);
+    const saved = await this.prisma.fiscalDevice.update({
+      where: { id: d.id },
+      data: { certificatePem: cert.certificatePem, certificateThumbprint: cert.certificateThumbprint, certificateExpiresAt: cert.certificateExpiresAt, certificateIssuedAt: cert.certificateIssuedAt, certificateRef: cert.certificateThumbprint.slice(0, 16), status: 'ACTIVE', registeredAt: d.registeredAt || new Date() },
+    });
+    await this.audit.log(companyId, userId, 'fiscal.certificate.install', 'FiscalDevice', d.id, { module: 'fiscalisation', metadata: { thumbprint: cert.certificateThumbprint } });
+    return this.sanitizeDevice(saved);
+  }
+
+  async reissueCertificate(companyId: string, userId: string | undefined, deviceId: string) {
+    const d = await this.prisma.fiscalDevice.findFirst({ where: { id: deviceId, branch: { companyId } } });
+    if (!d) throw new BadRequestException('Device not found');
+    const [unresolved] = await Promise.all([
+      this.prisma.fiscalReceipt.count({ where: { deviceId: d.id, status: { in: ['PENDING', 'RETRY'] } } }),
+    ]);
+    if (unresolved) throw new BadRequestException('Resolve pending fiscal receipts before reissuing the device certificate.');
+    const saved = await this.prisma.fiscalDevice.update({ where: { id: d.id }, data: { certificateRenewedAt: new Date() } });
+    await this.audit.log(companyId, userId, 'fiscal.certificate.reissue', 'FiscalDevice', d.id, { module: 'fiscalisation' });
+    return this.generateCsr(companyId, userId, saved.id);
+  }
+
+  // ---------- Product / service classification ----------
+  async classification(companyId: string) {
+    const items = await this.prisma.inventoryItem.findMany({ where: { companyId, active: true }, select: { id: true, sku: true, name: true, hsCode: true, salesTaxCode: true }, take: 1000 });
+    const missingHs = items.filter((i) => !i.hsCode);
+    const missingTax = items.filter((i) => !i.salesTaxCode);
+    return {
+      total: items.length,
+      missingHsCode: missingHs.length,
+      missingTaxCode: missingTax.length,
+      compliant: items.length - missingHs.length,
+      items: missingHs.slice(0, 100).map((i) => ({ id: i.id, sku: i.sku, name: i.name, hsCode: i.hsCode, salesTaxCode: i.salesTaxCode })),
+    };
   }
 
   // ---------- Ready / failed queues ----------
@@ -286,6 +382,279 @@ export class FiscalisationService {
     const receipt = await this.prisma.fiscalReceipt.findFirst({ where: { id: receiptId, OR: [{ invoice: { companyId } }, { creditNote: { companyId } }, { debitNote: { companyId } }] } });
     if (!receipt) throw new BadRequestException('Fiscal receipt not found');
     return this.prisma.fiscalIntegrationLog.findMany({ where: { deviceId: receipt.deviceId }, orderBy: { createdAt: 'asc' } });
+  }
+
+  // ================= Setup wizard, profile & credentials =================
+
+  private async ensureProfile(companyId: string) {
+    const company = await this.prisma.company.findUnique({ where: { id: companyId } });
+    if (!company) throw new BadRequestException('Company not found');
+    return this.prisma.fiscalisationProfile.upsert({
+      where: { companyId },
+      update: {},
+      create: {
+        companyId,
+        taxpayerName: company.legalName,
+        softwareName: 'NexusERP',
+        integratorName: process.env.FISCAL_INTEGRATOR_NAME || null,
+        deviceModelName: process.env.FISCAL_DEVICE_MODEL || null,
+        deviceModelVersion: process.env.FISCAL_DEVICE_MODEL_VERSION || null,
+      },
+    });
+  }
+
+  async profile(companyId: string) {
+    const p = await this.ensureProfile(companyId);
+    const devices = await this.prisma.fiscalDevice.findMany({ where: { branch: { companyId } } });
+    const active = devices.find((d) => d.environment === p.environment) || devices[0] || null;
+    return {
+      ...p,
+      activationKeyMasked: maskSecret(active?.activationKeyEnc),
+      hasActivationKey: hasSecret(active?.activationKeyEnc),
+      integrator: { name: p.integratorName, softwareName: p.softwareName, modelName: p.deviceModelName, modelVersion: p.deviceModelVersion },
+    };
+  }
+
+  async saveProfile(companyId: string, userId: string | undefined, data: any) {
+    await this.ensureProfile(companyId);
+    const allowed = ['taxpayerName', 'vatRegistered', 'taxpayerEmail', 'integratorName', 'softwareName', 'deviceModelName', 'deviceModelVersion', 'technicalContactName', 'technicalContactEmail', 'technicalContactPhone', 'businessAddress', 'softwareDescription', 'integrationArchitecture', 'testRegistrationRef', 'productionApprovalRef', 'productionApprovalEvidence', 'setupStep', 'setupDraft'];
+    const patch: any = {};
+    for (const k of allowed) if (data[k] !== undefined) patch[k] = data[k];
+    if (data.productionApprovalDate !== undefined) patch.productionApprovalDate = data.productionApprovalDate ? new Date(data.productionApprovalDate) : null;
+    const saved = await this.prisma.fiscalisationProfile.update({ where: { companyId }, data: patch });
+    await this.audit.log(companyId, userId, 'fiscal.profile.update', 'FiscalisationProfile', saved.id, { module: 'fiscalisation', metadata: { fields: Object.keys(patch) } });
+    return this.profile(companyId);
+  }
+
+  async createDevice(companyId: string, userId: string | undefined, data: any) {
+    const branch = await this.prisma.branch.findFirst({ where: { id: data.branchId, companyId } });
+    if (!branch) throw new BadRequestException('Branch not found');
+    if (!data.serialNumber) throw new BadRequestException('Device serial number is required');
+    const profile = await this.ensureProfile(companyId);
+    const saved = await this.prisma.fiscalDevice.create({
+      data: {
+        branchId: branch.id,
+        name: data.name || data.serialNumber,
+        serialNumber: data.serialNumber,
+        modelName: data.modelName ?? profile.deviceModelName,
+        modelVersion: data.modelVersion ?? profile.deviceModelVersion,
+        integratorName: data.integratorName ?? profile.integratorName,
+        posLocation: data.posLocation,
+        environment: (data.environment || 'MOCK') as any,
+        activationKeyEnc: data.activationKey ? encryptSecret(data.activationKey) : null,
+        zimraDeviceId: data.zimraDeviceId || null,
+      },
+    });
+    await this.audit.log(companyId, userId, 'fiscal.device.create', 'FiscalDevice', saved.id, { module: 'fiscalisation', metadata: { serialNumber: saved.serialNumber, environment: saved.environment } });
+    return this.sanitizeDevice(saved);
+  }
+
+  async saveDevice(companyId: string, userId: string | undefined, deviceId: string, data: any) {
+    const d = await this.prisma.fiscalDevice.findFirst({ where: { id: deviceId, branch: { companyId } } });
+    if (!d) throw new BadRequestException('Device not found');
+    const allowed = ['name', 'serialNumber', 'modelName', 'modelVersion', 'integratorName', 'posLocation', 'zimraDeviceId', 'certificateRef', 'certificateThumbprint', 'environment'];
+    const patch: any = {};
+    for (const k of allowed) if (data[k] !== undefined) patch[k] = data[k];
+    if (data.certificateExpiresAt !== undefined) patch.certificateExpiresAt = data.certificateExpiresAt ? new Date(data.certificateExpiresAt) : null;
+    if (data.activationKey) patch.activationKeyEnc = encryptSecret(data.activationKey);
+    const saved = await this.prisma.fiscalDevice.update({ where: { id: deviceId }, data: patch });
+    await this.audit.log(companyId, userId, 'fiscal.device.update', 'FiscalDevice', deviceId, { module: 'fiscalisation', metadata: { fields: Object.keys(patch), environment: saved.environment } });
+    return this.sanitizeDevice(saved);
+  }
+
+  // ================= Branch registration (linked to Branch master) =================
+
+  async branches(companyId: string) {
+    return this.prisma.branch.findMany({ where: { companyId }, orderBy: { name: 'asc' } });
+  }
+
+  async saveBranch(companyId: string, userId: string | undefined, branchId: string, data: any) {
+    const b = await this.prisma.branch.findFirst({ where: { id: branchId, companyId } });
+    if (!b) throw new BadRequestException('Branch not found');
+    const allowed = ['name', 'phone', 'email', 'address', 'street', 'houseNumber', 'suburb', 'city', 'province', 'zimraRegion', 'zimraStation'];
+    const patch: any = {};
+    for (const k of allowed) if (data[k] !== undefined) patch[k] = data[k];
+    const saved = await this.prisma.branch.update({ where: { id: branchId }, data: patch });
+    await this.audit.log(companyId, userId, 'fiscal.branch.update', 'Branch', branchId, { module: 'fiscalisation', metadata: { fields: Object.keys(patch) } });
+    return saved;
+  }
+
+  async verifyTaxpayer(companyId: string, userId: string | undefined, environment = 'MOCK') {    const company = await this.prisma.company.findUnique({ where: { id: companyId } });
+    if (!company) throw new BadRequestException('Company not found');
+    if (!company.tin) throw new BadRequestException('Company TIN is required before verification.');
+    const res = await this.factory.getForEnvironment(environment).verifyTaxpayer({ tin: company.tin, vatNumber: company.vatNumber });
+    const returnedName = res?.taxpayerName || null;
+    const mismatch = !!returnedName && !!company.legalName && returnedName.trim().toLowerCase() !== company.legalName.trim().toLowerCase();
+    await this.ensureProfile(companyId);
+    const saved = await this.prisma.fiscalisationProfile.update({ where: { companyId }, data: { taxpayerVerified: !!res?.valid, verifiedTaxpayerName: returnedName, verifiedTin: res?.tin || company.tin, verifiedAt: new Date() } });
+    await this.audit.log(companyId, userId, 'fiscal.taxpayer.verify', 'FiscalisationProfile', saved.id, { module: 'fiscalisation', result: mismatch ? 'MISMATCH' : 'OK', metadata: { environment, returnedName } });
+    return { ...res, mismatch, companyName: company.legalName, verifiedAt: saved.verifiedAt };
+  }
+
+  // ================= Tax mapping =================
+
+  async taxMappings(companyId: string) {
+    const [rates, mappings] = await Promise.all([
+      this.prisma.taxRate.findMany({ where: { companyId, active: true }, orderBy: { code: 'asc' } }),
+      this.prisma.fiscalTaxMapping.findMany({ where: { companyId }, orderBy: { erpTaxCode: 'asc' } }),
+    ]);
+    const byCode = new Map(mappings.map((m) => [m.erpTaxCode, m]));
+    return rates.map((r) => {
+      const m = byCode.get(r.code);
+      return {
+        id: m?.id, erpTaxCode: r.code, erpTaxName: r.name, erpRate: Number(r.rate), erpTreatment: m?.erpTreatment ?? r.treatment,
+        fdmsTaxId: m?.fdmsTaxId ?? null, fdmsTaxName: m?.fdmsTaxName ?? null, fdmsTaxRate: m?.fdmsTaxRate != null ? Number(m.fdmsTaxRate) : null,
+        validFrom: m?.validFrom, validTo: m?.validTo, active: m?.active ?? true, mapped: !!m?.fdmsTaxId,
+      };
+    });
+  }
+
+  async saveTaxMapping(companyId: string, userId: string | undefined, data: any) {
+    if (!data.erpTaxCode) throw new BadRequestException('ERP tax code is required');
+    const rate = data.fdmsTaxRate != null && data.fdmsTaxRate !== '' ? Number(data.fdmsTaxRate) : null;
+    const saved = await this.prisma.fiscalTaxMapping.upsert({
+      where: { companyId_erpTaxCode: { companyId, erpTaxCode: data.erpTaxCode } },
+      update: { erpTreatment: data.erpTreatment, fdmsTaxId: data.fdmsTaxId, fdmsTaxName: data.fdmsTaxName, fdmsTaxRate: rate, validFrom: data.validFrom ? new Date(data.validFrom) : null, validTo: data.validTo ? new Date(data.validTo) : null, active: data.active ?? true },
+      create: { companyId, erpTaxCode: data.erpTaxCode, erpTreatment: data.erpTreatment, fdmsTaxId: data.fdmsTaxId, fdmsTaxName: data.fdmsTaxName, fdmsTaxRate: rate, validFrom: data.validFrom ? new Date(data.validFrom) : null, validTo: data.validTo ? new Date(data.validTo) : null, active: data.active ?? true },
+    });
+    await this.audit.log(companyId, userId, 'fiscal.taxmapping.save', 'FiscalTaxMapping', saved.id, { module: 'fiscalisation' });
+    return saved;
+  }
+
+  // ================= ZIMRA registration assistance & evidence =================
+
+  async requests(companyId: string) {
+    return this.prisma.fiscalRegistrationRequest.findMany({ where: { companyId }, orderBy: { createdAt: 'desc' } });
+  }
+
+  async saveRequest(companyId: string, userId: string | undefined, id: string | undefined, data: any) {
+    if (id) {
+      const existing = await this.prisma.fiscalRegistrationRequest.findFirst({ where: { id, companyId } });
+      if (!existing) throw new BadRequestException('Request not found');
+    }
+    const patch: any = {};
+    for (const k of ['assistance', 'status', 'referenceNumber', 'requestedBy', 'zimraContact', 'responseNotes', 'approvalReference', 'subject', 'body', 'deviceId']) if (data[k] !== undefined) patch[k] = data[k];
+    for (const k of ['requestDate', 'responseDate']) if (data[k] !== undefined) patch[k] = data[k] ? new Date(data[k]) : null;
+    if (data.attachments !== undefined) patch.attachments = data.attachments;
+    const saved = id
+      ? await this.prisma.fiscalRegistrationRequest.update({ where: { id }, data: patch })
+      : await this.prisma.fiscalRegistrationRequest.create({ data: { companyId, assistance: data.assistance || 'OTHER', ...patch } });
+    await this.audit.log(companyId, userId, 'fiscal.request.save', 'FiscalRegistrationRequest', saved.id, { module: 'fiscalisation', metadata: { status: saved.status } });
+    return saved;
+  }
+
+  async buildRequestEmail(companyId: string, input: { assistance?: string; deviceId?: string } = {}) {
+    const company = await this.prisma.company.findUnique({ where: { id: companyId } });
+    if (!company) throw new BadRequestException('Company not found');
+    const profile = await this.prisma.fiscalisationProfile.findUnique({ where: { companyId } });
+    const devices = await this.prisma.fiscalDevice.findMany({ where: { branch: { companyId } }, include: { branch: true } });
+    const device = devices.find((d) => d.id === input.deviceId) || devices[0] || null;
+    const branch = device?.branch || null;
+    const assistance = input.assistance || 'New fiscal-device registration';
+    const v = (x: any) => (x === null || x === undefined || x === '' ? '[MISSING]' : x);
+    const missing: string[] = [];
+    const line = (label: string, value: any) => { if (value === null || value === undefined || value === '') missing.push(label); return `${label}: ${v(value)}`; };
+    const subject = `ZIMRA FDMS Virtual Fiscalisation Registration — ${profile?.softwareName || 'NexusERP'} / ${company.legalName}`;
+    const body = [
+      'Dear ZIMRA FDMS Support,',
+      '',
+      "We are preparing the registration and integration of the following taxpayer's accounting system with the ZIMRA Fiscalisation Data Management System.",
+      '',
+      'Request Type: ' + assistance,
+      '',
+      'Taxpayer Details:',
+      line('Registered Name', company.legalName),
+      line('TIN', company.tin),
+      line('VAT Number', company.vatNumber),
+      line('Taxpayer Email', profile?.taxpayerEmail),
+      '',
+      'Branch Details:',
+      line('Trade Name', branch?.name),
+      line('Physical Address', branch ? [branch.address, branch.street, branch.city].filter(Boolean).join(', ') : null),
+      line('Contact Number', branch?.phone),
+      line('Branch Email', branch?.email),
+      '',
+      'Fiscal Device Details:',
+      line('Device Serial Number', device?.serialNumber),
+      line('Device Model', device?.modelName),
+      line('Integrator', device?.integratorName || profile?.integratorName),
+      '',
+      'Software Details:',
+      'Software Name: ' + (profile?.softwareName || 'NexusERP'),
+      'Integration Type: Virtual Fiscal Device / Direct FDMS API',
+      line('Technical Contact', profile?.technicalContactName),
+      line('Technical Email', profile?.technicalContactEmail),
+      '',
+      'We would appreciate your assistance with the registration requirements and confirmation of the process for obtaining the device credentials and completing the required testing and production onboarding.',
+      '',
+      'Kind regards,',
+      profile?.technicalContactName || '[Authorised Contact]',
+    ].join('\n');
+    return { subject, body, assistance, missing, deviceId: device?.id || null };
+  }
+
+  // ================= Environment management & readiness =================
+
+  async readiness(companyId: string, target: 'MOCK' | 'SANDBOX' | 'PRODUCTION' = 'PRODUCTION') {
+    return this.readinessSvc.evaluate(companyId, target);
+  }
+
+  async switchEnvironment(companyId: string, userId: string | undefined, target: string, reason: string) {
+    const env = (target || '').toUpperCase();
+    if (!['MOCK', 'SANDBOX', 'PRODUCTION'].includes(env)) throw new BadRequestException('Invalid fiscal environment');
+    const profile = await this.ensureProfile(companyId);
+    const current = profile.environment;
+    if (env === current) return this.profile(companyId);
+
+    const readiness = await this.readinessSvc.evaluate(companyId, env as any);
+    if (env === 'PRODUCTION' && !readiness?.ready) {
+      throw new BadRequestException({ statusCode: 400, error: 'PRODUCTION_SETUP_INCOMPLETE', message: 'Production setup incomplete. Resolve the blocking requirements before activating production.', blockers: readiness?.blockers || [], readiness });
+    }
+    if (current === 'PRODUCTION') {
+      const [unresolved, openDays] = await Promise.all([
+        this.prisma.fiscalReceipt.count({ where: { device: { branch: { companyId } }, environment: 'PRODUCTION', status: { in: ['RETRY', 'REJECTED', 'PENDING'] } } }),
+        this.prisma.fiscalDay.count({ where: { device: { branch: { companyId }, environment: 'PRODUCTION' }, status: 'OPEN' } }),
+      ]);
+      if (unresolved || openDays) {
+        throw new BadRequestException(`Cannot change environment: ${unresolved} unresolved production receipt(s) and ${openDays} open fiscal day(s). Close the fiscal day and reconcile receipts first.`);
+      }
+      if (!reason) throw new BadRequestException('A reason is required to change an active production connection.');
+    }
+    const saved = await this.prisma.fiscalisationProfile.update({ where: { companyId }, data: { environment: env as any } });
+    await this.audit.log(companyId, userId, 'fiscal.environment.switch', 'FiscalisationProfile', saved.id, { module: 'fiscalisation', reason, metadata: { from: current, to: env } });
+    return this.profile(companyId);
+  }
+
+  async activateProduction(companyId: string, userId: string | undefined, body: { confirm?: boolean; reason?: string }) {
+    const profile = await this.ensureProfile(companyId);
+    const { result, allowed, blockers } = await this.readinessSvc.assertProductionActivatable(companyId);
+    if (!allowed) {
+      throw new BadRequestException({ statusCode: 400, error: 'PRODUCTION_SETUP_INCOMPLETE', message: 'Production setup incomplete. Resolve the blocking requirements before activating production.', blockers, readiness: result });
+    }
+    if (!body?.confirm) throw new BadRequestException('Explicit administrator confirmation is required to activate production.');
+    const previous = profile.environment;
+    const saved = await this.prisma.fiscalisationProfile.update({ where: { companyId }, data: { environment: 'PRODUCTION' } });
+    await this.audit.log(companyId, userId, 'fiscal.production.activate', 'FiscalisationProfile', saved.id, {
+      module: 'fiscalisation', reason: body?.reason,
+      metadata: { activatedBy: userId, activatedAt: new Date().toISOString(), previousEnvironment: previous, newEnvironment: 'PRODUCTION', approvalReference: profile.productionApprovalRef, readiness: result?.status },
+    });
+    return { ok: true, environment: 'PRODUCTION', readiness: result };
+  }
+
+  async syncConfig(companyId: string, userId: string | undefined, deviceId: string) {
+    const d = await this.prisma.fiscalDevice.findFirst({ where: { id: deviceId, branch: { companyId } } });
+    if (!d) throw new BadRequestException('Device not found');
+    const res = await this.factory.getForEnvironment(d.environment).getConfig({ deviceId: d.zimraDeviceId });
+    await this.prisma.fiscalIntegrationLog.create({ data: { deviceId: d.id, operation: 'getConfig', status: 'OK', environment: d.environment, response: res } });
+    await this.audit.log(companyId, userId, 'fiscal.config.sync', 'FiscalDevice', d.id, { module: 'fiscalisation' });
+    return res;
+  }
+
+  async integrationLogs(companyId: string, q: { environment?: string; operation?: string } = {}) {
+    const where: any = { device: { branch: { companyId } } };
+    if (q.environment) where.environment = q.environment;
+    if (q.operation) where.operation = q.operation;
+    return this.prisma.fiscalIntegrationLog.findMany({ where, include: { device: { include: { branch: true } } }, orderBy: { createdAt: 'desc' }, take: 300 });
   }
 }
 

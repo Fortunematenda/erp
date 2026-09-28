@@ -68,6 +68,22 @@ enum DeviceStatus {
   EXPIRED
 }
 
+enum FiscalEnvironment {
+  MOCK
+  SANDBOX
+  PRODUCTION
+}
+
+enum FiscalRequestStatus {
+  DRAFT
+  READY_TO_SUBMIT
+  SUBMITTED
+  AWAITING_RESPONSE
+  ADDITIONAL_INFORMATION_REQUIRED
+  APPROVED
+  REJECTED
+}
+
 enum JournalStatus {
   DRAFT
   POSTED
@@ -174,6 +190,9 @@ model Company {
   approvalRequests          ApprovalRequest[]
   financialYears            FinancialYear[]
   fiscalPeriods             FiscalPeriod[]
+  fiscalisationProfile      FiscalisationProfile?
+  fiscalRegistrationRequests FiscalRegistrationRequest[]
+  fiscalTaxMappings         FiscalTaxMapping[]
   bankAccounts              BankAccount[]
   bankReconciliations       BankReconciliation[]
   vendorCredits             VendorCredit[]
@@ -311,6 +330,10 @@ model Branch {
   phone                   String?
   email                   String?
   street                  String?
+  houseNumber             String?
+  suburb                  String?
+  zimraRegion             String?
+  zimraStation            String?
   province                String?
   postalCode              String?
   country                 String?
@@ -1759,9 +1782,22 @@ model FiscalDevice {
   name                 String
   serialNumber         String
   zimraDeviceId        String?
+  modelName            String?
+  modelVersion         String?
+  integratorName       String?
+  posLocation          String?
+  activationKeyEnc     String?
+  environment          FiscalEnvironment      @default(MOCK)
+  registeredAt         DateTime?
   status               DeviceStatus           @default(UNREGISTERED)
   certificateRef       String?
+  certificateThumbprint String?
   certificateExpiresAt DateTime?
+  certificateIssuedAt  DateTime?
+  certificateRenewedAt DateTime?
+  privateKeyEnc        String?
+  csrPem               String?
+  certificatePem       String?
   fiscalDayNo          Int                    @default(0)
   receiptCounter       Int                    @default(0)
   globalReceiptNo      Int                    @default(0)
@@ -1803,6 +1839,7 @@ model FiscalReceipt {
   globalReceiptNo Int
   receiptType     String        @default("FiscalInvoice")
   status          FiscalStatus  @default(PENDING)
+  environment     FiscalEnvironment @default(MOCK)
   zimraReceiptId  String?
   serverSignature String?
   receiptHash     String?
@@ -1829,11 +1866,88 @@ model FiscalIntegrationLog {
   device       FiscalDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
   operation    String
   status       String
+  environment  FiscalEnvironment @default(MOCK)
   request      Json?
   response     Json?
   errorCode    String?
   errorMessage String?
   createdAt    DateTime     @default(now())
+}
+
+model FiscalisationProfile {
+  id                        String            @id @default(uuid())
+  companyId                 String            @unique
+  company                   Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  environment               FiscalEnvironment @default(MOCK)
+
+  taxpayerName              String?
+  vatRegistered             Boolean           @default(false)
+  taxpayerEmail             String?
+  taxpayerVerified          Boolean           @default(false)
+  verifiedTaxpayerName      String?
+  verifiedTin               String?
+  verifiedAt                DateTime?
+
+  integratorName            String?
+  softwareName              String            @default("NexusERP")
+  deviceModelName           String?
+  deviceModelVersion        String?
+  technicalContactName      String?
+  technicalContactEmail     String?
+  technicalContactPhone     String?
+  businessAddress           String?
+  softwareDescription       String?
+  integrationArchitecture   String?
+  testRegistrationRef       String?
+  productionApprovalRef     String?
+  productionApprovalDate    DateTime?
+  productionApprovalEvidence String?
+
+  readinessStatus           String            @default("NOT_CONFIGURED")
+  readinessUpdatedAt        DateTime?
+  setupStep                 Int?
+  setupDraft                Json?
+  createdAt                 DateTime          @default(now())
+  updatedAt                 DateTime          @updatedAt
+}
+
+model FiscalRegistrationRequest {
+  id                String              @id @default(uuid())
+  companyId         String
+  company           Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  deviceId          String?
+  assistance        String
+  status            FiscalRequestStatus @default(DRAFT)
+  requestDate       DateTime?
+  referenceNumber   String?
+  requestedBy       String?
+  zimraContact      String?
+  responseDate      DateTime?
+  responseNotes     String?
+  approvalReference String?
+  subject           String?
+  body              String?
+  attachments       Json?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+}
+
+model FiscalTaxMapping {
+  id          String    @id @default(uuid())
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  erpTaxCode  String
+  erpTreatment String?
+  fdmsTaxId   String?
+  fdmsTaxName String?
+  fdmsTaxRate Decimal?  @db.Decimal(8, 4)
+  validFrom   DateTime?
+  validTo     DateTime?
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([companyId, erpTaxCode])
 }
 
 model AuditLog {
