@@ -78,10 +78,12 @@ export class ProcurementController {
     const companyId = companyIdOf(req.user);
     const supplier = await this.prisma.supplier.findFirst({ where: { id, companyId } });
     if (!supplier) throw new Error('Supplier not found');
-    const [orders, grns, invoices] = await Promise.all([
+    const [orders, grns, invoices, vendorCredits, supplierReturns] = await Promise.all([
       this.prisma.purchaseOrder.findMany({ where: { companyId, supplierId: id }, include: { lines: true }, orderBy: { orderDate: 'desc' } }),
       this.prisma.goodsReceivedNote.findMany({ where: { companyId, supplierId: id }, include: { purchaseOrder: true, lines: true }, orderBy: { receivedAt: 'desc' } }),
       this.prisma.supplierInvoice.findMany({ where: { companyId, supplierId: id }, include: { lines: true, payments: true }, orderBy: { invoiceDate: 'desc' } }),
+      this.prisma.vendorCredit.findMany({ where: { companyId, supplierId: id }, include: { lines: true, applications: true }, orderBy: { creditDate: 'desc' } }),
+      this.prisma.supplierReturn.findMany({ where: { companyId, supplierId: id }, include: { lines: true }, orderBy: { createdAt: 'desc' } }).catch(() => []),
     ]);
     const invoiceIds = invoices.map((i) => i.id);
     const orderIds = orders.map((o) => o.id);
@@ -89,7 +91,20 @@ export class ProcurementController {
     const resolvedInvoices = [];
     for (const i of invoices) { const r = await this.resolveBill(i); resolvedInvoices.push({ ...i, status: r.documentStatus, documentStatus: r.documentStatus, amountPaid: r.paid, balanceDue: r.remaining, remaining: r.remaining, paymentStatus: r.paymentStatus }); }
     const outstanding = resolvedInvoices.filter((i) => i.documentStatus === 'POSTED' && Number(i.remaining) > 0).reduce((s, i) => s + Number(i.remaining), 0);
-    return { supplier, outstanding: Number(outstanding.toFixed(2)), purchaseOrders: orders, grns, invoices: resolvedInvoices, payments };
+    return { supplier, outstanding: Number(outstanding.toFixed(2)), purchaseOrders: orders, grns, invoices: resolvedInvoices, payments, vendorCredits, supplierReturns };
+  }
+  /** Related transactions for a purchase order (clickable receipt/bill/payment/credit links). */
+  @Get('purchase-orders/:id/related') async orderRelated(@Req() req: any, @Param('id') id: string) {
+    const companyId = companyIdOf(req.user);
+    const po = await this.prisma.purchaseOrder.findFirst({ where: { id, companyId } });
+    if (!po) throw new BadRequestException('Purchase order not found');
+    const [grns, bills, payments, credits] = await Promise.all([
+      this.prisma.goodsReceivedNote.findMany({ where: { companyId, purchaseOrderId: id }, select: { id: true, grnNo: true, status: true, receivedAt: true }, orderBy: { receivedAt: 'desc' } }),
+      this.prisma.supplierInvoice.findMany({ where: { companyId, purchaseOrderId: id }, select: { id: true, invoiceNo: true, status: true, total: true, balanceDue: true, paymentStatus: true }, orderBy: { invoiceDate: 'desc' } }),
+      this.prisma.supplierPayment.findMany({ where: { companyId, purchaseOrderId: id }, select: { id: true, paymentNo: true, amount: true, paidAt: true, status: true }, orderBy: { paidAt: 'desc' } }),
+      this.prisma.vendorCredit.findMany({ where: { companyId, sourcePurchaseOrderId: id }, select: { id: true, vendorCreditNo: true, total: true, status: true, applicationStatus: true } }),
+    ]);
+    return { purchaseOrderId: id, poNo: po.poNo, goodsReceipts: grns, bills, payments, vendorCredits: credits };
   }
   @UseGuards(PermissionsGuard) @RequirePermissions('procurement.suppliers.manage')
   @Delete('suppliers/:id') async deleteSupplier(@Req() req: any, @Param('id') id: string) {
@@ -861,6 +876,10 @@ export class ProcurementController {
   @UseGuards(PermissionsGuard) @RequirePermissions('procurement.payments.manage')
   @Post('supplier-payments') async createSupplierPayment(@Req() req: any, @Body() dto: CreateSupplierPaymentDto) {
     const companyId = companyIdOf(req.user);
+    if (dto.idempotencyKey) {
+      const existing = await this.prisma.supplierPayment.findFirst({ where: { companyId, idempotencyKey: dto.idempotencyKey }, include: { allocations: { include: { supplierInvoice: true } }, supplier: true } });
+      if (existing) return existing;
+    }
     const amount = Number(dto.amount);
     if (!(amount > 0)) throw new BadRequestException('Payment amount must be greater than 0');
     const allocs = (dto.allocations || []).map((a) => ({ supplierInvoiceId: a.supplierInvoiceId, amount: Number(a.amount) })).filter((a) => a.amount > 0);
@@ -875,7 +894,7 @@ export class ProcurementController {
       if (!b) throw new BadRequestException('Invoice not found');
       if (b.supplierId !== supplierId) throw new BadRequestException('All bills must belong to the same supplier');
       if (b.status !== 'POSTED') throw new BadRequestException('Only posted bills can be paid');
-      const balance = Math.max(0, Number(b.total) - Number(b.amountPaid));
+      const balance = Math.max(0, Number(b.total) - Number(b.creditsApplied || 0) - Number(b.amountPaid));
       if (a.amount > balance + 0.005) throw new BadRequestException(`Bill ${b.invoiceNo} balance has changed. Current outstanding balance: ${balance.toFixed(2)}`);
     }
     const payFrom = await this.accountByCode(companyId, dto.payFromAccountId);
@@ -883,13 +902,13 @@ export class ProcurementController {
     const prepay = await this.prepayCode(companyId, unapplied);
     const paymentNo = await this.numbering.next(companyId, 'SP');
     const payment = await this.prisma.$transaction(async (tx) => {
-      const p = await tx.supplierPayment.create({ data: { companyId, supplierId, paymentNo, paidAt: dto.paidAt ? new Date(dto.paidAt) : new Date(), amount, applied, unapplied, method: dto.method || 'BANK', referenceNo: dto.referenceNo, note: dto.note, payFromAccountId: dto.payFromAccountId, payFromAccountCode: payFrom.code, payFromAccountName: payFrom.name, status: 'POSTED', createdBy: this.nameOf(req), createdById: req.user?.sub, allocations: { create: allocs.map((a) => ({ supplierInvoiceId: a.supplierInvoiceId, amountApplied: a.amount })) } } });
+      const p = await tx.supplierPayment.create({ data: { companyId, supplierId, paymentNo, paidAt: dto.paidAt ? new Date(dto.paidAt) : new Date(), amount, applied, unapplied, method: dto.method || 'BANK', referenceNo: dto.referenceNo, note: dto.note, payFromAccountId: dto.payFromAccountId, payFromAccountCode: payFrom.code, payFromAccountName: payFrom.name, status: 'POSTED', idempotencyKey: dto.idempotencyKey || null, createdBy: this.nameOf(req), createdById: req.user?.sub, allocations: { create: allocs.map((a) => ({ supplierInvoiceId: a.supplierInvoiceId, amountApplied: a.amount })) } } });
       for (const a of allocs) {
         const b = await tx.supplierInvoice.findUnique({ where: { id: a.supplierInvoiceId } });
         if (!b) continue;
         const newPaid = Number(b.amountPaid || 0) + a.amount;
-        const newDue = Math.max(0, Number(b.total) - newPaid);
-        const ps = newPaid <= 0.005 ? 'UNPAID' : newDue <= 0.005 ? 'PAID' : 'PARTIALLY_PAID';
+        const newDue = Math.max(0, Number(b.total) - Number(b.creditsApplied || 0) - newPaid);
+        const ps = newDue <= 0.005 ? 'PAID' : (newPaid > 0.005 || Number(b.creditsApplied || 0) > 0.005) ? 'PARTIALLY_PAID' : 'UNPAID';
         await tx.supplierInvoice.update({ where: { id: b.id }, data: { amountPaid: newPaid, balanceDue: newDue, paymentStatus: ps, status: 'POSTED' } });
       }
       return p;
@@ -923,9 +942,9 @@ export class ProcurementController {
         const b = await tx.supplierInvoice.findUnique({ where: { id: a.supplierInvoiceId } });
         if (!b) continue;
         const newPaid = Math.max(0, Number(b.amountPaid) - Number(a.amountApplied));
-        const newDue = Number(b.total) - newPaid;
-        const ps = newPaid <= 0.005 ? 'UNPAID' : newDue <= 0.005 ? 'PAID' : 'PARTIALLY_PAID';
-        await tx.supplierInvoice.update({ where: { id: b.id }, data: { amountPaid: newPaid, balanceDue: Math.max(0, newDue), paymentStatus: ps } });
+        const newDue = Math.max(0, Number(b.total) - Number(b.creditsApplied || 0) - newPaid);
+        const ps = newDue <= 0.005 ? 'PAID' : (newPaid > 0.005 || Number(b.creditsApplied || 0) > 0.005) ? 'PARTIALLY_PAID' : 'UNPAID';
+        await tx.supplierInvoice.update({ where: { id: b.id }, data: { amountPaid: newPaid, balanceDue: newDue, paymentStatus: ps } });
       }
       await tx.supplierPayment.update({ where: { id }, data: { status: 'REVERSED', reversedAt: new Date(), reversalReason: body.reason, reversalOfId: payment.reversalOfId || null } });
     });

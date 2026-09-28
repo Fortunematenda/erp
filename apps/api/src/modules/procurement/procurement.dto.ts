@@ -88,6 +88,7 @@ export class CreateSupplierPaymentDto {
   @IsOptional() @IsString() referenceNo?: string;
   @IsOptional() @IsString() note?: string;
   @IsOptional() @IsString() payFromAccountId?: string;
+  @IsOptional() @IsString() idempotencyKey?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => PaymentAllocationDto) allocations?: PaymentAllocationDto[];
 }
 

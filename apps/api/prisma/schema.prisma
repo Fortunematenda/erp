@@ -2431,10 +2431,12 @@ model SupplierPayment {
   reversalReason     String?
   createdBy          String?
   createdById        String?
+  idempotencyKey     String?
   allocations        SupplierPaymentAllocation[]
   createdAt          DateTime                    @default(now())
 
   @@unique([companyId, paymentNo])
+  @@unique([companyId, idempotencyKey])
 }
 
 model SupplierPaymentAllocation {

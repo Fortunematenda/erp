@@ -1151,8 +1151,10 @@ export class FinanceController {
         if (amt > bal + 0.001) throw new BadRequestException(`Cannot apply more than bill outstanding (${bal.toFixed(2)})`);
         await tx.vendorCreditApplication.create({ data: { vendorCreditId: id, supplierInvoiceId: a.supplierInvoiceId, amount: amt, status: 'ACTIVE', createdBy: req.user?.name || req.user?.email } });
         const newCredits = Number(bill.creditsApplied || 0) + amt;
-        const newDue = Math.max(0, Number(bill.total) - Number(bill.amountPaid) - newCredits);
-        await tx.supplierInvoice.update({ where: { id: bill.id }, data: { creditsApplied: newCredits, balanceDue: newDue } });
+        const paid = Number(bill.amountPaid || 0);
+        const newDue = Math.max(0, Number(bill.total) - paid - newCredits);
+        const ps = newDue <= 0.005 ? 'PAID' : (paid > 0.005 || newCredits > 0.005) ? 'PARTIALLY_PAID' : 'UNPAID';
+        await tx.supplierInvoice.update({ where: { id: bill.id }, data: { creditsApplied: newCredits, balanceDue: newDue, paymentStatus: ps } });
       }
       const newApplied = applied + totalApply;
       const appStatus = newApplied >= Number(vc.total) - Number(vc.refundedAmount || 0) - 0.001 ? 'FULLY_APPLIED' : (newApplied > 0.005 ? 'PARTIALLY_APPLIED' : 'UNAPPLIED');
@@ -1169,7 +1171,7 @@ export class FinanceController {
     if (!body?.reason) throw new BadRequestException('Reason required');
     await this.prisma.$transaction(async (tx) => {
       const bill = await tx.supplierInvoice.findFirst({ where: { id: app.supplierInvoiceId, companyId } });
-      if (bill) { const newCredits = Math.max(0, Number(bill.creditsApplied || 0) - Number(app.amount)); const newDue = Math.max(0, Number(bill.total) - Number(bill.amountPaid) - newCredits); await tx.supplierInvoice.update({ where: { id: bill.id }, data: { creditsApplied: newCredits, balanceDue: newDue } }); }
+      if (bill) { const newCredits = Math.max(0, Number(bill.creditsApplied || 0) - Number(app.amount)); const paid = Number(bill.amountPaid || 0); const newDue = Math.max(0, Number(bill.total) - paid - newCredits); const ps = newDue <= 0.005 ? 'PAID' : (paid > 0.005 || newCredits > 0.005) ? 'PARTIALLY_PAID' : 'UNPAID'; await tx.supplierInvoice.update({ where: { id: bill.id }, data: { creditsApplied: newCredits, balanceDue: newDue, paymentStatus: ps } }); }
       await tx.vendorCreditApplication.update({ where: { id: appId }, data: { status: 'REVERSED', reversedAt: new Date(), reversalReason: body.reason } });
       const vc = await tx.vendorCredit.findFirst({ where: { id }, include: { applications: { where: { status: 'ACTIVE' } } } });
       if (!vc) throw new BadRequestException('Vendor credit not found');
