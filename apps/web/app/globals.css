@@ -628,3 +628,55 @@ body {
 .nex-items-table .ant-table-thead > tr > th { background: #f8fafc !important; color: #475467 !important; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; border-bottom: 1px solid #e2e8f0 !important; }
 .nex-items-table .ant-table-tbody > tr > td { border-bottom: 1px solid #eef1f6 !important; }
 
+
+/* ---------- Global form field borders (all forms) ---------- */
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-input-number,
+.ant-input-number-affix-wrapper,
+.ant-select:not(.ant-select-customize-input) .ant-select-selector,
+.ant-picker,
+.ant-input-group-addon {
+  border-color: #cbd5e1;
+}
+.ant-input:hover,
+.ant-input-affix-wrapper:hover,
+.ant-input-number:hover,
+.ant-select:not(.ant-select-disabled):hover .ant-select-selector,
+.ant-picker:not(.ant-picker-disabled):hover {
+  border-color: #94a3b8;
+}
+.ant-input:focus,
+.ant-input-focused,
+.ant-input-affix-wrapper-focused,
+.ant-input-number-focused,
+.ant-select-focused:not(.ant-select-disabled) .ant-select-selector,
+.ant-picker-focused {
+  border-color: #003366;
+  box-shadow: 0 0 0 3px rgba(0,51,102,.12);
+}
+.ant-input-status-error,
+.ant-input-affix-wrapper-status-error,
+.ant-input-number-status-error,
+.ant-select-status-error .ant-select-selector,
+.ant-picker-status-error {
+  border-color: #ef4444 !important;
+}
+.ant-input-status-error:focus,
+.ant-input-affix-wrapper-status-error:focus,
+.ant-select-status-error.ant-select-focused .ant-select-selector,
+.ant-picker-status-error.ant-picker-focused {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 0 3px rgba(239,68,68,.14) !important;
+}
+.ant-input[disabled],
+.ant-input-disabled,
+.ant-input-affix-wrapper-disabled,
+.ant-input-number-disabled,
+.ant-select-disabled .ant-select-selector,
+.ant-picker-disabled {
+  border-color: #dbe1ea !important;
+  background-color: #f1f5f9 !important;
+  color: #475467 !important;
+}
+
