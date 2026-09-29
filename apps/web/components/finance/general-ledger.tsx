@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Button, Card, DatePicker, Input, Pagination, Select, Space, Table } from 'antd';
+import { Button, Card, DatePicker, Input, Pagination, Select, Space, Table, Tooltip } from 'antd';
 import { ReloadOutlined, PrinterOutlined, DownloadOutlined } from '@ant-design/icons';
 import Link from 'next/link';
 import { api } from '@/lib/api';
@@ -80,7 +80,17 @@ export function GeneralLedger() {
   const columns: ColumnsType<any> = [
     { title: 'Date', dataIndex: 'date', width: 105, render: fmtDate },
     { title: 'Journal', dataIndex: 'journalNumber', width: 110, render: (v, r) => <button onClick={() => setJournalId(r.journalId)} className="font-mono text-[12px] text-[#003366] font-semibold hover:underline">{v}</button> },
-    { title: 'Description', dataIndex: 'description', render: (v) => <span className="text-[#475467]">{v}</span> },
+    { title: 'Payee / Description', dataIndex: 'description', render: (v, r) => (
+      <div>
+        <div className="text-[13px] font-medium text-[#171a2e]">{r.payee || (r.sourceType === 'MANUAL' ? 'Manual journal' : '—')}</div>
+        <div className="text-[12px] text-[#98A2B3]">{v}</div>
+      </div>
+    ) },
+    { title: 'Account(s)', dataIndex: 'contraSummary', width: 170, render: (v, r) => v ? (
+      (r.contraAccounts?.length || 0) > 1
+        ? <Tooltip title={(r.contraAccounts || []).map((a: any) => `${a.code} ${a.name}`).join(', ')}><span className="text-[#5a6080] cursor-help underline decoration-dotted">{v}</span></Tooltip>
+        : <span className="text-[#5a6080]">{v}</span>
+    ) : <span className="text-[#dfe1ee]">—</span> },
     { title: 'Reference', dataIndex: 'reference', width: 120, render: (v, r) => v ? <Link href={r.sourceRoute}><span className="font-mono text-[12px] text-[#5a6080] hover:underline">{v}</span></Link> : <span className="text-[#dfe1ee]">—</span> },
     { title: 'Type', dataIndex: 'sourceLabel', width: 120, render: (v, r) => sourceBadge(r) },
     { title: 'Debit', dataIndex: 'debit', width: 100, align: 'right', render: (v) => v ? <span className="font-semibold text-[#10b981]">{fmtMoney(v)}</span> : '' },
@@ -92,7 +102,7 @@ export function GeneralLedger() {
 
   function exportCsv() {
     const rows = d?.rows || [];
-    const csv = [['Date', 'Journal', 'Description', 'Reference', 'Type', 'Debit', 'Credit', 'Balance'].join(','), ...rows.map((r: any) => [r.date ? dayjs(r.date).format('YYYY-MM-DD') : '', r.journalNumber, `"${(r.description || '').replace(/"/g, '""')}"`, r.reference, r.sourceLabel, Number(r.debit).toFixed(2), Number(r.credit).toFixed(2), Number(r.runningBalance).toFixed(2)].join(','))].join('\n');
+    const csv = [['Date', 'Journal', 'Payee', 'Description', 'Account(s)', 'Reference', 'Type', 'Debit', 'Credit', 'Balance'].join(','), ...rows.map((r: any) => [r.date ? dayjs(r.date).format('YYYY-MM-DD') : '', r.journalNumber, `"${(r.payee || '').replace(/"/g, '""')}"`, `"${(r.description || '').replace(/"/g, '""')}"`, `"${(r.contraSummary || '').replace(/"/g, '""')}"`, r.reference, r.sourceLabel, Number(r.debit).toFixed(2), Number(r.credit).toFixed(2), Number(r.runningBalance).toFixed(2)].join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `ledger-${acc?.code || 'account'}.csv`; a.click(); URL.revokeObjectURL(a.href);
   }
 
