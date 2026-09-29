@@ -22,6 +22,7 @@ export function RouteProgress() {
       const dest = href.split('?')[0];
       if (dest === window.location.pathname) return; // same page (e.g. tab query change)
       start();
+      document.dispatchEvent(new CustomEvent('nex:navigate'));
     }
     // Programmatic navigation (sidebar, flyout, quick access, table links) dispatches this.
     function onNavigate() { start(); }
