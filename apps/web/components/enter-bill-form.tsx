@@ -96,7 +96,7 @@ export function EnterBillForm({ onSaved, variant = 'tab', initialSupplierId, ini
       setLines(poLines.map((l: any) => ({
         key: keySeq++, itemId: l.itemId || undefined, description: l.description, quantity: Number(l.remainingToBill),
         unitPrice: Number(l.unitPrice), taxRate: taxRateOf(itemById.get(l.itemId)?.purchaseTaxCode), unit: l.unit,
-        accountId: '', purchaseOrderLineId: l.purchaseOrderLineId, itemType: l.itemId ? normalizeItemType(itemById.get(l.itemId)?.type) : undefined,
+        accountId: l.accountId || '', purchaseOrderLineId: l.purchaseOrderLineId, itemType: l.itemId ? normalizeItemType(itemById.get(l.itemId)?.type) : undefined,
       })));
       if (data.supplierId) setSupplierId((prev) => prev || data.supplierId);
       if (data.currency) setCurrency(data.currency);
@@ -212,6 +212,7 @@ export function EnterBillForm({ onSaved, variant = 'tab', initialSupplierId, ini
             { title: 'Qty', width: 100, render: (_v, l: any) => <InputNumber min={0} className="w-full" value={l.quantity} onChange={(v) => updLine(l.key, { quantity: Number(v || 0) })} /> },
             { title: 'Unit Cost', width: 120, render: (_v, l: any) => <InputNumber min={0} prefix="$" className="w-full" value={l.unitPrice} onChange={(v) => updLine(l.key, { unitPrice: Number(v || 0) })} /> },
             { title: 'Tax %', width: 90, render: (_v, l: any) => <InputNumber min={0} className="w-full" value={l.taxRate} onChange={(v) => updLine(l.key, { taxRate: Number(v || 0) })} /> },
+            { title: 'Account', width: 210, render: (_v, l: any) => <AccountSelector billLine postingOnly allowedTypes={['EXPENSE', 'ASSET']} value={l.accountId} onChange={(v) => updLine(l.key, { accountId: v })} placeholder="Auto / override" /> },
             { title: 'Amount', width: 110, align: 'right', render: (_v, l: any) => <span className="font-semibold text-[#003366]">{fmtMoney(Number(l.quantity || 0) * Number(l.unitPrice || 0))}</span> },
             { title: 'Type', width: 110, render: (_v, l: any) => { const t = l.itemType; return t ? <Tag>{ITEM_TYPE_BADGE[t as keyof typeof ITEM_TYPE_BADGE] || t}</Tag> : <span className="text-[11px] text-[#94a3b8]">account line</span>; } },
             { title: '', width: 50, render: (_v, l: any) => <Tooltip title="Remove line"><Button type="text" danger icon={<DeleteOutlined />} onClick={() => remLine(l.key)} disabled={lines.length === 1} /></Tooltip> },
