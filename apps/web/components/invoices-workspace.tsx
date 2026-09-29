@@ -208,8 +208,23 @@ export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { cust
 
   async function post(r: any) { try { await api(`/sales/invoices/${r.id}/finalize`, { method: 'POST', body: JSON.stringify({ action: 'POST' }) }); notify.success('Invoice posted — awaiting payment'); qc.invalidateQueries({ queryKey: ['/sales/invoices'] }); qc.invalidateQueries({ queryKey: ['sales-register'] }); } catch (e: any) { notify.error(e.message); } }
   async function del(r: any) { try { await api(`/sales/invoices/${r.id}`, { method: 'DELETE' }); notify.success('Invoice deleted'); qc.invalidateQueries({ queryKey: ['/sales/invoices'] }); qc.invalidateQueries({ queryKey: ['sales-register'] }); } catch (e: any) { notify.error(e.message); } }
-  async function fiscal(r: any) { const dev = (devices.data || []).find((d: any) => d.status === 'ACTIVE' && d.dayStatus === 'OPEN'); if (!dev) { notify.warning('No open fiscal day on an active device'); return; } try { await api(`/fiscalisation/devices/${dev.id}/fiscalise`, { method: 'POST', body: JSON.stringify({ invoiceId: r.id }) }); notify.success('Fiscalised'); qc.invalidateQueries({ queryKey: ['/sales/invoices'] }); } catch (e: any) { notify.error(e.message); } }
-  const canFiscal = (r: any) => { const recv = (r.receipts || []).reduce((s: number, x: any) => s + Number(x.amount), 0); return recv >= Number(r.total) - 0.001 && r.fiscalStatus !== 'FISCALISED'; };
+  async function fiscal(r: any) {
+    const list = devices.data || [];
+    // Device-selection: prefer the device assigned to the invoice's branch, else any active device.
+    const dev = list.find((d: any) => d.status === 'ACTIVE' && d.branchId === r.branchId) || list.find((d: any) => d.status === 'ACTIVE');
+    if (!dev) { notify.error('No active fiscal device configured. Configure a device under Fiscalisation → ZIMRA FDMS first.'); return; }
+    try {
+      if (dev.dayStatus !== 'OPEN') await api(`/fiscalisation/devices/${dev.id}/open-day`, { method: 'POST' });
+      const res = await api(`/fiscalisation/devices/${dev.id}/fiscalise`, { method: 'POST', body: JSON.stringify({ invoiceId: r.id }) });
+      notify.success(res?.zimraReceiptId ? `Fiscalised — receipt ${res.zimraReceiptId}` : 'Invoice fiscalised');
+      ['/sales/invoices', 'fiscal-receipts', 'fiscal-devices', 'fiscal-dashboard', 'sales-register'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+    } catch (e: any) { notify.error(e.message); }
+  }
+  const canFiscal = (r: any) => {
+    const recv = (r.receipts || []).reduce((s: number, x: any) => s + Number(x.amount), 0);
+    const paid = recv >= Number(r.total) - 0.001;
+    return paid && r.fiscalRequired !== false && !['FISCALISED', 'PENDING', 'SUBMITTED'].includes(r.fiscalStatus);
+  };
 
   const columns: ColumnsType<any> = [
     { title: 'Invoice #', dataIndex: 'invoiceNo', width: 130, render: (v, r) => <Link href={`/sales/invoices/${r.id}/edit`} className="font-mono text-[12px] font-semibold text-[#003366] hover:text-[#0b4a8f] hover:underline">{v}</Link> },
@@ -227,7 +242,7 @@ export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { cust
       <RowActionsMenu items={[
         { key: 'view', label: isInvoiceDraft(r) ? 'Edit' : 'View', icon: <EyeOutlined />, onClick: () => router.push(`/sales/invoices/${r.id}/edit`) },
         { key: 'post', label: 'Save & Post', icon: <FileDoneOutlined />, hidden: !isInvoiceDraft(r), onClick: () => post(r) },
-        { key: 'fiscal', label: 'Fiscalise', icon: <RobotOutlined />, hidden: !canFiscal(r), onClick: () => fiscal(r) },
+        { key: 'fiscal', label: 'Fiscalise', icon: <RobotOutlined />, hidden: !canFiscal(r), confirm: { title: `Fiscalise invoice ${r.invoiceNo}?`, content: 'This submits the invoice to the ZIMRA FDMS using the branch\'s fiscal device (opening a fiscal day if needed) and stores the fiscal receipt. This cannot be undone.', okText: 'Fiscalise' }, onClick: () => fiscal(r) },
         { key: 'delete', label: 'Delete', icon: <DeleteOutlined />, danger: true, hidden: !isInvoiceDraft(r), confirm: 'Delete invoice?', onClick: () => del(r) },
       ]} />
     ) },
