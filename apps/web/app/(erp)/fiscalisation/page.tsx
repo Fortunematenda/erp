@@ -25,7 +25,7 @@ const PAYMENT_METHODS = ['CASH', 'CARD', 'BANK', 'MOBILE_MONEY', 'CREDIT', 'CHEQ
 const FISCAL_STATUSES = ['READY', 'PENDING', 'SUBMITTED', 'FISCALISED', 'RETRY', 'REJECTED'];
 
 export default function Fiscalisation() {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const qc = useQueryClient();
   const config = useQuery({ queryKey: ['fiscal-config'], queryFn: () => api('/fiscalisation/config') });
   const dashboard = useQuery({ queryKey: ['fiscal-dashboard'], queryFn: () => api('/fiscalisation/dashboard') });
@@ -76,10 +76,30 @@ export default function Fiscalisation() {
 
   function refresh() { ['fiscal-dashboard', 'fiscal-ready', 'fiscal-devices', 'fiscal-receipts', 'fiscal-days', 'fiscal-recon', 'fiscal-reports'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); }
   async function act(path: string, body?: any, msg = 'Done') { try { await api(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }); message.success(msg); refresh(); } catch (e: any) { message.error(e.message); } }
-  async function fiscaliseDoc(doc: any) {
+  function fiscaliseDoc(doc: any) {
     const path = doc.source === 'INVOICE' ? `fiscalise` : doc.source === 'CREDIT_NOTE' ? `fiscalise-credit-note` : `fiscalise-debit-note`;
     const key = doc.source === 'INVOICE' ? 'invoiceId' : doc.source === 'CREDIT_NOTE' ? 'creditNoteId' : 'debitNoteId';
-    try { await api(`/fiscalisation/devices/${dev?.id}/${path}`, { method: 'POST', body: JSON.stringify({ [key]: doc.id }) }); message.success(`${doc.docNo} fiscalised`); refresh(); } catch (e: any) { message.error(e.message); }
+    const label = (docTypeMap[doc.source]?.label || 'document').toLowerCase();
+    modal.confirm({
+      title: `Confirm ${label} fiscalisation`,
+      okText: 'Confirm Fiscalisation',
+      cancelText: 'Cancel',
+      content: (
+        <div className="text-[13px] space-y-1">
+          <div>Document: <b>{doc.docNo}</b></div>
+          <div>Customer: {doc.customer || 'Walk-in'}</div>
+          <div>Amount: {fmtMoney(doc.total)}</div>
+          <div className="mt-2 text-[#64748b]">This submits the {label} to the ZIMRA FDMS using the open fiscal device and stores the fiscal receipt. Once accepted it cannot be freely edited or submitted again.</div>
+        </div>
+      ),
+      onOk: async () => {
+        try {
+          await api(`/fiscalisation/devices/${dev?.id}/${path}`, { method: 'POST', body: JSON.stringify({ [key]: doc.id }) });
+          message.success(`${doc.docNo} fiscalised`);
+          refresh();
+        } catch (e: any) { message.error(e.message); throw e; }
+      },
+    });
   }
 
   const receiptCols: ColumnsType<any> = [
