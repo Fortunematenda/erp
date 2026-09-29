@@ -15,6 +15,7 @@ import { api } from '@/lib/api';
 import { StatusPill, EmptyState } from '@/components/sales-ui';
 import { StatCard } from '@/components/stat-card';
 import { FiscalisationSetup } from '@/components/fiscalisation-setup';
+import { FiscalisationReports } from '@/components/fiscalisation-reports';
 import { fmtDate, fmtDateTime, fmtMoney } from '@/lib/format';
 
 const { RangePicker } = DatePicker;
@@ -312,32 +313,14 @@ export default function Fiscalisation() {
           </div>
         ) },
         { key: 'reports', label: 'Reports', children: (
-          <div className="p-4">
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-              <StatCard icon={<FileDoneOutlined />} label="Total Receipts" value={reportTotals.receipts} color="#1d5fb5" />
-              <StatCard icon={<DollarOutlined />} label="Total Amount" value={fmtMoney(reportTotals.gross)} color="#16a34a" />
-              <StatCard icon={<WalletOutlined />} label="Total VAT" value={fmtMoney(reportTotals.vat)} color="#f59e0b" />
-              <StatCard icon={<CalendarOutlined />} label="Date Range" value={rFrom && rTo ? `${fmtDate(rFrom.toISOString())} – ${fmtDate(rTo.toISOString())}` : 'All time'} color="#64748b" />
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+          <div>
+            <FiscalisationReports />
+            <div className="p-4 pt-0">
               <div className="nex-card p-4">
-                <div className="text-[13px] font-semibold text-[#171a2e] mb-3">Receipt Types Distribution</div>
-                {byType.length ? <div className="space-y-2">{byType.map((b) => <div key={b.key} className="flex items-center justify-between text-[13px]"><span className="text-[#344054]">{b.key}</span><span className="font-medium text-[#171a2e]">{b.count}</span></div>)}</div> : <div className="text-[13px] text-[#94a3b8]">No fiscal receipts in the selected period.</div>}
+                <div className="text-[13px] font-semibold text-[#171a2e] mb-3">Fiscal vs Posted Sales (Reconciliation)</div>
+                <div className="flex flex-wrap gap-4 mb-3 text-[13px]"><span>Posted <b>{fmtMoney(reconTotals.posted)}</b></span><span>Fiscalised <b>{fmtMoney(reconTotals.fiscal)}</b></span><span>Difference <b className={reconTotals.diff ? 'text-[#e11d48]' : 'text-[#16a34a]'}>{fmtMoney(reconTotals.diff)}</b></span><span>Unfiscalised <b>{reconTotals.unfiscalised}</b></span></div>
+                <Table rowKey="id" size="small" loading={reconciliation.isLoading} dataSource={recon} columns={reconCols} pagination={{ pageSize: 10 }} />
               </div>
-              <div className="nex-card p-4">
-                <div className="text-[13px] font-semibold text-[#171a2e] mb-3">Payment Method Distribution</div>
-                {byPayment.length ? <div className="space-y-2">{byPayment.map((b) => <div key={b.key} className="flex items-center justify-between text-[13px]"><span className="text-[#344054]">{b.key}</span><span className="font-medium text-[#171a2e]">{b.count}</span></div>)}</div> : <div className="text-[13px] text-[#94a3b8]">No fiscal payments recorded.</div>}
-              </div>
-            </div>
-            {byCurrency.length > 1 && <div className="nex-card p-4 mb-5"><div className="text-[13px] font-semibold text-[#171a2e] mb-3">Currency Distribution</div><Table rowKey="currency" size="small" dataSource={byCurrency} columns={[{ title: 'Currency', dataIndex: 'currency' }, { title: 'Receipts', dataIndex: 'count', align: 'right' }, { title: 'Gross', dataIndex: 'gross', align: 'right', render: (v) => fmtMoney(v) }]} pagination={false} /></div>}
-            <div className="nex-card p-4 mb-5">
-              <div className="text-[13px] font-semibold text-[#171a2e] mb-3 flex items-center justify-between"><span>Fiscal Receipts</span><Button size="small" icon={<DownloadOutlined />} onClick={exportCsv}>Export CSV</Button></div>
-              <Table rowKey="id" size="small" loading={receipts.isLoading} dataSource={receiptsFiltered} columns={receiptCols} pagination={{ pageSize: 12 }} />
-            </div>
-            <div className="nex-card p-4">
-              <div className="text-[13px] font-semibold text-[#171a2e] mb-3">Fiscal vs Posted Sales (Reconciliation)</div>
-              <div className="flex flex-wrap gap-4 mb-3 text-[13px]"><span>Posted <b>{fmtMoney(reconTotals.posted)}</b></span><span>Fiscalised <b>{fmtMoney(reconTotals.fiscal)}</b></span><span>Difference <b className={reconTotals.diff ? 'text-[#e11d48]' : 'text-[#16a34a]'}>{fmtMoney(reconTotals.diff)}</b></span><span>Unfiscalised <b>{reconTotals.unfiscalised}</b></span></div>
-              <Table rowKey="id" size="small" loading={reconciliation.isLoading} dataSource={recon} columns={reconCols} pagination={{ pageSize: 10 }} />
             </div>
           </div>
         ) },

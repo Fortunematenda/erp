@@ -346,21 +346,40 @@ export class FiscalisationService {
   }
 
   // ---------- Reports ----------
-  async reports(companyId: string, q: { from?: string; to?: string; receiptType?: string; paymentMethod?: string; currency?: string; status?: string; fiscalDayNo?: string }) {
-    const from = q.from ? new Date(q.from) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-    const to = q.to ? new Date(q.to) : new Date();
-    const where: any = { ...this.receiptWhere(companyId), createdAt: { gte: from, lte: to } };
+  async reports(companyId: string, q: { startDate?: string; endDate?: string; from?: string; to?: string; receiptType?: string; paymentMethod?: string; currency?: string; status?: string; fiscalDayNo?: string; deviceId?: string; branchId?: string; environment?: string }) {
+    const now = new Date();
+    const startRaw = q.startDate || q.from;
+    const endRaw = q.endDate || q.to;
+    const from = startRaw ? new Date(startRaw) : new Date(now.getFullYear(), now.getMonth(), 1);
+    if (isNaN(from.getTime())) throw new BadRequestException('Invalid start date');
+    const to = endRaw ? new Date(endRaw) : new Date(now);
+    if (isNaN(to.getTime())) throw new BadRequestException('Invalid end date');
+    if (!endRaw || !String(endRaw).includes('T')) to.setHours(23, 59, 59, 999); // inclusive end-of-day for date-only input
+    if (to.getTime() < from.getTime()) throw new BadRequestException('End date cannot be before start date.');
+
+    const profile = await this.prisma.fiscalisationProfile.findUnique({ where: { companyId } });
+    const environment = String(q.environment || profile?.environment || 'MOCK').toUpperCase();
+
+    const where: any = { ...this.receiptWhere(companyId), createdAt: { gte: from, lte: to }, environment };
     if (q.receiptType) where.receiptType = q.receiptType;
     if (q.currency) where.currency = q.currency;
     if (q.status) where.status = q.status;
     if (q.paymentMethod) where.paymentMethod = q.paymentMethod;
     if (q.fiscalDayNo) where.fiscalDayNo = Number(q.fiscalDayNo);
+    if (q.deviceId) where.deviceId = q.deviceId;
+    if (q.branchId) where.device = { branchId: q.branchId };
+
     const receipts = await this.prisma.fiscalReceipt.findMany({ where, include: { invoice: true, creditNote: true, debitNote: true, device: { include: { branch: true } } }, orderBy: { createdAt: 'desc' } });
     const totals = { receipts: receipts.length, gross: round2(receipts.reduce((s, r) => s + Number(r.total || 0), 0)), vat: round2(receipts.reduce((s, r) => s + Number(r.tax || 0), 0)) };
     const byType = this.distribute(receipts, (r) => r.receiptType);
     const byPayment = this.distribute(receipts, (r) => r.paymentMethod || 'CASH');
+    const byDevice = this.distribute(receipts, (r) => r.device?.name || 'Unknown device');
     const byCurrency = receipts.reduce((acc, r) => { const c = r.currency || 'USD'; const e = acc[c] || (acc[c] = { currency: c, receipts: 0, gross: 0, vat: 0 }); e.receipts++; e.gross += Number(r.total || 0); e.vat += Number(r.tax || 0); return acc; }, {} as Record<string, any>);
-    return { from, to, totals, receipts, byType, byPayment, byCurrency: Object.values(byCurrency).map((c) => ({ ...c, gross: round2(c.gross), vat: round2(c.vat) })) };
+    return {
+      from, to, environment,
+      totals, receipts, byType, byPayment, byDevice,
+      byCurrency: Object.values(byCurrency).map((c) => ({ ...c, gross: round2(c.gross), vat: round2(c.vat) })),
+    };
   }
 
   private distribute(rows: any[], keyFn: (r: any) => string) {
