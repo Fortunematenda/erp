@@ -27,6 +27,8 @@ export function DebitNotesWorkspace() {
   const sp = useSearchParams();
   const { message } = App.useApp();
   const list = useQuery({ queryKey: ['/sales/debit-notes'], queryFn: () => api('/sales/debit-notes') });
+  const devices = useQuery({ queryKey: ['fiscal-devices'], queryFn: () => api('/fiscalisation/devices') });
+  const fiscalConfig = useQuery({ queryKey: ['fiscal-config'], queryFn: () => api('/fiscalisation/config') });
   const [q, setQ] = useState('');
   const [doc, setDoc] = useState('');
   const [pay, setPay] = useState('');
@@ -39,6 +41,19 @@ export function DebitNotesWorkspace() {
   async function doApi(url: string, method: 'POST' | 'PATCH' | 'DELETE' = 'POST', body?: any) {
     try { await api(url, { method, body: body ? JSON.stringify(body) : undefined }); message.success('Done'); qc.invalidateQueries({ queryKey: ['/sales/debit-notes'] }); } catch (e: any) { message.error(e.message); }
   }
+
+  async function doFiscal(r: any) {
+    const list2 = devices.data || [];
+    const dev = list2.find((d: any) => d.status === 'ACTIVE' && d.branchId === r.branchId) || list2.find((d: any) => d.status === 'ACTIVE');
+    if (!dev) { message.error('No active fiscal device configured. Configure one under Fiscalisation → ZIMRA FDMS.'); return; }
+    try {
+      if (dev.dayStatus !== 'OPEN') await api(`/fiscalisation/devices/${dev.id}/open-day`, { method: 'POST' });
+      const res = await api(`/fiscalisation/devices/${dev.id}/fiscalise-debit-note`, { method: 'POST', body: JSON.stringify({ debitNoteId: r.id }) });
+      message.success(res?.zimraReceiptId ? `Fiscalised — receipt ${res.zimraReceiptId}` : 'Debit note fiscalised');
+      ['/sales/debit-notes', '/sales/invoices', 'fiscal-receipts', 'fiscal-devices'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+    } catch (e: any) { message.error(e.message); }
+  }
+  const fiscalEnv = String(fiscalConfig.data?.environment || fiscalConfig.data?.mode || 'MOCK').toUpperCase();
 
   const rows = useMemo(() => {
     const base = Array.isArray(list.data) ? list.data : [];
@@ -71,7 +86,7 @@ export function DebitNotesWorkspace() {
     { title: 'Payment', dataIndex: 'paymentStatus', width: 120, render: (v) => <StatusPill status={String(v || 'UNPAID').replace(/_/g, ' ')} /> },
     { title: 'Fiscal', dataIndex: 'fiscalStatus', width: 110, render: (v) => <StatusPill status={String(v || '—').replace(/_/g, ' ')} /> },
     { title: 'Doc', dataIndex: 'status', width: 100, render: (v) => <StatusPill status={v} /> },
-    { ...ACTIONS_COL, render: (_, r) => <DebitActions r={r} onView={() => setView(r)} onPay={() => setPayCn(r)} onAction={doApi} /> },
+    { ...ACTIONS_COL, render: (_, r) => <DebitActions r={r} env={fiscalEnv} onView={() => setView(r)} onPay={() => setPayCn(r)} onAction={doApi} onFiscal={() => doFiscal(r)} /> },
   ];
 
   return (
@@ -104,12 +119,14 @@ export function DebitNotesWorkspace() {
   );
 }
 
-function DebitActions({ r, onView, onPay, onAction }: { r: any; onView: () => void; onPay: () => void; onAction: (url: string, m?: 'POST' | 'PATCH' | 'DELETE', b?: any) => Promise<void> }) {
+function DebitActions({ r, env, onView, onPay, onAction, onFiscal }: { r: any; env: string; onView: () => void; onPay: () => void; onAction: (url: string, m?: 'POST' | 'PATCH' | 'DELETE', b?: any) => Promise<void>; onFiscal: () => void }) {
   const canPay = r.status === 'POSTED' && ['UNPAID', 'PARTIALLY_PAID', 'OVERDUE'].includes(r.paymentStatus) && Number(r.balanceDue ?? (Number(r.total || 0) - Number(r.amountPaid || 0))) > 0.001;
   const isDraft = r.status === 'DRAFT';
+  const canFiscal = r.status === 'POSTED' && !r.fiscalReceipt && !['FISCALISED', 'PENDING', 'SUBMITTED'].includes(r.fiscalStatus);
   return (
     <RowActionsMenu items={[
       { key: 'view', icon: <EyeOutlined />, label: 'View / Edit', onClick: onView },
+      { key: 'fiscal', icon: <RobotOutlined />, label: 'Fiscalise', hidden: !canFiscal, confirm: { title: 'Confirm debit note fiscalisation', content: `Debit Note: ${r.debitNoteNo}\nOriginal invoice: ${r.invoice?.invoiceNo || '—'}\nAdditional amount: ${fmtMoney(r.total)}\nEnvironment: ${env}\n\nThis submits a fiscal debit note referencing the original transaction.`, okText: 'Confirm Fiscalisation' }, onClick: onFiscal },
       { key: 'pay', icon: <WalletOutlined />, label: 'Receive Payment', disabled: !canPay, disabledReason: 'Debit note is not payable in its current status', onClick: onPay },
       { key: 'void', icon: <UndoOutlined />, danger: true, label: 'Void', disabled: r.status !== 'POSTED', disabledReason: 'Only posted debit notes can be voided', confirm: 'Void this posted debit note? (reverses GL)', onClick: () => onAction(`/sales/debit-notes/${r.id}/void`) },
       { key: 'delete', icon: <DeleteOutlined />, danger: true, label: 'Delete', disabled: !isDraft, disabledReason: 'Only draft debit notes can be deleted', confirm: 'Delete draft debit note?', onClick: () => onAction(`/sales/debit-notes/${r.id}`, 'DELETE') },

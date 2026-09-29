@@ -15,11 +15,19 @@ import { CurrencyValue, CustomerAvatar, EmptyState, FilterBar, StatusPill, Summa
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
 import { letterheadHtml } from '@/components/documents/document-letterhead';
 
+/** Authoritative fiscal display: an accepted receipt always means FISCALISED. */
+function fiscalDisplayStatus(r: any): string {
+  if (r?.fiscalReceipt) return 'FISCALISED';
+  if (r?.fiscalRequired === false) return 'NOT_REQUIRED';
+  return r?.fiscalStatus || 'READY';
+}
+
 export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { customerId?: string; embedded?: boolean; hideCustomer?: boolean }) {
   const qc = useQueryClient();
   const router = useRouter();
   const list = useQuery({ queryKey: ['/sales/invoices'], queryFn: () => api('/sales/invoices') });
   const devices = useQuery({ queryKey: ['fiscal-devices'], queryFn: () => api('/fiscalisation/devices') });
+  const fiscalConfig = useQuery({ queryKey: ['fiscal-config'], queryFn: () => api('/fiscalisation/config') });
   const [q, setQ] = useState('');
   const [invStatus, setInvStatus] = useState('');
   const [payStatus, setPayStatus] = useState('');
@@ -38,7 +46,7 @@ export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { cust
     if (q) r = r.filter((i: any) => `${i.invoiceNo} ${i.customer?.name || ''}`.toLowerCase().includes(q.toLowerCase()));
     if (invStatus) r = r.filter((i: any) => i.invoiceStatus === invStatus);
     if (payStatus) r = r.filter((i: any) => i.paymentStatus === payStatus);
-    if (fiscStatus) r = r.filter((i: any) => i.fiscalStatus === fiscStatus);
+    if (fiscStatus) r = r.filter((i: any) => fiscalDisplayStatus(i) === fiscStatus);
     if (range?.[0] && range?.[1]) r = r.filter((i: any) => dayjs(i.invoiceDate).isAfter(dayjs(range[0])) && dayjs(i.invoiceDate).isBefore(dayjs(range[1]).add(1, 'day')));
     return r;
   }, [list.data, customerId, q, invStatus, payStatus, fiscStatus, range]);
@@ -221,9 +229,9 @@ export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { cust
     } catch (e: any) { notify.error(e.message); }
   }
   const canFiscal = (r: any) => {
-    const recv = (r.receipts || []).reduce((s: number, x: any) => s + Number(x.amount), 0);
-    const paid = recv >= Number(r.total) - 0.001;
-    return paid && r.fiscalRequired !== false && !['FISCALISED', 'PENDING', 'SUBMITTED'].includes(r.fiscalStatus);
+    const life = String(r.invoiceStatus || r.status || '').toUpperCase();
+    return !isInvoiceDraft(r) && life !== 'VOID' && r.fiscalRequired !== false && !r.fiscalReceipt
+      && !['FISCALISED', 'PENDING', 'SUBMITTED'].includes(r.fiscalStatus);
   };
 
   const columns: ColumnsType<any> = [
@@ -238,11 +246,12 @@ export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { cust
         : <span className={`text-[13px] font-semibold ${Number(v) > 0 ? 'text-[#F97316]' : 'text-[#16A34A]'}`}>{fmtMoney(Number(v || 0))}</span>
     ) },
     { title: 'Status', key: 'displayStatus', width: 150, render: (_v, r) => <StatusPill status={invoiceDisplayStatus(r)} /> },
+    { title: 'Fiscal Status', key: 'fiscalDisplayStatus', width: 130, render: (_v, r) => <StatusPill status={fiscalDisplayStatus(r)} /> },
     { ...ACTIONS_COL, render: (_, r: any) => (
       <RowActionsMenu items={[
         { key: 'view', label: isInvoiceDraft(r) ? 'Edit' : 'View', icon: <EyeOutlined />, onClick: () => router.push(`/sales/invoices/${r.id}/edit`) },
         { key: 'post', label: 'Save & Post', icon: <FileDoneOutlined />, hidden: !isInvoiceDraft(r), onClick: () => post(r) },
-        { key: 'fiscal', label: 'Fiscalise', icon: <RobotOutlined />, hidden: !canFiscal(r), confirm: { title: `Fiscalise invoice ${r.invoiceNo}?`, content: 'This submits the invoice to the ZIMRA FDMS using the branch\'s fiscal device (opening a fiscal day if needed) and stores the fiscal receipt. This cannot be undone.', okText: 'Fiscalise' }, onClick: () => fiscal(r) },
+        { key: 'fiscal', label: 'Fiscalise', icon: <RobotOutlined />, hidden: !canFiscal(r), confirm: { title: `Confirm invoice fiscalisation`, content: `Invoice: ${r.invoiceNo}\nCustomer: ${r.customer?.name || '—'}\nInvoice amount: ${fmtMoney(r.total)}\nPayment status: ${invoiceDisplayStatus(r)}\nCurrent fiscal status: ${fiscalDisplayStatus(r)}\nEnvironment: ${String(fiscalConfig.data?.environment || fiscalConfig.data?.mode || 'MOCK').toUpperCase()}\n\nYou are about to submit this invoice for fiscalisation. Once accepted, the fiscal transaction cannot be freely edited or submitted again.`, okText: 'Confirm Fiscalisation' }, onClick: () => fiscal(r) },
         { key: 'delete', label: 'Delete', icon: <DeleteOutlined />, danger: true, hidden: !isInvoiceDraft(r), confirm: 'Delete invoice?', onClick: () => del(r) },
       ]} />
     ) },

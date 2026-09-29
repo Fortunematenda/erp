@@ -55,6 +55,7 @@ export class FiscalisationController {
   @UseGuards(PermissionsGuard) @RequirePermissions('fiscalisation.configuration.manage') @Post('environment/switch') switchEnvironment(@Req() req: any, @Body() body: { target: string; reason?: string }) { return this.fiscal.switchEnvironment(companyIdOf(req.user), this.userId(req), body?.target, body?.reason || ''); }
   @UseGuards(PermissionsGuard) @RequirePermissions('fiscalisation.configuration.manage') @Post('production/activate') activateProduction(@Req() req: any, @Body() body: { confirm?: boolean; reason?: string }) { return this.fiscal.activateProduction(companyIdOf(req.user), this.userId(req), body || {}); }
   @UseGuards(PermissionsGuard) @RequirePermissions('fiscalisation.view') @Get('integration-logs') integrationLogs(@Req() req: any, @Query() q: any) { return this.fiscal.integrationLogs(companyIdOf(req.user), q); }
+  @UseGuards(PermissionsGuard) @RequirePermissions('fiscalisation.configuration.manage') @Post('reconcile') reconcile(@Req() req: any) { return this.fiscal.reconcileFiscalStatuses(companyIdOf(req.user)); }
 
   // ---------- Operations ----------
   @UseGuards(PermissionsGuard) @RequirePermissions('fiscalisation.view') @Get('dashboard') dashboard(@Req() req: any) { return this.fiscal.dashboard(companyIdOf(req.user)); }

@@ -81,10 +81,9 @@ export class FiscalisationService {
       const res = await this.providerSubmit(a.payload, a.environment);
       await this.prisma.$transaction(async (tx) => {
         await tx.fiscalReceipt.update({ where: { id: a.receiptId }, data: { status: 'FISCALISED', zimraReceiptId: res.receiptID, serverSignature: res.receiptServerSignature, rawResponse: res, submittedAt: new Date(), attemptCount: { increment: 1 }, lastAttemptAt: new Date() } });
-        const target: any = {};
-        if (a.link.invoiceId) target.invoice = { update: { fiscalStatus: 'FISCALISED' } };
-        if (a.link.creditNoteId) target.creditNote = { update: { fiscalStatus: 'FISCALISED' } };
-        if (a.link.debitNoteId) target.debitNote = { update: { fiscalStatus: 'FISCALISED' } };
+        if (a.link.invoiceId) await tx.salesInvoice.update({ where: { id: a.link.invoiceId }, data: { fiscalStatus: 'FISCALISED' } });
+        if (a.link.creditNoteId) await tx.creditNote.update({ where: { id: a.link.creditNoteId }, data: { fiscalStatus: 'FISCALISED' } });
+        if (a.link.debitNoteId) await tx.debitNote.update({ where: { id: a.link.debitNoteId }, data: { fiscalStatus: 'FISCALISED' } });
         await tx.fiscalDay.update({ where: { deviceId_dayNo: { deviceId: a.deviceId, dayNo: a.fiscalDayNo } }, data: { receiptCount: { increment: 1 }, grossTotal: { increment: a.payload.total }, taxTotal: { increment: a.payload.tax } } });
         await tx.fiscalIntegrationLog.create({ data: { deviceId: a.deviceId, operation: 'submitReceipt', status: 'OK', environment: a.environment as any, request: a.payload, response: res } });
       });
@@ -101,7 +100,14 @@ export class FiscalisationService {
     if (inv.status === 'DRAFT') throw new BadRequestException('Post invoice before fiscalisation');
     if (!inv.fiscalRequired) throw new BadRequestException('Invoice does not require fiscalisation');
     await this.assertTaxMapped(companyId, deviceId, inv.lines);
-    if (inv.fiscalReceipt) return inv.fiscalReceipt;
+    if (inv.fiscalReceipt) {
+      // Authoritative: an accepted receipt means the document is FISCALISED, even if a
+      // stale status field says READY. Reconcile rather than trusting the stale value.
+      if (inv.fiscalReceipt.status === 'FISCALISED' && inv.fiscalStatus !== 'FISCALISED') {
+        await this.prisma.salesInvoice.update({ where: { id: inv.id }, data: { fiscalStatus: 'FISCALISED' } });
+      }
+      return inv.fiscalReceipt;
+    }
     const d = await this.prisma.fiscalDevice.findFirst({ where: { id: deviceId, branch: { companyId } } });
     if (!d || d.dayStatus !== 'OPEN') throw new BadRequestException('Fiscal day is not open');
     const allocated = await this.allocate(deviceId);
@@ -116,7 +122,12 @@ export class FiscalisationService {
     const cn = await this.prisma.creditNote.findFirst({ where: { id: creditNoteId, companyId }, include: { lines: true, invoice: { include: { fiscalReceipt: true } }, fiscalReceipt: true, customer: true } });
     if (!cn) throw new BadRequestException('Credit note not found');
     if (cn.status === 'DRAFT') throw new BadRequestException('Post credit note before fiscalisation');
-    if (cn.fiscalReceipt) throw new BadRequestException('Credit note already has fiscal receipt');
+    if (cn.fiscalReceipt) {
+      if (cn.fiscalReceipt.status === 'FISCALISED' && cn.fiscalStatus !== 'FISCALISED') {
+        await this.prisma.creditNote.update({ where: { id: cn.id }, data: { fiscalStatus: 'FISCALISED' } });
+      }
+      return cn.fiscalReceipt;
+    }
     await this.assertTaxMapped(companyId, deviceId, cn.lines);
     const original = cn.invoice?.fiscalReceipt;
     if (!cn.invoice || !original) throw new BadRequestException('Credit note must reference a fiscalised invoice');
@@ -133,7 +144,12 @@ export class FiscalisationService {
     const dn = await this.prisma.debitNote.findFirst({ where: { id: debitNoteId, companyId }, include: { lines: true, invoice: { include: { fiscalReceipt: true } }, fiscalReceipt: true, customer: true } });
     if (!dn) throw new BadRequestException('Debit note not found');
     if (dn.status === 'DRAFT') throw new BadRequestException('Post debit note before fiscalisation');
-    if (dn.fiscalReceipt) throw new BadRequestException('Debit note already has fiscal receipt');
+    if (dn.fiscalReceipt) {
+      if (dn.fiscalReceipt.status === 'FISCALISED' && dn.fiscalStatus !== 'FISCALISED') {
+        await this.prisma.debitNote.update({ where: { id: dn.id }, data: { fiscalStatus: 'FISCALISED' } });
+      }
+      return dn.fiscalReceipt;
+    }
     await this.assertTaxMapped(companyId, deviceId, dn.lines);
     const d = await this.prisma.fiscalDevice.findFirst({ where: { id: deviceId, branch: { companyId } } });
     if (!d || d.dayStatus !== 'OPEN') throw new BadRequestException('Fiscal day is not open');
@@ -674,6 +690,28 @@ export class FiscalisationService {
     if (q.environment) where.environment = q.environment;
     if (q.operation) where.operation = q.operation;
     return this.prisma.fiscalIntegrationLog.findMany({ where, include: { device: { include: { branch: true } } }, orderBy: { createdAt: 'desc' }, take: 300 });
+  }
+
+  /**
+   * Safe reconciliation: any document with an ACCEPTED fiscal receipt must read FISCALISED.
+   * Only touches documents with verifiable acceptance evidence; never marks unaccepted
+   * receipts as fiscalised, and never creates receipts.
+   */
+  async reconcileFiscalStatuses(companyId: string) {
+    const receipts = await this.prisma.fiscalReceipt.findMany({
+      where: { status: 'FISCALISED', OR: [{ invoice: { companyId } }, { creditNote: { companyId } }, { debitNote: { companyId } }] },
+      select: { invoiceId: true, creditNoteId: true, debitNoteId: true },
+    });
+    const invIds = receipts.map((r) => r.invoiceId).filter(Boolean) as string[];
+    const cnIds = receipts.map((r) => r.creditNoteId).filter(Boolean) as string[];
+    const dnIds = receipts.map((r) => r.debitNoteId).filter(Boolean) as string[];
+    const [i, c, d] = await Promise.all([
+      invIds.length ? this.prisma.salesInvoice.updateMany({ where: { id: { in: invIds }, companyId, fiscalStatus: { not: 'FISCALISED' } }, data: { fiscalStatus: 'FISCALISED' } }) : Promise.resolve({ count: 0 }),
+      cnIds.length ? this.prisma.creditNote.updateMany({ where: { id: { in: cnIds }, companyId, fiscalStatus: { not: 'FISCALISED' } }, data: { fiscalStatus: 'FISCALISED' } }) : Promise.resolve({ count: 0 }),
+      dnIds.length ? this.prisma.debitNote.updateMany({ where: { id: { in: dnIds }, companyId, fiscalStatus: { not: 'FISCALISED' } }, data: { fiscalStatus: 'FISCALISED' } }) : Promise.resolve({ count: 0 }),
+    ]);
+    await this.audit.log(companyId, undefined, 'fiscal.reconcile', 'FiscalReceipt', undefined, { module: 'fiscalisation', metadata: { invoices: i.count, creditNotes: c.count, debitNotes: d.count } });
+    return { invoices: i.count, creditNotes: c.count, debitNotes: d.count };
   }
 }
 

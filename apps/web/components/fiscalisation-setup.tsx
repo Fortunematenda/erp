@@ -206,6 +206,7 @@ export function FiscalisationSetup() {
           <div className="flex items-center gap-3">
             <Tag color={rdMeta.color} className="!m-0">{rdMeta.label}</Tag>
             <Button type="primary" icon={<RocketOutlined />} onClick={() => setWizardOpen(true)}>Setup Wizard</Button>
+            <Button icon={<SyncOutlined />} loading={busy === 'reconcile'} onClick={() => run('reconcile', () => api('/fiscalisation/reconcile', { method: 'POST' }), 'Fiscal statuses reconciled from accepted receipts')}>Reconcile statuses</Button>
             <Segmented
               value={env}
               onChange={(v) => switchEnv(String(v))}
