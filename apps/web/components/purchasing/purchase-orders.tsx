@@ -1,15 +1,14 @@
 'use client';
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { App, Button, Card, DatePicker, Descriptions, Drawer, Empty, Form, Input, InputNumber, Select, Space, Table, Tabs, Tag, Alert } from 'antd';
+import { App, Alert, Button, Card, ConfigProvider, DatePicker, Descriptions, Drawer, Empty, Form, Input, InputNumber, Select, Space, Table, Tabs, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { PlusOutlined, PrinterOutlined, ShoppingCartOutlined, SwapOutlined, FileAddOutlined, EyeOutlined, EditOutlined, CheckCircleOutlined, CloseOutlined, SyncOutlined } from '@ant-design/icons';
+import { PlusOutlined, PrinterOutlined, ShoppingCartOutlined, SwapOutlined, FileAddOutlined, EyeOutlined, EditOutlined, CheckCircleOutlined, CloseOutlined, SyncOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/navigation';
 import dayjs from 'dayjs';
 import { api } from '@/lib/api';
 import { useMeta } from '@/lib/meta';
 import { StatusTag } from '@/components/crud-page';
-import { LineItems } from '@/components/line-items';
 import { RowActionsMenu, ACTIONS_COL } from '@/components/row-actions-menu';
 import { Can, useAuthPermissions } from '@/components/Can';
 import { SkeletonTable, SectionLoading } from '@/components/loading';
@@ -128,32 +127,99 @@ function PoFormDrawer({ open, editId, onClose, onSaved }: { open: boolean; editI
   }
 
   return (
-    <Drawer open={open} onClose={onClose} width={920} destroyOnHidden afterOpenChange={(v) => { if (v) fill(); }}
+    <Drawer open={open} onClose={onClose} width={980} destroyOnHidden afterOpenChange={(v) => { if (v) fill(); }}
       title={editId ? 'Edit Purchase Order' : 'New Purchase Order'}
-      extra={<Space><Button onClick={onClose}>Cancel</Button><Button type="primary" loading={saving} onClick={submit}>{editId ? 'Save' : 'Create'}</Button></Space>}>
-      <Form form={form} layout="vertical">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <Form.Item label="Supplier" name="supplierId" rules={[{ required: true, message: 'Select a supplier' }]} className="col-span-2">
-            <Select showSearch optionFilterProp="label" onChange={onSupplier} options={(meta.data?.suppliers || []).map((s: any) => ({ label: s.name, value: s.id }))} />
-          </Form.Item>
-          <Form.Item label="PO Date" name="orderDate"><DatePicker className="w-full" /></Form.Item>
-          <Form.Item label="Expected Date" name="expectedDate"><DatePicker className="w-full" /></Form.Item>
-          <Form.Item label="Warehouse" name="warehouseId"><Select allowClear options={(meta.data?.warehouses || []).map((w: any) => ({ label: w.name, value: w.id }))} /></Form.Item>
-          <Form.Item label="Currency" name="currency"><Select options={['USD', 'ZAR', 'ZWG', 'EUR', 'GBP'].map((c) => ({ label: c, value: c }))} /></Form.Item>
-          <Form.Item label="Payment Terms" name="paymentTerms"><Select allowClear options={['Due on Receipt', 'Net 7', 'Net 14', 'Net 30', 'Net 60'].map((t) => ({ label: t, value: t }))} /></Form.Item>
-          <Form.Item label="Reference" name="supplierReference"><Input /></Form.Item>
-          <Form.Item label="Ship / Receive To" name="shipTo" className="col-span-2"><Input /></Form.Item>
-          <Form.Item label="Notes" name="memo" className="col-span-2"><Input.TextArea rows={2} /></Form.Item>
+      styles={{ body: { padding: '18px 24px 8px' } }}
+      footer={
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-6 text-[13px]">
+            <span className="text-[#64748b]">Subtotal <b className="text-[#171a2e] ml-1">{fmtMoney(totals.sub)}</b></span>
+            <span className="text-[#64748b]">Tax <b className="text-[#171a2e] ml-1">{fmtMoney(totals.tax)}</b></span>
+            <span className="text-[14px] text-[#64748b]">Total <b className="text-[#003366] text-[16px] ml-1">{fmtMoney(totals.total)}</b></span>
+          </div>
+          <Space>
+            <Button onClick={onClose} disabled={saving}>Cancel</Button>
+            <Button type="primary" loading={saving} onClick={submit}>{saving ? 'Creating…' : editId ? 'Save Purchase Order' : 'Create Purchase Order'}</Button>
+          </Space>
         </div>
-        <div className="text-[13px] font-semibold text-[#171a2e] mb-2">Items</div>
-        <LineItems form={form} lines="lines" items={meta.data?.items || []} priceKey="purchaseCost" />
-        <div className="flex justify-end gap-8 mt-4 text-[13px]">
-          <span className="text-[#64748b]">Subtotal <b className="text-[#171a2e]">{fmtMoney(totals.sub)}</b></span>
-          <span className="text-[#64748b]">Tax <b className="text-[#171a2e]">{fmtMoney(totals.tax)}</b></span>
-          <span className="text-[#64748b]">Total <b className="text-[#003366]">{fmtMoney(totals.total)}</b></span>
-        </div>
-      </Form>
+      }>
+      <ConfigProvider componentSize="large">
+        <Form form={form} layout="vertical" requiredMark={false} className="nex-po-form">
+          <div className="nex-form-section">Purchase Details</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-4">
+            <Form.Item label="Supplier" name="supplierId" rules={[{ required: true, message: 'Select a supplier' }]} className="sm:col-span-2">
+              <Select showSearch optionFilterProp="label" placeholder="Select supplier" onChange={onSupplier} options={(meta.data?.suppliers || []).map((s: any) => ({ label: s.name, value: s.id }))} />
+            </Form.Item>
+            <Form.Item label="PO Date" name="orderDate"><DatePicker className="w-full" /></Form.Item>
+            <Form.Item label="Expected Date" name="expectedDate"><DatePicker className="w-full" /></Form.Item>
+            <Form.Item label="Warehouse" name="warehouseId"><Select allowClear placeholder="Warehouse" options={(meta.data?.warehouses || []).map((w: any) => ({ label: w.name, value: w.id }))} /></Form.Item>
+            <Form.Item label="Currency" name="currency"><Select options={['USD', 'ZAR', 'ZWG', 'EUR', 'GBP'].map((c) => ({ label: c, value: c }))} /></Form.Item>
+            <Form.Item label="Payment Terms" name="paymentTerms"><Select allowClear placeholder="Terms" options={['Due on Receipt', 'Net 7', 'Net 14', 'Net 30', 'Net 60'].map((t) => ({ label: t, value: t }))} /></Form.Item>
+            <Form.Item label="Reference" name="supplierReference"><Input placeholder="Optional" /></Form.Item>
+            <Form.Item label="Ship / Receive To" name="shipTo" className="sm:col-span-2"><Input placeholder="Delivery address" /></Form.Item>
+            <Form.Item label="Notes" name="memo" className="sm:col-span-2"><Input placeholder="Internal notes" /></Form.Item>
+          </div>
+
+          <div className="nex-form-section mt-5">Items</div>
+          <div className="overflow-x-auto -mx-1 px-1">
+            <div className="min-w-[860px]">
+              <div className="grid grid-cols-[minmax(180px,2.2fr)_minmax(160px,1.8fr)_110px_120px_80px_120px_40px] gap-x-3 px-1 pb-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#94a3b8] border-b border-[#e6e9f2]">
+                <span>Item</span><span>Description</span><span className="text-right">Qty</span><span className="text-right">Unit Cost</span><span className="text-right">Tax</span><span className="text-right">Amount</span><span />
+              </div>
+              <Form.List name="lines">
+                {(fields, { add, remove }) => (
+                  <>
+                    {fields.map((field) => (
+                      <PoLineRow key={field.key} field={field} form={form} items={meta.data?.items || []} onRemove={remove} />
+                    ))}
+                    <Button type="dashed" block icon={<PlusOutlined />} onClick={() => add({ quantity: 1, unitPrice: 0, taxRate: 0 })} className="mt-3">Add Line</Button>
+                  </>
+                )}
+              </Form.List>
+            </div>
+          </div>
+        </Form>
+      </ConfigProvider>
     </Drawer>
+  );
+}
+
+function PoLineRow({ field, form, items, onRemove }: any) {
+  const { key, name, ...rest } = field;
+  const unit = Form.useWatch(['lines', name, 'unit'], form);
+  const qty = Form.useWatch(['lines', name, 'quantity'], form);
+  const price = Form.useWatch(['lines', name, 'unitPrice'], form);
+  function applyItem(itemId: string) {
+    const it = (items || []).find((x: any) => x.id === itemId);
+    if (!it) return;
+    const patch: any[] = [
+      { name: ['lines', name, 'unitPrice'], value: Number(it.purchaseCost || 0) },
+      { name: ['lines', name, 'unit'], value: it.unit },
+    ];
+    if (!form.getFieldValue(['lines', name, 'description'])) patch.push({ name: ['lines', name, 'description'], value: it.purchaseDescription || it.name });
+    form.setFields(patch);
+  }
+  return (
+    <div className="grid grid-cols-[minmax(180px,2.2fr)_minmax(160px,1.8fr)_110px_120px_80px_120px_40px] gap-x-3 items-start px-1 py-1.5 border-b border-[#f0f1f6]">
+      <Form.Item {...rest} name={[name, 'itemId']} className="!mb-0">
+        <Select showSearch allowClear optionFilterProp="label" placeholder="Select item" options={(items || []).map((i: any) => ({ label: [i.sku, i.name].filter(Boolean).join(' — '), value: i.id }))} onChange={applyItem} />
+      </Form.Item>
+      <Form.Item {...rest} name={[name, 'description']} className="!mb-0" rules={[{ required: true, message: 'Description' }]}>
+        <Input placeholder="Description" />
+      </Form.Item>
+      <Form.Item {...rest} name={[name, 'quantity']} className="!mb-0" rules={[{ required: true, message: 'Qty' }]}>
+        <InputNumber className="w-full" min={0} style={{ textAlign: 'right' }} addonAfter={unit || undefined} />
+      </Form.Item>
+      <Form.Item {...rest} name={[name, 'unitPrice']} className="!mb-0" rules={[{ required: true, message: 'Cost' }]}>
+        <InputNumber className="w-full" min={0} prefix="$" style={{ textAlign: 'right' }} />
+      </Form.Item>
+      <Form.Item {...rest} name={[name, 'taxRate']} className="!mb-0">
+        <InputNumber className="w-full" min={0} style={{ textAlign: 'right' }} />
+      </Form.Item>
+      <Form.Item {...rest} name={[name, 'unit']} hidden><Input /></Form.Item>
+      <div className="flex items-center h-10 justify-end text-[13px] font-semibold text-[#003366]">{fmtMoney(Number(qty || 0) * Number(price || 0))}</div>
+      <Button type="text" danger icon={<DeleteOutlined />} onClick={() => onRemove(name)} className="!h-10" />
+    </div>
   );
 }
 
