@@ -43,7 +43,6 @@ export function PurchaseOrdersWorkspace() {
     { title: 'PO No', dataIndex: 'poNo', width: 120, render: (v, r: any) => <a className="font-mono text-[12px] text-[#1d5fb5]" onClick={() => setDetailId(r.id)}>{v}</a> },
     { title: 'Supplier', width: 170, render: (_v, r: any) => r.supplier?.name || '—' },
     { title: 'Date', dataIndex: 'orderDate', width: 110, render: fmtDate },
-    { title: 'Expected', dataIndex: 'expectedDate', width: 110, render: (v) => v ? fmtDate(v) : '—' },
     { title: 'Total', dataIndex: 'total', width: 110, align: 'right', render: (v) => fmtMoney(v) },
     { title: 'Received', width: 130, align: 'right', render: (_v, r: any) => <span className="text-[12px]">{fmtNumber(r.progress?.received)} / {fmtNumber(r.progress?.ordered)}</span> },
     { title: 'Billed', width: 130, align: 'right', render: (_v, r: any) => <span className="text-[12px]">{fmtNumber(r.progress?.billed)} / {fmtNumber(r.progress?.ordered)}</span> },
