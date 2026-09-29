@@ -1,8 +1,16 @@
 'use client';
-import { useRouter } from 'next/navigation';
+import { Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from 'antd';
 import { CloseOutlined } from '@ant-design/icons';
 import { EnterBillForm } from '@/components/enter-bill-form';
+
+function EnterBillInner() {
+  const router = useRouter();
+  const sp = useSearchParams();
+  const purchaseOrderId = sp.get('purchaseOrderId') || undefined;
+  return <EnterBillForm variant="page" initialPurchaseOrderId={purchaseOrderId} onSaved={() => router.push('/expenses/bills')} onCancel={() => router.push('/expenses/bills')} />;
+}
 
 export default function EnterBillPage() {
   const router = useRouter();
@@ -16,7 +24,9 @@ export default function EnterBillPage() {
         <Button onClick={() => router.push('/expenses/bills')}>Cancel</Button>
       </div>
 
-      <EnterBillForm variant="page" onSaved={() => router.push('/expenses/bills')} onCancel={() => router.push('/expenses/bills')} />
+      <Suspense fallback={<div className="text-[#8a90ad]">Loading bill form…</div>}>
+        <EnterBillInner />
+      </Suspense>
     </div>
   );
 }

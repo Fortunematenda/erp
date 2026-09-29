@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { App, Button, Card, DatePicker, Descriptions, Drawer, Empty, Form, Input, InputNumber, Select, Space, Table, Tabs, Tag, Alert } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { PlusOutlined, PrinterOutlined, ShoppingCartOutlined, SwapOutlined, FileAddOutlined, EyeOutlined, EditOutlined, CheckCircleOutlined, CloseOutlined, SyncOutlined } from '@ant-design/icons';
+import { useRouter } from 'next/navigation';
 import dayjs from 'dayjs';
 import { api } from '@/lib/api';
 import { useMeta } from '@/lib/meta';
@@ -19,6 +20,7 @@ const OPEN_STATUSES = ['OPEN', 'APPROVED', 'PART_RECEIVED', 'RECEIVED'];
 export function PurchaseOrdersWorkspace() {
   const { message } = App.useApp();
   const qc = useQueryClient();
+  const router = useRouter();
   const meta = useMeta();
   const { permissions } = useAuthPermissions();
   const can = (p: string) => permissions.includes(p);
@@ -30,7 +32,6 @@ export function PurchaseOrdersWorkspace() {
   const [editId, setEditId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [receiveId, setReceiveId] = useState<string | null>(null);
-  const [billId, setBillId] = useState<string | null>(null);
 
   const invalidate = () => ['/procurement/purchase-orders', '/procurement/grns', '/procurement/supplier-invoices', '/procurement/supplier-payments', '/inventory/stock', '/procurement/dashboard'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 
@@ -54,7 +55,7 @@ export function PurchaseOrdersWorkspace() {
         ...(r.status === 'DRAFT' && canManage ? [{ key: 'edit', label: 'Edit Draft', icon: <EditOutlined />, onClick: () => { setEditId(r.id); setFormOpen(true); } }] : []),
         ...(r.status === 'DRAFT' && canApprove ? [{ key: 'approve', label: 'Approve', icon: <CheckCircleOutlined />, onClick: () => act(`/procurement/purchase-orders/${r.id}/status`, 'PATCH', { status: 'APPROVED' }, 'Purchase order approved') }] : []),
         ...(OPEN_STATUSES.includes(r.status) && (r.progress?.remainingToReceive > 0) && r.progress?.receivingRequired && (canApprove || canManage) ? [{ key: 'receive', label: 'Receive Items', icon: <SwapOutlined />, onClick: () => setReceiveId(r.id) }] : []),
-        ...(OPEN_STATUSES.includes(r.status) && (r.progress?.remainingToBill > 0) && canBill ? [{ key: 'bill', label: 'Create Bill', icon: <FileAddOutlined />, onClick: () => setBillId(r.id) }] : []),
+        ...(OPEN_STATUSES.includes(r.status) && (r.progress?.remainingToBill > 0) && canBill ? [{ key: 'bill', label: 'Create Bill', icon: <FileAddOutlined />, onClick: () => router.push(`/expenses/enter-bill?purchaseOrderId=${r.id}`) }] : []),
         { key: 'print', label: 'Print / PDF', icon: <PrinterOutlined />, onClick: () => window.open(`/documents/purchase-order/${r.id}`, '_blank') },
         ...(OPEN_STATUSES.includes(r.status) && canApprove ? [{ key: 'close', label: 'Close', onClick: () => act(`/procurement/purchase-orders/${r.id}/status`, 'PATCH', { status: 'CLOSED' }, 'Purchase order closed') }] : []),
         ...(['DRAFT', 'OPEN', 'APPROVED'].includes(r.status) && canApprove ? [{ key: 'cancel', label: 'Cancel', danger: true, icon: <CloseOutlined />, onClick: () => act(`/procurement/purchase-orders/${r.id}/status`, 'PATCH', { status: 'CANCELLED' }, 'Purchase order cancelled') }] : []),
@@ -75,9 +76,8 @@ export function PurchaseOrdersWorkspace() {
       )}
 
       <PoFormDrawer open={formOpen} editId={editId} onClose={() => setFormOpen(false)} onSaved={invalidate} />
-      <PoDetailDrawer id={detailId} onClose={() => setDetailId(null)} onReceive={(id) => { setDetailId(null); setReceiveId(id); }} onBill={(id) => { setDetailId(null); setBillId(id); }} onChanged={invalidate} />
+      <PoDetailDrawer id={detailId} onClose={() => setDetailId(null)} onReceive={(id) => { setDetailId(null); setReceiveId(id); }} onBill={(id) => { setDetailId(null); router.push(`/expenses/enter-bill?purchaseOrderId=${id}`); }} onChanged={invalidate} />
       <ReceiveDrawer id={receiveId} onClose={() => setReceiveId(null)} onDone={invalidate} />
-      <CreateBillDrawer id={billId} onClose={() => setBillId(null)} onDone={invalidate} />
     </div>
   );
 }

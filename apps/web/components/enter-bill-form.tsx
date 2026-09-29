@@ -23,7 +23,7 @@ function dueFromTerms(invDate: any, terms?: string) {
 let keySeq = 1;
 const newLine = () => ({ key: keySeq++, itemId: undefined, description: '', quantity: 1, unitPrice: 0, taxRate: 0, accountId: '', purchaseOrderLineId: undefined, itemType: undefined, unit: undefined });
 
-export function EnterBillForm({ onSaved, variant = 'tab', initialSupplierId, onCancel }: { onSaved?: () => void; variant?: 'page' | 'tab'; initialSupplierId?: string; onCancel?: () => void }) {
+export function EnterBillForm({ onSaved, variant = 'tab', initialSupplierId, initialPurchaseOrderId, onCancel }: { onSaved?: () => void; variant?: 'page' | 'tab'; initialSupplierId?: string; initialPurchaseOrderId?: string; onCancel?: () => void }) {
   const { message } = App.useApp();
   const qc = useQueryClient();
   const meta = useMeta();
@@ -98,11 +98,14 @@ export function EnterBillForm({ onSaved, variant = 'tab', initialSupplierId, onC
         unitPrice: Number(l.unitPrice), taxRate: taxRateOf(itemById.get(l.itemId)?.purchaseTaxCode), unit: l.unit,
         accountId: '', purchaseOrderLineId: l.purchaseOrderLineId, itemType: l.itemId ? normalizeItemType(itemById.get(l.itemId)?.type) : undefined,
       })));
-      if (!currency && data.currency) setCurrency(data.currency);
+      if (data.supplierId) setSupplierId((prev) => prev || data.supplierId);
+      if (data.currency) setCurrency(data.currency);
       setPoModalOpen(false);
       message.success(`Loaded ${poLines.length} line(s) from ${data.poNo}`);
     } catch (e: any) { message.error(e.message); }
   }
+
+  useEffect(() => { if (initialPurchaseOrderId) addFromPo(initialPurchaseOrderId); }, [initialPurchaseOrderId]); // eslint-disable-line
 
   // Matching preview (from the selected PO's bill-lines)
   const matching = useMemo(() => {
