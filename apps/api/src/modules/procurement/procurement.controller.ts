@@ -948,11 +948,13 @@ export class ProcurementController {
       }
       await tx.supplierPayment.update({ where: { id }, data: { status: 'REVERSED', reversedAt: new Date(), reversalReason: body.reason, reversalOfId: payment.reversalOfId || null } });
     });
+    const prepayCode = Number(payment.unapplied) > 0 ? await this.prepayCode(companyId, Number(payment.unapplied)) : null;
     await this.posting.postJournal(companyId, {
       date: new Date(), description: `Reverse payment ${payment.paymentNo}`, reference: `${payment.paymentNo}-REV`, sourceType: 'SUPPLIER_PAYMENT_REVERSAL', sourceId: payment.id,
       lines: [
-        { code: '2000', debit: Number(payment.applied), credit: 0, description: 'Reverse accounts payable settlement' },
-        { code: payment.payFromAccountCode || '1000', debit: 0, credit: Number(payment.amount), description: 'Cash / bank reversal' },
+        { code: payment.payFromAccountCode || '1000', debit: Number(payment.amount), credit: 0, description: 'Cash / bank reversal' },
+        { code: '2000', debit: 0, credit: Number(payment.applied), description: 'Restore accounts payable' },
+        ...(prepayCode && Number(payment.unapplied) > 0 ? [{ code: prepayCode, debit: 0, credit: Number(payment.unapplied), description: 'Reverse supplier prepayment' }] : []),
       ],
     }).catch((e: any) => { throw new BadRequestException(e.message || 'Reversal GL posting failed'); });
     await this.audit.log(companyId, req.user.sub, 'REVERSE', 'SupplierPayment', id, { paymentNo: payment.paymentNo, reason: body.reason });

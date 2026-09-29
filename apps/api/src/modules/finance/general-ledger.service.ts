@@ -122,6 +122,8 @@ export class GeneralLedgerService {
       REVERSAL: { label: 'Reversal', route: '/finance/journals' },
       ASSET_DISPOSAL: { label: 'Asset Disposal', route: '/finance/accounts' },
       COGS: { label: 'Cost of Goods Sold', route: '/finance/accounts' },
+      COGS_DIRECT_INVOICE: { label: 'Cost of Goods Sold', route: '/sales/invoices' },
+      GOODS_RECEIPT: { label: 'Goods Receipt', route: '/procurement' },
       DEPRECIATION: { label: 'Depreciation', route: '/finance/accounts' },
       PAYROLL: { label: 'Payroll', route: '/finance/accounts' },
     };

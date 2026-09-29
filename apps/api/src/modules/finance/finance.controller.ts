@@ -1210,13 +1210,26 @@ export class FinanceController {
   @UseGuards(PermissionsGuard) @RequirePermissions('finance.vendorcredits.manage')
   @Post('vendor-credits/:id/void') async voidVendorCredit(@Req() req: any, @Param('id') id: string, @Body() body: any) {
     const companyId = companyIdOf(req.user);
-    const vc = await this.prisma.vendorCredit.findFirst({ where: { id, companyId }, include: { applications: { where: { status: 'ACTIVE' } }, refunds: true } });
+    const vc = await this.prisma.vendorCredit.findFirst({ where: { id, companyId }, include: { lines: true, applications: { where: { status: 'ACTIVE' } }, refunds: true } });
     if (!vc) throw new BadRequestException('Vendor credit not found');
     if (vc.status === 'VOID') throw new BadRequestException('Already void');
     if (vc.applications.length || vc.refunds.length) throw new BadRequestException('Vendor credit has applications/refunds. Reverse them first.');
     if (!body?.reason) throw new BadRequestException('Void reason required');
     await this.prisma.vendorCredit.update({ where: { id }, data: { status: 'VOID', voidReason: body.reason } });
-    if (vc.status === 'POSTED') { try { await this.posting.postJournal(companyId, { date: new Date(), description: `Void vendor credit ${vc.vendorCreditNo}`, reference: `${vc.vendorCreditNo}-VOID`, sourceType: 'VENDOR_CREDIT_VOID', sourceId: vc.id, lines: [{ code: '2000', debit: 0, credit: Number(vc.total), description: 'AP reversal' }, { code: '6000', debit: Number(vc.subtotal), credit: 0, description: 'Expense reversal' }] }); } catch {} }
+    if (vc.status === 'POSTED') {
+      try {
+        const lines: any[] = [];
+        for (const l of vc.lines) {
+          const acc = l.accountId ? await this.prisma.ledgerAccount.findFirst({ where: { id: l.accountId, companyId } }) : null;
+          const code = acc?.code || (l.itemId ? '1200' : '6000');
+          const net = Number(l.lineTotal) - Number(l.taxAmount || 0);
+          lines.push({ code, debit: Number(net.toFixed(2)), credit: 0, description: l.description });
+        }
+        if (Number(vc.taxTotal) > 0) lines.push({ code: '2100', debit: Number(vc.taxTotal), credit: 0, description: 'Input VAT reversal' });
+        lines.push({ code: '2000', debit: 0, credit: Number(vc.total), description: 'Accounts payable reversal' });
+        await this.posting.postJournal(companyId, { date: new Date(), description: `Void vendor credit ${vc.vendorCreditNo}`, reference: `${vc.vendorCreditNo}-VOID`, sourceType: 'VENDOR_CREDIT_VOID', sourceId: vc.id, lines });
+      } catch { /* void state already recorded; journal reversal best-effort */ }
+    }
     await this.audit.log(companyId, req.user.sub, 'VENDOR_CREDIT_VOIDED', 'VendorCredit', id, { reason: body.reason });
     return this.prisma.vendorCredit.findUnique({ where: { id } });
   }
