@@ -16,6 +16,7 @@ import { LineItems } from '@/components/line-items';
 import { useMeta } from '@/lib/meta';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
+import { PurchaseOrdersWorkspace } from '@/components/purchasing/purchase-orders';
 
 function mapLines(lines: any[] | undefined) {
   return (lines || []).map((l: any) => ({
@@ -167,14 +168,7 @@ export default function Procurement() {
         { label: 'Convert → PO', type: 'primary', show: (r: any) => r.status === 'APPROVED', url: (r: any) => `/procurement/requisitions/${r.id}/convert`, done: 'Converted to PO' },
       ]}
     /> },
-    { key: 'orders', label: 'Purchase Orders', children: <ProcDocTab path="/procurement/purchase-orders" invalidates={['/procurement/purchase-orders', '/procurement/grns', '/inventory/stock']} idPrefix="Purchase Order" numberKey="poNo" printType="purchase-order"
-      createFn={(v: any) => ({ supplierId: v.supplierId, orderDate: v.dateRequired?.format('YYYY-MM-DD'), currency: 'USD', lines: mapLines(v.lines) })}
-      actions={[
-        { label: 'Approve', type: 'primary', show: (r: any) => r.status === 'DRAFT', url: (r: any) => `/procurement/purchase-orders/${r.id}/status`, ...statusPatch('APPROVED'), done: 'Purchase order approved' },
-        { label: 'Receive Items', type: 'primary', show: (r: any) => ['APPROVED', 'PART_RECEIVED'].includes(r.status) || ['PARTIALLY_RECEIVED', 'NOT_RECEIVED'].includes(r.receiptStatus), url: (r: any) => `/procurement/purchase-orders/${r.id}/receive`, body: () => ({}), done: 'Receipt confirmed — stock updated' },
-        { label: 'Cancel', danger: true, show: (r: any) => r.status === 'DRAFT' || r.status === 'APPROVED', url: (r: any) => `/procurement/purchase-orders/${r.id}/status`, ...statusPatch('CANCELLED'), done: 'Purchase order cancelled' },
-      ]}
-    /> },
+    { key: 'orders', label: 'Purchase Orders', children: <PurchaseOrdersWorkspace /> },
     { key: 'grns', label: 'GRNs', children: <CrudPage title="Goods Received Notes" path="/procurement/grns" hideCreate hideEdit canDelete
       columns={[
         { title: 'GRN', dataIndex: 'grnNo', width: 120 }, { title: 'PO', render: (_, r: any) => r.purchaseOrder?.poNo || '—' },

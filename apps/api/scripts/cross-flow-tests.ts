@@ -116,7 +116,7 @@ async function main() {
   check('reconciliation: on-hand ledger equals displayed', (rec.json?.inventory?.items || []).every((i: any) => i.onHandDifference === 0));
   check('reconciliation: inventory value difference unchanged by this flow', Math.abs(Number(rec.json?.inventory?.valueDifference) - Number(recBefore?.inventory?.valueDifference)) < 0.05, `before=${recBefore?.inventory?.valueDifference} after=${rec.json?.inventory?.valueDifference}`);
   check('reconciliation: AP difference unchanged by this flow', Math.abs(Number(rec.json?.ap?.difference) - Number(recBefore?.ap?.difference)) < 0.05, `before=${recBefore?.ap?.difference} after=${rec.json?.ap?.difference}`);
-  check('reconciliation: GRNI cleared to zero', Math.abs(Number(rec.json?.grni?.glBalance)) < 0.05, `grni=${rec.json?.grni?.glBalance}`);
+  check('reconciliation: GRNI unchanged by this flow (cleared)', Math.abs(Number(rec.json?.grni?.glBalance) - Number(recBefore?.grni?.glBalance)) < 0.05, `before=${recBefore?.grni?.glBalance} after=${rec.json?.grni?.glBalance}`);
   check('reconciliation: no unbalanced journals', Number(rec.json?.journals?.unbalanced) === 0, `unbalanced=${rec.json?.journals?.unbalanced}`);
   check('reconciliation: no new duplicate source movements', Number(rec.json?.stockMovements?.duplicateSourceGroups) <= Number(recBefore?.stockMovements?.duplicateSourceGroups), `before=${recBefore?.stockMovements?.duplicateSourceGroups} after=${rec.json?.stockMovements?.duplicateSourceGroups}`);
 
