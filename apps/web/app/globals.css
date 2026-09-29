@@ -608,3 +608,23 @@ body {
 .nex-po-form .ant-input-number-group-addon { background: #f8fafc; color: #64748b; font-size: 12px; }
 .nex-form-section { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #94a3b8; margin-bottom: 12px; }
 
+
+/* ---------- Shared compact accounting form (PO + Enter Bill) ---------- */
+.nex-form .ant-form-item { margin-bottom: 0; }
+.nex-form .ant-form-item-label { padding-bottom: 6px; }
+.nex-form .ant-form-item-label > label { font-size: 12px; font-weight: 600; color: #334155; height: auto; }
+.nex-form .ant-input, .nex-form .ant-input-affix-wrapper, .nex-form .ant-select-selector, .nex-form .ant-picker, .nex-form .ant-input-number { border-color: #cbd5e1 !important; }
+.nex-form .ant-input:hover, .nex-form .ant-select:hover .ant-select-selector, .nex-form .ant-picker:hover, .nex-form .ant-input-number:hover { border-color: #94a3b8 !important; }
+.nex-form .ant-input:focus, .nex-form .ant-input-affix-wrapper-focused, .nex-form .ant-select-focused .ant-select-selector, .nex-form .ant-picker-focused, .nex-form .ant-input-number-focused { border-color: #003366 !important; box-shadow: 0 0 0 2px rgba(0,51,102,.12) !important; }
+.nex-form .ant-input::placeholder, .nex-form .ant-select-selection-placeholder, .nex-form .ant-picker-input > input::placeholder, .nex-form .ant-input-number-input::placeholder { color: #94a3b8 !important; opacity: 1; }
+.nex-form .ant-input-number { width: 100%; }
+.nex-form .ant-input-number-group-addon { background: #f8fafc; color: #64748b; font-size: 12px; }
+.nex-form .ant-input[disabled], .nex-form .ant-input-disabled, .nex-form .ant-picker-disabled, .nex-form .ant-select-disabled .ant-select-selector { background: #f1f5f9 !important; color: #475467 !important; }
+.nex-form .ant-picker-disabled input { color: #475467 !important; -webkit-text-fill-color: #475467; }
+.nex-form .ant-select-disabled .ant-select-selection-item { color: #475467 !important; }
+.nex-field-label { font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 6px; display: block; }
+.nex-field-label .req { color: #dc2626; margin-left: 2px; }
+.nex-readonly { min-height: 40px; display: flex; align-items: center; padding: 0 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f1f5f9; color: #334155; font-weight: 500; }
+.nex-items-table .ant-table-thead > tr > th { background: #f8fafc !important; color: #475467 !important; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; border-bottom: 1px solid #e2e8f0 !important; }
+.nex-items-table .ant-table-tbody > tr > td { border-bottom: 1px solid #eef1f6 !important; }
+
