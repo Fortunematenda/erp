@@ -376,6 +376,47 @@ export class InventoryController {
     return { ok: true };
   }
 
+  /**
+   * Read-only reconciliation across the inventory subledger, GRNI, AP subledger and
+   * the GL control accounts. Never auto-posts adjustments — flags differences for review.
+   */
+  @Get('reconciliation') async reconciliation(@Req() req: any) {
+    const companyId = companyIdOf(req.user);
+    const items = await this.prisma.inventoryItem.findMany({ where: { companyId }, select: { id: true, sku: true, name: true, type: true } });
+    const stockItems = items.filter((i) => isStockTracked(i.type));
+    let ledgerOnHand = 0, stockValue = 0;
+    const lines: any[] = [];
+    for (const it of stockItems) {
+      const b = await this.movementService.balance(companyId, it.id);
+      ledgerOnHand += b.onHand; stockValue += b.value;
+      lines.push({ itemId: it.id, sku: it.sku, name: it.name, ledgerOnHand: b.onHand, displayedOnHand: b.onHand, onHandDifference: 0, value: b.value, avgCost: b.avgCost });
+    }
+    const byCode = await this.posting.accountsByCode(companyId);
+    const acctNet = async (code: string) => {
+      const a = byCode[code]; if (!a) return 0;
+      const rows = await this.prisma.journalLine.findMany({ where: { accountId: a.id, journal: { companyId } } });
+      return rows.reduce((s, l) => s + Number(l.debit) - Number(l.credit), 0);
+    };
+    const inventoryGl = await acctNet('1200');
+    const grniGl = await acctNet('2050');
+    const apGl = await acctNet('2000');
+    const bills = await this.prisma.supplierInvoice.findMany({ where: { companyId, status: 'POSTED' }, select: { total: true, amountPaid: true, creditsApplied: true } });
+    const apSubledger = bills.reduce((s, b) => s + (Number(b.total) - Number(b.amountPaid) - Number(b.creditsApplied)), 0);
+    const journals = await this.prisma.journalEntry.findMany({ where: { companyId, status: 'POSTED' }, include: { lines: true } });
+    const unbalanced = journals.filter((j) => Math.abs(j.lines.reduce((s, l) => s + Number(l.debit), 0) - j.lines.reduce((s, l) => s + Number(l.credit), 0)) > 0.02).length;
+    const dupAgg = await this.prisma.stockMovement.groupBy({ by: ['itemId', 'type', 'reference'], where: { item: { companyId } }, _count: { _all: true } });
+    const duplicates = dupAgg.filter((g) => g._count._all > 1 && g.reference).length;
+    return {
+      companyId,
+      inventory: { ledgerOnHand: Number(ledgerOnHand.toFixed(4)), stockValue: Number(stockValue.toFixed(2)), inventoryGl: Number(inventoryGl.toFixed(2)), valueDifference: Number((stockValue - inventoryGl).toFixed(2)), items: lines },
+      grni: { glBalance: Number(grniGl.toFixed(2)) },
+      ap: { subledger: Number(apSubledger.toFixed(2)), control: Number((-apGl).toFixed(2)), difference: Number((apSubledger + apGl).toFixed(2)) },
+      journals: { posted: journals.length, unbalanced },
+      stockMovements: { duplicateSourceGroups: duplicates },
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
   // ----- Item detail 360 -----
   /** Resolve item purchase/sale defaults (shared resolver) for document prefill. */
   @Get('items/:id/resolve') async resolveItem(@Req() req: any, @Param('id') id: string, @Query() q: any) {

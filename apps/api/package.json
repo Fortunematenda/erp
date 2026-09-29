@@ -22,7 +22,8 @@
     "test:ap-payment": "tsx scripts/ap-payment-tests.ts",
     "test:inventory-sales": "tsx scripts/inventory-sales-tests.ts",
     "test:history": "tsx scripts/item-history-tests.ts",
-    "test:gl": "tsx scripts/gl-counterparty-tests.ts"
+    "test:gl": "tsx scripts/gl-counterparty-tests.ts",
+    "test:e2e": "tsx scripts/cross-flow-tests.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
