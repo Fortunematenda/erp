@@ -272,6 +272,7 @@ function PayBillTab({ onPay }: { onPay: (ids: string[]) => void }) {
 function BillDetailModal({ billId, onClose, onPay }: { billId: string; onClose: () => void; onPay: (id: string) => void }) {
   const { data: bill, isLoading } = useQuery({ queryKey: ['/procurement/bills', billId], queryFn: () => api(`/procurement/bills/${billId}`) });
   const [tab, setTab] = useState('details');
+  const related = useQuery({ queryKey: ['/procurement/purchase-orders', bill?.purchaseOrderId, 'related'], queryFn: () => api(`/procurement/purchase-orders/${bill!.purchaseOrderId}/related`), enabled: !!bill?.purchaseOrderId });
   if (isLoading) return <Drawer open onClose={onClose} title="Bill" width={980}><div className="p-4 text-[#8a90ad]">Loading bill…</div></Drawer>;
   if (!bill) return null;
   const payable = bill.status === 'POSTED' && Number(bill.remaining) > 0.005;
@@ -299,10 +300,12 @@ function BillDetailModal({ billId, onClose, onPay }: { billId: string; onClose: 
     { key: 'attachments', label: 'Attachments', children: arr(bill.attachments).length ? <div className="space-y-2">{arr(bill.attachments).map((a: any) => <div key={a.id} className="rounded-xl border p-3 flex items-center gap-3"><FileTextOutlined /><div className="flex-1 truncate">{a.name}</div><Tooltip title="Preview"><Button size="small" icon={<EyeOutlined />} onClick={() => window.open(a.dataUrl, '_blank')} /></Tooltip></div>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No attachments" /> },
     { key: 'flow', label: 'Document Flow', children: <div className="space-y-2">
       <FlowRow type="Purchase Order" ref={bill.purchaseOrder?.poNo || '—'} href={bill.purchaseOrderId ? `/documents/purchase-order/${bill.purchaseOrderId}` : undefined} />
-      <FlowRow type="Goods Receipt" ref="—" />
+      {((related.data?.goodsReceipts || []) as any[]).map((g: any) => <FlowRow key={g.id} type="Goods Receipt" ref={g.grnNo} href={`/documents/goods-received-note/${g.id}`} />)}
+      {bill.purchaseOrderId && !(related.data?.goodsReceipts || []).length && <FlowRow type="Goods Receipt" ref="—" />}
       <FlowRow type="Supplier Bill" ref={bill.invoiceNo} href={`/documents/supplier-invoice/${bill.id}`} />
+      {((related.data?.vendorCredits || []) as any[]).map((c: any) => <FlowRow key={c.id} type="Vendor Credit" ref={c.vendorCreditNo} href="/expenses/vendor-credits" />)}
       {(bill.payments || []).map((p: any) => <FlowRow key={p.id} type="Supplier Payment" ref={p.paymentNo} href="/procurement" />)}
-      <FlowRow type="Journal Entry" ref="—" href="/finance/journals" />
+      <FlowRow type="Journal Entry" ref={bill.invoiceNo} href="/finance/journals" />
     </div> },
     { key: 'trail', label: 'Bill Trail', children: <div className="space-y-2">
       {[{ t: `Bill ${bill.invoiceNo} created`, d: bill.createdAt }, ...(bill.status === 'POSTED' ? [{ t: 'Bill posted', d: bill.createdAt }] : []), ...arr(bill.payments).map((p: any) => ({ t: `Payment ${p.paymentNo} · ${fmtMoney(p.applied)}`, d: p.paidAt }))].map((e, i) => <div key={i} className="flex items-center gap-3 rounded-xl border p-3"><CheckCircleOutlined className="text-[#003366]" /><div className="flex-1"><div className="text-[13px] text-[#171a2e]">{e.t}</div><div className="text-[11px] text-[#8a90ad]">{fmtDate(e.d)}</div></div></div>)}
@@ -311,7 +314,7 @@ function BillDetailModal({ billId, onClose, onPay }: { billId: string; onClose: 
   ];
   return (
     <Drawer open onClose={onClose} width={980} title={<span>Supplier Bill <b>{bill.invoiceNo}</b></span>}
-      extra={<Space wrap>{payable && <Button type="primary" icon={<PayCircleOutlined />} onClick={() => onPay(bill.id)}>{Number(bill.amountPaid) > 0.005 ? 'Pay Balance' : 'Make Payment'}</Button>}<Tooltip title="Print"><a href={`/documents/supplier-invoice/${bill.id}`} target="_blank"><Button icon={<PrinterOutlined />} /></a></Tooltip>{bill.status === 'DRAFT' && <Button icon={<CheckCircleOutlined />} onClick={() => { api(`/procurement/supplier-invoices/${bill.id}/finalize`, { method: 'POST', body: JSON.stringify({ action: 'POST' }) }).then(() => { message.success('Bill posted — awaiting payment'); onClose(); }).catch((e) => message.error(e.message)); }}>Save & Post</Button>}</Space>}>
+      extra={<Space wrap>{payable && <Button type="primary" icon={<PayCircleOutlined />} onClick={() => onPay(bill.id)}>{Number(bill.amountPaid) > 0.005 ? 'Pay Balance' : 'Make Payment'}</Button>}<Tooltip title="Print"><a href={`/documents/supplier-invoice/${bill.id}`} target="_blank"><Button icon={<PrinterOutlined />} /></a></Tooltip>{bill.status === 'DRAFT' && <Button icon={<CheckCircleOutlined />} onClick={() => { api(`/procurement/supplier-invoices/${bill.id}/finalize`, { method: 'POST', body: JSON.stringify({ action: 'POST', confirmMissingReceipt: true }) }).then(() => { message.success('Bill posted — awaiting payment'); onClose(); }).catch((e) => message.error(e.message)); }}>Save & Post</Button>}</Space>}>
       <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-[#f8f9ff] px-4 py-3">
         <MetricStrip
           className="flex-1 mb-0 !bg-transparent !shadow-none !border-0"
