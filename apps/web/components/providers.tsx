@@ -1,6 +1,6 @@
 'use client';
 import '@ant-design/v5-patch-for-react-19';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, keepPreviousData } from '@tanstack/react-query';
 import { App as AntApp, ConfigProvider, theme } from 'antd';
 import { useState } from 'react';
 import { Toaster } from 'sonner';
@@ -8,7 +8,7 @@ import { AuthProvider } from '@/components/auth-provider';
 import { GlobalLoadingOverlay } from '@/components/global-loading-overlay';
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  const [client] = useState(() => new QueryClient({ defaultOptions: { queries: { staleTime: 15_000, refetchOnWindowFocus: false, retry: 1 } } }));
+  const [client] = useState(() => new QueryClient({ defaultOptions: { queries: { staleTime: 15_000, gcTime: 5 * 60_000, refetchOnWindowFocus: false, retry: 1, placeholderData: keepPreviousData } } }));
   return (
     <QueryClientProvider client={client}>
       <ConfigProvider

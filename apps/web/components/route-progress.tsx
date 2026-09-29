@@ -21,13 +21,20 @@ export function RouteProgress() {
       if (!href || href.startsWith('#') || href.startsWith('http') || href.startsWith('mailto:') || a.getAttribute('target') === '_blank') return;
       const dest = href.split('?')[0];
       if (dest === window.location.pathname) return; // same page (e.g. tab query change)
-      setActive(true);
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => setActive(false), 10000); // safety: never stick
+      start();
     }
+    // Programmatic navigation (sidebar, flyout, quick access, table links) dispatches this.
+    function onNavigate() { start(); }
     document.addEventListener('click', onClick, true);
-    return () => document.removeEventListener('click', onClick, true);
+    document.addEventListener('nex:navigate', onNavigate as EventListener);
+    return () => { document.removeEventListener('click', onClick, true); document.removeEventListener('nex:navigate', onNavigate as EventListener); };
   }, []);
+
+  function start() {
+    setActive(true);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setActive(false), 10000); // safety: never stick
+  }
 
   useEffect(() => {
     // Route committed — hide the bar (with a tiny delay to avoid flicker on fast nav).

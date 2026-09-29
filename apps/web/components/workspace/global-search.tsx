@@ -82,7 +82,7 @@ function SearchField({
       options={options}
       value={value}
       onChange={setValue}
-      onSelect={(href) => { setValue(''); router.push(href); }}
+              onSelect={(href) => { setValue(''); if (typeof document !== 'undefined') document.dispatchEvent(new CustomEvent('nex:navigate')); router.push(href); }}
       popupMatchSelectWidth={popupWidth ?? true}
       notFoundContent={value.trim().length >= 2 && !loading ? 'No matching records or pages' : null}
       filterOption={false}

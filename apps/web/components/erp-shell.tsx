@@ -363,6 +363,7 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
     closeFlyout();
     setMobileNavOpen(false);
     setActiveQuery(key.includes('?') ? key.slice(key.indexOf('?')) : '');
+    if (typeof document !== 'undefined') document.dispatchEvent(new CustomEvent('nex:navigate'));
     router.push(key);
   }
 
@@ -449,7 +450,7 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
         {QUICK_MODULES.map((m) => (
           <button
             key={m.key}
-            onClick={() => { setQuickOpen(false); router.push(m.key); }}
+            onClick={() => { setQuickOpen(false); if (typeof document !== 'undefined') document.dispatchEvent(new CustomEvent('nex:navigate')); router.push(m.key); }}
             className="group flex flex-col items-start gap-3 sm:gap-4 rounded-2xl border border-[#edf0f6] bg-[#fbfcff] px-4 py-5 sm:px-7 sm:py-9 shadow-[0_2px_8px_rgba(23,26,46,0.04)] hover:bg-white hover:border-[#dde5f2] hover:shadow-[0_10px_24px_rgba(23,26,46,0.08)] hover:-translate-y-0.5 transition-all duration-200 cursor-pointer text-left"
           >
             <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-base transition-transform duration-200 group-hover:scale-110" style={{ background: m.color, boxShadow: `0 6px 14px ${m.color}66` }}>{m.icon}</div>
