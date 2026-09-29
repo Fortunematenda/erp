@@ -224,7 +224,7 @@ export function EnterBillForm({ onSaved, variant = 'tab', initialSupplierId, onC
               <div>
                 <Table rowKey="key" size="small" pagination={false} dataSource={previewLines as any[]} columns={[
                   { title: 'Item', dataIndex: 'description' },
-                  { title: 'Amount', dataIndex: 'amount', align: 'right', render: fmtMoney },
+                  { title: 'Amount', dataIndex: 'amount', align: 'right', render: (v: any) => fmtMoney(v) },
                   { title: 'Debit', dataIndex: 'dr', render: (v: any) => <span className="text-[#10b981]">{v}</span> },
                   { title: 'Credit', render: () => <span className="text-[#ef4444]">2000 Accounts Payable</span> },
                   { title: 'COGS (future sale/issue)', dataIndex: 'cogs', render: (v: any) => v ? <span className="text-[#64748b]">{v} (not debited on purchase)</span> : <span className="text-[#dfe1ee]">—</span> },
@@ -297,7 +297,7 @@ export function EnterBillForm({ onSaved, variant = 'tab', initialSupplierId, onC
           { title: 'PO No', dataIndex: 'poNo', width: 120 },
           { title: 'Date', dataIndex: 'orderDate', render: (v) => dayjs(v).format('YYYY-MM-DD') },
           { title: 'Remaining to Bill', align: 'right', render: (_v, r: any) => fmtNumber(r.progress?.remainingToBill) },
-          { title: 'Total', dataIndex: 'total', align: 'right', render: fmtMoney },
+          { title: 'Total', dataIndex: 'total', align: 'right', render: (v: any) => fmtMoney(v) },
           { title: '', width: 90, render: (_v, r: any) => <Button type="primary" size="small" onClick={() => addFromPo(r.id)}>Add</Button> },
         ]} />
         {!eligiblePos.isLoading && !(eligiblePos.data || []).length && <div className="text-center text-[#94a3b8] py-6">No open purchase orders with a remaining billable balance for this supplier.</div>}

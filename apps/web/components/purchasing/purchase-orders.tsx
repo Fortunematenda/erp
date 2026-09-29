@@ -167,20 +167,20 @@ function PoDetailDrawer({ id, onClose, onReceive, onBill, onChanged }: { id: str
 
   const itemCols: ColumnsType<any> = [
     { title: 'Item', render: (_v, r: any) => r.description || '—' },
-    { title: 'Ordered', dataIndex: 'quantity', align: 'right', render: fmtNumber },
-    { title: 'Received', dataIndex: 'receivedQty', align: 'right', render: fmtNumber },
-    { title: 'Billed', dataIndex: 'invoicedQty', align: 'right', render: fmtNumber },
+    { title: 'Ordered', dataIndex: 'quantity', align: 'right', render: (v: any) => fmtNumber(v) },
+    { title: 'Received', dataIndex: 'receivedQty', align: 'right', render: (v: any) => fmtNumber(v) },
+    { title: 'Billed', dataIndex: 'invoicedQty', align: 'right', render: (v: any) => fmtNumber(v) },
     { title: 'Remaining', align: 'right', render: (_v, r: any) => fmtNumber(Math.max(0, Number(r.quantity) - Number(r.receivedQty))) },
-    { title: 'Cost', dataIndex: 'unitPrice', align: 'right', render: fmtMoney },
-    { title: 'Line Total', dataIndex: 'lineTotal', align: 'right', render: fmtMoney },
+    { title: 'Cost', dataIndex: 'unitPrice', align: 'right', render: (v: any) => fmtMoney(v) },
+    { title: 'Line Total', dataIndex: 'lineTotal', align: 'right', render: (v: any) => fmtMoney(v) },
   ];
   const matchCols: ColumnsType<any> = [
     { title: 'Item', render: (_v, r: any) => r.description },
-    { title: 'Ordered', dataIndex: 'poQty', align: 'right', render: fmtNumber },
-    { title: 'Received', dataIndex: 'receivedQty', align: 'right', render: fmtNumber },
-    { title: 'Billed', dataIndex: 'invoiceQty', align: 'right', render: fmtNumber },
-    { title: 'PO Cost', dataIndex: 'poPrice', align: 'right', render: fmtMoney },
-    { title: 'Bill Cost', dataIndex: 'invoicePrice', align: 'right', render: fmtMoney },
+    { title: 'Ordered', dataIndex: 'poQty', align: 'right', render: (v: any) => fmtNumber(v) },
+    { title: 'Received', dataIndex: 'receivedQty', align: 'right', render: (v: any) => fmtNumber(v) },
+    { title: 'Billed', dataIndex: 'invoiceQty', align: 'right', render: (v: any) => fmtNumber(v) },
+    { title: 'PO Cost', dataIndex: 'poPrice', align: 'right', render: (v: any) => fmtMoney(v) },
+    { title: 'Bill Cost', dataIndex: 'invoicePrice', align: 'right', render: (v: any) => fmtMoney(v) },
     { title: 'Variance', dataIndex: 'variance', align: 'right', render: (v) => <span className={Number(v) ? 'text-[#e11d48]' : 'text-[#16a34a]'}>{fmtMoney(v)}</span> },
   ];
 
@@ -203,13 +203,13 @@ function PoDetailDrawer({ id, onClose, onReceive, onBill, onChanged }: { id: str
     { key: 'billing', label: `Billing (${related.data?.bills?.length || 0})`, children: <Table rowKey="id" size="small" dataSource={related.data?.bills || []} pagination={false} columns={[
       { title: 'Bill', dataIndex: 'invoiceNo', render: (v) => <a className="text-[#1d5fb5]" onClick={() => window.open('/expenses/bills', '_blank')}>{v}</a> },
       { title: 'Status', dataIndex: 'status', render: (v) => <StatusTag value={v} /> },
-      { title: 'Total', dataIndex: 'total', align: 'right', render: fmtMoney },
-      { title: 'Balance', dataIndex: 'balanceDue', align: 'right', render: fmtMoney },
+      { title: 'Total', dataIndex: 'total', align: 'right', render: (v: any) => fmtMoney(v) },
+      { title: 'Balance', dataIndex: 'balanceDue', align: 'right', render: (v: any) => fmtMoney(v) },
       { title: 'Payment', dataIndex: 'paymentStatus', render: (v) => <StatusTag value={v} /> },
     ]} /> },
     { key: 'matching', label: 'Three-Way Matching', children: <Table rowKey="lineId" size="small" dataSource={match.data || []} columns={matchCols} pagination={false} /> },
     { key: 'payments', label: `Payments (${related.data?.payments?.length || 0})`, children: <Table rowKey="id" size="small" dataSource={related.data?.payments || []} pagination={false} columns={[
-      { title: 'Payment', dataIndex: 'paymentNo' }, { title: 'Date', dataIndex: 'paidAt', render: fmtDate }, { title: 'Amount', dataIndex: 'amount', align: 'right', render: fmtMoney }, { title: 'Status', dataIndex: 'status', render: (v) => <StatusTag value={v} /> },
+      { title: 'Payment', dataIndex: 'paymentNo' }, { title: 'Date', dataIndex: 'paidAt', render: fmtDate }, { title: 'Amount', dataIndex: 'amount', align: 'right', render: (v: any) => fmtMoney(v) }, { title: 'Status', dataIndex: 'status', render: (v) => <StatusTag value={v} /> },
     ]} /> },
   ];
 
@@ -271,10 +271,10 @@ function ReceiveDrawer({ id, onClose, onDone }: { id: string | null; onClose: ()
         </div>
         <Table rowKey="lineId" size="small" pagination={false} dataSource={rows} columns={[
           { title: 'Item', render: (_v, r: any) => r.description || '—' },
-          { title: 'Ordered', dataIndex: 'ordered', align: 'right', render: fmtNumber },
-          { title: 'Previously Received', dataIndex: 'previouslyReceived', align: 'right', render: fmtNumber },
+          { title: 'Ordered', dataIndex: 'ordered', align: 'right', render: (v: any) => fmtNumber(v) },
+          { title: 'Previously Received', dataIndex: 'previouslyReceived', align: 'right', render: (v: any) => fmtNumber(v) },
           { title: 'Receive Now', width: 130, render: (_v, r: any, i: number) => r.stockTracked ? <Form.Item name={`q_${i}`} noStyle initialValue={Math.max(0, Number(r.remaining))}><InputNumber min={0} max={Number(r.remaining)} className="w-full" /></Form.Item> : <span className="text-[12px] text-[#94a3b8]">No stock</span> },
-          { title: 'Remaining', dataIndex: 'remaining', align: 'right', render: fmtNumber },
+          { title: 'Remaining', dataIndex: 'remaining', align: 'right', render: (v: any) => fmtNumber(v) },
         ]} />
       </Form>
     </Drawer>
