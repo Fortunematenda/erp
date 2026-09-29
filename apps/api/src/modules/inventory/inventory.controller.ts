@@ -385,6 +385,88 @@ export class InventoryController {
     }
     return this.itemResolver.resolveForPurchase(companyId, id);
   }
+
+  /**
+   * Product / inventory history: signed movements with running balance, source links,
+   * counterparty and summary. Running balance = period opening + chronological signed
+   * movements (deterministic by occurredAt then id); filtered rows keep their true balance.
+   */
+  @Get('items/:id/history') async itemHistory(@Req() req: any, @Param('id') id: string, @Query() q: any) {
+    const companyId = companyIdOf(req.user);
+    const item = await this.prisma.inventoryItem.findFirst({ where: { id, companyId } });
+    if (!item) throw new BadRequestException('Item not found');
+    const all = await this.prisma.stockMovement.findMany({ where: { itemId: id, warehouse: { companyId } }, include: { warehouse: { select: { id: true, name: true } } }, orderBy: [{ occurredAt: 'asc' }, { seq: 'asc' }] });
+    const warehouseId: string | undefined = q.warehouseId;
+    const scoped = warehouseId ? all.filter((m) => m.warehouseId === warehouseId) : all;
+    const fromDate = q.from ? new Date(q.from) : null;
+    const toDate = q.to ? new Date(q.to) : null;
+    const opening = fromDate ? scoped.filter((m) => new Date(m.occurredAt) < fromDate).reduce((s, m) => s + Number(m.signedQuantity || 0), 0) : 0;
+    let running = opening;
+    const withBalance = scoped.map((m) => {
+      const at = new Date(m.occurredAt);
+      const inPeriod = (!fromDate || at >= fromDate) && (!toDate || at <= toDate);
+      if (inPeriod) running += Number(m.signedQuantity || 0);
+      return { m, balance: running, inPeriod };
+    });
+    const refs = [...new Set(scoped.map((m) => m.reference).filter(Boolean))] as string[];
+    const [invs, dns, grns, pos] = await Promise.all([
+      refs.length ? this.prisma.salesInvoice.findMany({ where: { companyId, invoiceNo: { in: refs } }, select: { id: true, invoiceNo: true, customer: { select: { name: true } } } }) : [],
+      refs.length ? this.prisma.deliveryNote.findMany({ where: { companyId, deliveryNo: { in: refs } }, select: { id: true, deliveryNo: true, customer: { select: { name: true } } } }) : [],
+      refs.length ? this.prisma.goodsReceivedNote.findMany({ where: { companyId, grnNo: { in: refs } }, select: { id: true, grnNo: true, supplier: { select: { name: true } } } }) : [],
+      refs.length ? this.prisma.purchaseOrder.findMany({ where: { companyId, poNo: { in: refs } }, select: { id: true, poNo: true, supplier: { select: { name: true } } } }) : [],
+    ]);
+    const invBy = new Map(invs.map((x) => [x.invoiceNo, x]));
+    const dnBy = new Map(dns.map((x) => [x.deliveryNo, x]));
+    const grnBy = new Map(grns.map((x) => [x.grnNo, x]));
+    const poBy = new Map(pos.map((x) => [x.poNo, x]));
+    const srcOf = (ref?: string | null) => {
+      if (!ref) return { label: null, route: null, counterparty: null };
+      const i = invBy.get(ref); if (i) return { label: 'Invoice', route: `/sales/invoices?invoiceId=${i.id}`, counterparty: i.customer?.name || null };
+      const d = dnBy.get(ref); if (d) return { label: 'Delivery', route: `/sales/deliveries?deliveryId=${d.id}`, counterparty: d.customer?.name || null };
+      const g = grnBy.get(ref); if (g) return { label: 'Goods Receipt', route: `/procurement?grnId=${g.id}`, counterparty: g.supplier?.name || null };
+      const p = poBy.get(ref); if (p) return { label: 'Purchase Order', route: `/procurement?poId=${p.id}`, counterparty: p.supplier?.name || null };
+      return { label: null, route: null, counterparty: null };
+    };
+    let rows = withBalance.filter((x) => x.inPeriod).map(({ m, balance }) => {
+      const src = srcOf(m.reference);
+      const signed = Number(m.signedQuantity || 0);
+      return {
+        id: m.id, occurredAt: m.occurredAt, type: m.type, warehouse: m.warehouse?.name || null, warehouseId: m.warehouseId,
+        qtyIn: signed > 0 ? signed : 0, qtyOut: signed < 0 ? -signed : 0, signedQuantity: signed,
+        runningBalance: Number(balance.toFixed(4)), unitCost: Number(m.unitCost), valueChange: Number((signed * Number(m.unitCost)).toFixed(2)),
+        reference: m.reference, notes: m.notes, sourceLabel: src.label, sourceRoute: src.route, counterparty: src.counterparty,
+      };
+    });
+    if (q.type) rows = rows.filter((r) => r.type === String(q.type).toUpperCase());
+    if (q.q) { const s = String(q.q).toLowerCase(); rows = rows.filter((r) => `${r.reference || ''} ${r.notes || ''} ${r.counterparty || ''} ${r.type}`.toLowerCase().includes(s)); }
+    const period = withBalance.filter((x) => x.inPeriod).map((x) => x.m);
+    const mag = (pred: (t: string) => boolean) => period.filter((m) => pred(m.type)).reduce((s, m) => s + Math.abs(Number(m.signedQuantity || 0)), 0);
+    const balance = await this.movementService.balance(companyId, id);
+    const warehouses = await this.prisma.warehouse.findMany({ where: { companyId }, select: { id: true, name: true } });
+    const whBreakdown = [];
+    for (const w of warehouses) {
+      if (!all.some((m) => m.warehouseId === w.id)) continue;
+      const b = await this.movementService.balance(companyId, id, w.id);
+      whBreakdown.push({ warehouseId: w.id, warehouse: w.name, onHand: b.onHand, value: b.value });
+    }
+    const summary = {
+      currentStock: balance.onHand,
+      periodOpening: opening,
+      received: mag((t) => t === 'RECEIPT'),
+      issued: mag((t) => t === 'ISSUE'),
+      transfersIn: mag((t) => t === 'TRANSFER_IN'),
+      transfersOut: mag((t) => t === 'TRANSFER_OUT'),
+      netAdjustments: period.filter((m) => m.type.startsWith('ADJUSTMENT')).reduce((s, m) => s + Number(m.signedQuantity || 0), 0),
+      returns: period.filter((m) => m.type.startsWith('RETURN')).reduce((s, m) => s + Number(m.signedQuantity || 0), 0),
+      inventoryValue: balance.value,
+      avgCost: balance.avgCost,
+    };
+    return {
+      item: { id: item.id, sku: item.sku, name: item.name, type: normalizeItemType(item.type), unit: item.unit, stockTracked: isStockTracked(item.type) },
+      summary, warehouses: whBreakdown, rows,
+      filters: { warehouseId: warehouseId || null, from: q.from || null, to: q.to || null, type: q.type || null, q: q.q || null },
+    };
+  }
   @Get('items/:id') async itemDetail(@Req() req: any, @Param('id') id: string) {
     const companyId = companyIdOf(req.user);
     const item = await this.prisma.inventoryItem.findFirst({ where: { id, companyId } });

@@ -986,6 +986,8 @@ model StockMovement {
   batchNo        String?
   serialNo       String?
   occurredAt     DateTime          @default(now())
+  /// Monotonic insertion sequence — deterministic tie-break for running balances.
+  seq            Int               @default(autoincrement())
 
   @@index([itemId, occurredAt])
   @@index([warehouseId])
