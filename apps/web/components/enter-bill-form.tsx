@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, App, Button, Collapse, DatePicker, Dropdown, Input, InputNumber, Modal, Select, Space, Table, Tag, Tooltip } from 'antd';
+import { Alert, App, Button, Checkbox, Collapse, DatePicker, Dropdown, Input, InputNumber, Modal, Select, Space, Table, Tag, Tooltip } from 'antd';
 import { DeleteOutlined, DownOutlined, PlusOutlined, UploadOutlined, EyeOutlined, FileSearchOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api } from '@/lib/api';
@@ -9,6 +9,7 @@ import { AccountSelector } from '@/components/account-selector';
 import { useMeta } from '@/lib/meta';
 import { fmtMoney, fmtNumber } from '@/lib/format';
 import { ITEM_TYPE_BADGE, normalizeItemType } from '@/lib/item-type';
+import { useAuthPermissions } from '@/components/Can';
 
 const TERMS = ['Due on Receipt', 'Net 7', 'Net 14', 'Net 30', 'Net 45', 'Net 60', 'Net 90', 'Custom'];
 const CURRENCIES = ['USD', 'ZAR', 'ZWG', 'EUR', 'GBP', 'CAD', 'AUD'];
@@ -26,6 +27,8 @@ export function EnterBillForm({ onSaved, variant = 'tab', initialSupplierId, onC
   const { message } = App.useApp();
   const qc = useQueryClient();
   const meta = useMeta();
+  const { permissions } = useAuthPermissions();
+  const canPost = permissions.includes('procurement.bills.manage');
   const suppliers = meta.data?.suppliers || [];
   const items = meta.data?.items || [];
   const accounts = meta.data?.accounts || [];
@@ -44,6 +47,8 @@ export function EnterBillForm({ onSaved, variant = 'tab', initialSupplierId, onC
   const [attachment, setAttachment] = useState<any>(null);
   const [lines, setLines] = useState<any[]>([newLine()]);
   const [po, setPo] = useState<{ id: string; poNo: string; lines: any[] } | null>(null);
+  const [receiveNow, setReceiveNow] = useState(false);
+  const [warehouseId, setWarehouseId] = useState<string | undefined>();
   const [poModalOpen, setPoModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [posting, setPosting] = useState(false);
@@ -62,6 +67,7 @@ export function EnterBillForm({ onSaved, variant = 'tab', initialSupplierId, onC
   const subtotal = lines.reduce((s, l) => s + Number(l.quantity || 0) * Number(l.unitPrice || 0), 0);
   const taxTotal = lines.reduce((s, l) => s + Number(l.quantity || 0) * Number(l.unitPrice || 0) * Number(l.taxRate || 0) / 100, 0);
   const grand = subtotal + taxTotal;
+  const hasInventory = lines.some((l) => (l.itemType || (l.itemId ? normalizeItemType(itemById.get(l.itemId)?.type) : null)) === 'INVENTORY_PRODUCT');
 
   function updLine(k: number, p: any) { setLines((prev) => prev.map((l) => (l.key === k ? { ...l, ...p } : l))); }
   function addLine() { setLines((prev) => [...prev, newLine()]); }
@@ -142,6 +148,8 @@ export function EnterBillForm({ onSaved, variant = 'tab', initialSupplierId, onC
         supplierId, invoiceNo: supplierInvNo.trim(), invoiceDate: invoiceDate.format('YYYY-MM-DD'),
         dueDate: dueDate ? dueDate.format('YYYY-MM-DD') : undefined, terms, currency, projectId: projectId || undefined, ref: reference, memo,
         purchaseOrderId: po?.id,
+        receiveNow: hasInventory ? receiveNow : undefined,
+        warehouseId: receiveNow ? warehouseId : undefined,
         lines: lines.map((l) => ({ description: l.description, itemId: l.itemId || undefined, quantity: Number(l.quantity), unitPrice: Number(l.unitPrice), taxRate: Number(l.taxRate || 0), accountId: l.accountId || undefined, purchaseOrderLineId: l.purchaseOrderLineId })),
       };
       const bill = await api('/procurement/supplier-invoices', { method: 'POST', body: JSON.stringify(body) });
@@ -227,6 +235,17 @@ export function EnterBillForm({ onSaved, variant = 'tab', initialSupplierId, onC
           }]}
         />
 
+        {hasInventory && (
+          <div className="mt-6 nex-card p-4">
+            <div className="text-[13px] font-semibold text-[#171a2e] mb-2">Inventory</div>
+            <div className="flex flex-wrap items-center gap-4">
+              <Checkbox checked={receiveNow} onChange={(e) => setReceiveNow(e.target.checked)}>Goods received now (create the stock receipt on posting)</Checkbox>
+              {receiveNow && <Select allowClear showSearch optionFilterProp="label" placeholder="Receiving warehouse" style={{ minWidth: 240 }} value={warehouseId} onChange={setWarehouseId} options={(meta.data?.warehouses || []).map((w: any) => ({ label: w.name, value: w.id }))} />}
+            </div>
+            <div className="text-[12px] text-[#94a3b8] mt-2">If not ticked, the bill is recorded as a GRNI accrual and stock is added when the goods are received.</div>
+          </div>
+        )}
+
         <div className="mt-8">
           <div className="text-[12px] font-medium text-[#566069] mb-1">Attachment (Vendor Invoice File)</div>
           {attachment ? (
@@ -258,16 +277,18 @@ export function EnterBillForm({ onSaved, variant = 'tab', initialSupplierId, onC
 
         <div className="mt-6 flex items-center justify-end gap-2">
           {variant === 'page' && <Button onClick={() => onCancel?.()}>Cancel</Button>}
-          <Button onClick={() => save('draft')} disabled={saving || posting}>Save Draft</Button>
-          <Dropdown.Button type="primary" icon={<DownOutlined />} loading={posting}
-            onClick={() => save('post')}
-            menu={{ items: [
-              { key: 'post', label: 'Save & Post', onClick: () => save('post') },
-              { key: 'draft', label: 'Save Draft', onClick: () => save('draft') },
-              { key: 'submit', label: 'Submit for Approval', onClick: () => save('submit') },
-            ] }}>
-            Save & Post
-          </Dropdown.Button>
+          {canPost ? (<>
+            <Button onClick={() => save('draft')} disabled={saving || posting}>Save Draft</Button>
+            <Dropdown.Button type="primary" icon={<DownOutlined />} loading={posting}
+              onClick={() => save('post')}
+              menu={{ items: [
+                { key: 'post', label: 'Save & Post', onClick: () => save('post') },
+                { key: 'draft', label: 'Save Draft', onClick: () => save('draft') },
+                { key: 'submit', label: 'Submit for Approval', onClick: () => save('submit') },
+              ] }}>
+              Save & Post
+            </Dropdown.Button>
+          </>) : <span className="text-[12px] text-[#94a3b8]">You do not have permission to create or post bills.</span>}
         </div>
       </div>
 

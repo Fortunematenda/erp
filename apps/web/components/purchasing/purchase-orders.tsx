@@ -10,6 +10,8 @@ import { useMeta } from '@/lib/meta';
 import { StatusTag } from '@/components/crud-page';
 import { LineItems } from '@/components/line-items';
 import { RowActionsMenu, ACTIONS_COL } from '@/components/row-actions-menu';
+import { Can, useAuthPermissions } from '@/components/Can';
+import { SkeletonTable, SectionLoading } from '@/components/loading';
 import { fmtDate, fmtDateTime, fmtMoney, fmtNumber } from '@/lib/format';
 
 const OPEN_STATUSES = ['OPEN', 'APPROVED', 'PART_RECEIVED', 'RECEIVED'];
@@ -18,6 +20,11 @@ export function PurchaseOrdersWorkspace() {
   const { message } = App.useApp();
   const qc = useQueryClient();
   const meta = useMeta();
+  const { permissions } = useAuthPermissions();
+  const can = (p: string) => permissions.includes(p);
+  const canManage = can('procurement.purchase_orders.create');
+  const canApprove = can('procurement.purchase_orders.approve');
+  const canBill = can('procurement.bills.manage');
   const list = useQuery({ queryKey: ['/procurement/purchase-orders'], queryFn: () => api('/procurement/purchase-orders') });
   const [formOpen, setFormOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -44,13 +51,13 @@ export function PurchaseOrdersWorkspace() {
     { ...ACTIONS_COL, render: (_v, r: any) => (
       <RowActionsMenu items={[
         { key: 'view', label: 'View Purchase Order', icon: <EyeOutlined />, onClick: () => setDetailId(r.id) },
-        ...(r.status === 'DRAFT' ? [{ key: 'edit', label: 'Edit Draft', icon: <EditOutlined />, onClick: () => { setEditId(r.id); setFormOpen(true); } }] : []),
-        ...(r.status === 'DRAFT' ? [{ key: 'approve', label: 'Approve', icon: <CheckCircleOutlined />, onClick: () => act(`/procurement/purchase-orders/${r.id}/status`, 'PATCH', { status: 'APPROVED' }, 'Purchase order approved') }] : []),
-        ...(OPEN_STATUSES.includes(r.status) && (r.progress?.remainingToReceive > 0) && r.progress?.receivingRequired ? [{ key: 'receive', label: 'Receive Items', icon: <SwapOutlined />, onClick: () => setReceiveId(r.id) }] : []),
-        ...(OPEN_STATUSES.includes(r.status) && (r.progress?.remainingToBill > 0) ? [{ key: 'bill', label: 'Create Bill', icon: <FileAddOutlined />, onClick: () => setBillId(r.id) }] : []),
+        ...(r.status === 'DRAFT' && canManage ? [{ key: 'edit', label: 'Edit Draft', icon: <EditOutlined />, onClick: () => { setEditId(r.id); setFormOpen(true); } }] : []),
+        ...(r.status === 'DRAFT' && canApprove ? [{ key: 'approve', label: 'Approve', icon: <CheckCircleOutlined />, onClick: () => act(`/procurement/purchase-orders/${r.id}/status`, 'PATCH', { status: 'APPROVED' }, 'Purchase order approved') }] : []),
+        ...(OPEN_STATUSES.includes(r.status) && (r.progress?.remainingToReceive > 0) && r.progress?.receivingRequired && (canApprove || canManage) ? [{ key: 'receive', label: 'Receive Items', icon: <SwapOutlined />, onClick: () => setReceiveId(r.id) }] : []),
+        ...(OPEN_STATUSES.includes(r.status) && (r.progress?.remainingToBill > 0) && canBill ? [{ key: 'bill', label: 'Create Bill', icon: <FileAddOutlined />, onClick: () => setBillId(r.id) }] : []),
         { key: 'print', label: 'Print / PDF', icon: <PrinterOutlined />, onClick: () => window.open(`/documents/purchase-order/${r.id}`, '_blank') },
-        ...(OPEN_STATUSES.includes(r.status) ? [{ key: 'close', label: 'Close', onClick: () => act(`/procurement/purchase-orders/${r.id}/status`, 'PATCH', { status: 'CLOSED' }, 'Purchase order closed') }] : []),
-        ...(['DRAFT', 'OPEN', 'APPROVED'].includes(r.status) ? [{ key: 'cancel', label: 'Cancel', danger: true, icon: <CloseOutlined />, onClick: () => act(`/procurement/purchase-orders/${r.id}/status`, 'PATCH', { status: 'CANCELLED' }, 'Purchase order cancelled') }] : []),
+        ...(OPEN_STATUSES.includes(r.status) && canApprove ? [{ key: 'close', label: 'Close', onClick: () => act(`/procurement/purchase-orders/${r.id}/status`, 'PATCH', { status: 'CLOSED' }, 'Purchase order closed') }] : []),
+        ...(['DRAFT', 'OPEN', 'APPROVED'].includes(r.status) && canApprove ? [{ key: 'cancel', label: 'Cancel', danger: true, icon: <CloseOutlined />, onClick: () => act(`/procurement/purchase-orders/${r.id}/status`, 'PATCH', { status: 'CANCELLED' }, 'Purchase order cancelled') }] : []),
       ]} />
     ) },
   ];
@@ -60,10 +67,12 @@ export function PurchaseOrdersWorkspace() {
       <div className="flex justify-end mb-4">
         <Space>
           <Button icon={<SyncOutlined />} onClick={() => list.refetch()} loading={list.isFetching}>Refresh</Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditId(null); setFormOpen(true); }}>New Purchase Order</Button>
+          {canManage && <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditId(null); setFormOpen(true); }}>New Purchase Order</Button>}
         </Space>
       </div>
-      <Table rowKey="id" loading={list.isLoading} dataSource={list.data || []} columns={cols} scroll={{ x: 1300 }} pagination={{ pageSize: 15 }} />
+      {list.isLoading ? <SkeletonTable rows={8} columns={8} /> : (
+        <Table rowKey="id" dataSource={list.data || []} columns={cols} scroll={{ x: 1300 }} pagination={{ pageSize: 15 }} />
+      )}
 
       <PoFormDrawer open={formOpen} editId={editId} onClose={() => setFormOpen(false)} onSaved={invalidate} />
       <PoDetailDrawer id={detailId} onClose={() => setDetailId(null)} onReceive={(id) => { setDetailId(null); setReceiveId(id); }} onBill={(id) => { setDetailId(null); setBillId(id); }} onChanged={invalidate} />
@@ -211,7 +220,7 @@ function PoDetailDrawer({ id, onClose, onReceive, onBill, onChanged }: { id: str
         {OPEN_STATUSES.includes(d?.status) && (p.remainingToBill > 0) && <Button type="primary" icon={<FileAddOutlined />} onClick={() => onBill(id!)}>Create Bill</Button>}
         <Button icon={<PrinterOutlined />} onClick={() => window.open(`/documents/purchase-order/${id}`, '_blank')}>Print</Button>
       </Space>}>
-      {detail.isLoading ? <div className="text-[#94a3b8]">Loading purchase order…</div> : d ? (
+      {detail.isLoading ? <SectionLoading rows={6} /> : d ? (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
             <MiniStat label="Ordered" value={fmtNumber(p.ordered)} />
