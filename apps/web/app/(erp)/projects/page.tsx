@@ -11,6 +11,7 @@ import { api } from '@/lib/api';
 import { fmtMoney } from '@/lib/format';
 import { CurrencyValue, StatusPill } from '@/components/sales-ui';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
+import { ProjectReportDrawer } from '@/components/project-report-drawer';
 
 const PROJECT_STATUS = ['Active', 'Planning', 'On Hold', 'Completed', 'Cancelled'];
 
@@ -104,13 +105,7 @@ export default function ProjectsPage() {
 
   return (
     <div className="nex-fade">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">Projects</h1>
-          <p className="text-[13px] text-[#64748b] mt-1">Plan, track and report on project work</p>
-        </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>New Project</Button>
-      </div>
+      <PageHeader title="Projects" description="Plan, track and report on project work" actions={<Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>New Project</Button>} />
 
       <Tabs
         defaultActiveKey="projects"

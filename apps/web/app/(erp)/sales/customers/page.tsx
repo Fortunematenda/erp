@@ -20,6 +20,7 @@ import { formatPhoneNumber } from '@/lib/phone-format';
 import { InvoicesWorkspace } from '@/components/invoices-workspace';
 import { QuotationsWorkspace } from '@/components/quotations-workspace';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
+import { PageHeader } from '@/components/ui/page-header';
 
 const COUNTRIES = ['United States', 'Canada', 'United Kingdom', 'Zimbabwe', 'South Africa', 'Australia', 'Germany', 'France', 'India', 'China', 'Japan', 'Brazil', 'United Arab Emirates', 'Nigeria', 'Kenya'];
 
@@ -129,13 +130,7 @@ export default function CustomerCenter() {
 
   return (
     <div className="nex-fade">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">Customer Center</h1>
-          <p className="text-[13px] text-[#64748b] mt-1">Manage customers, invoices, quotes and receivables in one place</p>
-        </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>Add Customer</Button>
-      </div>
+      <PageHeader title="Customer Center" description="Manage customers, invoices, quotes and receivables in one place" actions={<Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>Add Customer</Button>} />
 
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-5 mb-6">
         <SummaryCard icon={<TeamOutlined />} label="Total Customers" value={rows.length} tone="#0ea5e9" />
