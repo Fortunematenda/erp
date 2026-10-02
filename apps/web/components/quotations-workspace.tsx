@@ -11,6 +11,7 @@ import { api } from '@/lib/api';
 import { fmtMoney } from '@/lib/format';
 import { CurrencyValue, CustomerAvatar, EmptyState, FilterBar, StatusPill, SummaryCard } from '@/components/sales-ui';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
+import { PageHeader } from '@/components/ui/page-header';
 
 const STATUS_OPTIONS = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'SENT', 'VIEWED', 'ACCEPTED', 'REJECTED', 'EXPIRED', 'CONVERTED', 'CANCELLED'].map((s) => ({ label: s.replace(/_/g, ' '), value: s }));
 
@@ -67,11 +68,14 @@ export function QuotationsWorkspace({ customerId, embedded, hideCustomer }: { cu
   return (
     <div className="nex-fade">
       {!embedded && (
-        <div className="flex items-center justify-between mb-6">
-          <div><h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">Quotes / Estimates</h1><p className="text-[13px] text-[#64748b] mt-1">Create, track and convert quotes into invoices</p></div>
-          <Link href="/sales/quotations/template"><Button icon={<SettingOutlined />}>Customize Template</Button></Link>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => router.push('/sales/quotations/new')}>New Quote</Button>
-        </div>
+        <PageHeader
+          title="Quotes / Estimates"
+          description="Create, track and convert quotes into invoices"
+          actions={<>
+            <Link href="/sales/quotations/template"><Button icon={<SettingOutlined />}>Customize Template</Button></Link>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => router.push('/sales/quotations/new')}>New Quote</Button>
+          </>}
+        />
       )}
       {!embedded && <div className="grid grid-cols-2 xl:grid-cols-4 gap-5 mb-6">{kpis.map((k) => <SummaryCard key={k.label} icon={k.icon} label={k.label} value={k.value} tone={k.tone} valueColor={k.valueColor} />)}</div>}
       <FilterBar extra={<span className="text-[12px] text-[#94a3b8]">{totals.count} quotes</span>}>

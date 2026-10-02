@@ -15,6 +15,7 @@ import { SalesDocumentFlow } from '@/components/sales/related-transactions';
 import { DocumentTrail } from '@/components/documents/document-trail';
 import { AccountSelector } from '@/components/account-selector';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
+import { PageHeader } from '@/components/ui/page-header';
 
 const METHODS = ['CASH', 'BANK_TRANSFER', 'ACH', 'CHECK', 'CARD', 'MOBILE_MONEY', 'OTHER'];
 const balanceOf = (i: any) => Number(i.balanceDue ?? (Number(i.total || 0) - Number(i.amountPaid || 0) - Number(i.creditsApplied || 0)));
@@ -89,10 +90,7 @@ export function ReceiptsWorkspace() {
 
   return (
     <div className="nex-fade">
-      <div className="flex items-center justify-between mb-6">
-        <div><h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">Receipts</h1><p className="text-[13px] text-[#64748b] mt-1">Record and allocate customer payments</p></div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>New Receipt</Button>
-      </div>
+      <PageHeader title="Receipts" description="Record and allocate customer payments" actions={<Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>New Receipt</Button>} />
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-5 mb-6">
         <SummaryCard icon={<WalletOutlined />} label="Receipts" value={kpis.count} tone="#003366" />
         <SummaryCard icon={<DollarOutlined />} label="Total Collected" value={fmtMoney(kpis.total)} tone="#16a34a" />
