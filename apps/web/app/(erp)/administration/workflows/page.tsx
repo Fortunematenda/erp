@@ -7,6 +7,7 @@ import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { api } from '@/lib/api';
 import { Can } from '@/components/Can';
 import { StatusPill } from '@/components/sales-ui';
+import { PageHeader } from '@/components/ui/page-header';
 
 const DTYPE_LABEL: Record<string, string> = {
   PURCHASE_REQUISITION: 'Purchase Requisition', PURCHASE_ORDER: 'Purchase Order', SUPPLIER_INVOICE: 'Supplier Invoice',
@@ -52,10 +53,7 @@ export default function WorkflowsPage() {
 
   return (
     <div className="nex-fade">
-      <div className="flex items-center justify-between mb-6">
-        <div><h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">Workflows & Approvals</h1><p className="text-[13px] text-[#64748b] mt-1">Configure approval workflows per document type</p></div>
-        <Button icon={<ReloadOutlined />} onClick={() => qc.invalidateQueries({ queryKey: ['/approvals/workflows'] })}>Refresh</Button>
-      </div>
+      <PageHeader title="Workflows & Approvals" description="Configure approval workflows per document type" actions={<Button icon={<ReloadOutlined />} onClick={() => qc.invalidateQueries({ queryKey: ['/approvals/workflows'] })}>Refresh</Button>} />
 
       <Tabs defaultActiveKey="workflows" items={[
         {

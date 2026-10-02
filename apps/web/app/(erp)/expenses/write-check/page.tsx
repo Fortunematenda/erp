@@ -14,6 +14,7 @@ import { StatCard } from '@/components/stat-card';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
 import { amountInWords } from '@/lib/amount-words';
+import { PageHeader } from '@/components/ui/page-header';
 
 export default function WriteCheckPage() {
   const router = useRouter();
@@ -92,10 +93,7 @@ export default function WriteCheckPage() {
   );
   return (
     <div className="nex-fade">
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-        <div><h1 className="text-[26px] font-bold text-[#171a2e]">Write a Check</h1><p className="text-[13px] text-[#64748b]">Write, record, and print checks</p></div>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => router.back()}>Back</Button>
-      </div>
+      <PageHeader title="Write a Check" description="Write, record, and print checks" actions={<Button icon={<ArrowLeftOutlined />} onClick={() => router.back()}>Back</Button>} />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
         <StatCard icon={<FileTextOutlined />} label="Total checks" value={checkList.data?.length || 0} />
         <StatCard icon={<BankOutlined />} label="Bank accounts" value={bankAccounts.length} />

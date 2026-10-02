@@ -6,6 +6,12 @@ import type { ColumnsType } from 'antd/es/table';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { api } from '@/lib/api';
 import { Can } from '@/components/Can';
+import { StatusPill, DetailItem, EmptyState } from '@/components/sales-ui';
+import { RowActionsMenu, ACTIONS_COL } from '@/components/row-actions-menu';
+import { fmtMoney, fmtNumber } from '@/lib/format';
+
+const PLAN_TYPES = ['MEDICAL', 'PENSION', 'HOUSING', 'TRANSPORT', 'LOAN', 'OTHER'];
+const lbl = (s: string) => (s || '').replace(/_/g, ' ');
 
 export default function LeaveBenefitsPage() {
   const qc = useQueryClient();
@@ -56,8 +62,15 @@ export default function LeaveBenefitsPage() {
   return (
     <div className="nex-fade">
       <div className="flex items-center justify-between mb-6">
-        <div><h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">Leave & Benefits</h1><p className="text-[13px] text-[#64748b] mt-1">Leave types, balances and employee benefits</p></div>
-        <Can permission="hr.employees.manage"><Button icon={<ReloadOutlined />} onClick={() => { types.refetch(); balances.refetch(); plans.refetch(); eb.refetch(); }}>Refresh</Button></Can>
+        <div><h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">Leave & Benefits</h1><p className="text-[13px] text-[#64748b] mt-1">Leave types, employee entitlements and benefit plans</p></div>
+        <Can permission="hr.employees.manage"><Button icon={<ReloadOutlined />} onClick={refresh}>Refresh</Button></Can>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
+        <MiniCard label="Leave Types" value={(types.data || []).length} hint="Configured" />
+        <MiniCard label="Total Leave Balance" value={`${fmtNumber(totalBalance, 1)} d`} hint={`${(balances.data || []).length} balance record(s)`} />
+        <MiniCard label="Benefit Plans" value={(plans.data || []).length} hint="Available plans" />
+        <MiniCard label="Assigned Benefits" value={(eb.data || []).length} hint="Employee benefits" />
       </div>
       <Tabs defaultActiveKey="types" items={[
         { key: 'types', label: 'Leave Types', children: <div className="nex-card"><div className="flex justify-end px-4 pt-3"><Button type="primary" icon={<PlusOutlined />} onClick={() => setTypeOpen(true)}>Add Leave Type</Button></div><Table rowKey="id" loading={types.isLoading} dataSource={types.data || []} columns={typeCols} pagination={false} /></div> },

@@ -18,6 +18,7 @@ import { fmtDate, fmtMoney } from '@/lib/format';
 import { CrmBoard } from '@/components/crm-board';
 import { CRM_STAGES, LEAD_PRIORITY, LEAD_SOURCES, LOST_REASONS, stageDef } from '@/lib/crm';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
+import { PageHeader } from '@/components/ui/page-header';
 
 const T_BADGE: Record<string, { c: string; icon: any }> = {
   CALL: { c: '#0ea5e9', icon: <PhoneOutlined /> }, EMAIL: { c: '#1d5fb5', icon: <MailOutlined /> }, MEETING: { c: '#003366', icon: <TeamOutlined /> },
@@ -187,10 +188,7 @@ export default function Crm() {
 
   return (
     <div className="nex-fade">
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-        <div><h1 className="text-[26px] font-bold text-[#171a2e]">CRM &amp; Sales Pipeline</h1><p className="text-[13px] text-[#64748b] mt-0.5">Lead-to-cash relationship layer</p></div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingLead(null); setLeadModal(true); }}>New Lead</Button>
-      </div>
+      <PageHeader title="CRM & Sales Pipeline" description="Lead-to-cash relationship layer" actions={<Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingLead(null); setLeadModal(true); }}>New Lead</Button>} />
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         {tcards.map((c) => c.onClick ? <button key={c.label} onClick={c.onClick} className="text-left"><StatCard icon={c.icon} label={c.label} value={c.value} hint={c.hint} color={c.color} /></button> : <StatCard key={c.label} icon={c.icon} label={c.label} value={c.value} hint={c.hint} color={c.color} />)}

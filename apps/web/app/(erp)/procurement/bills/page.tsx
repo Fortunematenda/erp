@@ -19,6 +19,7 @@ import { BillManagementList } from '@/components/bill-management-list';
 import { fmtDate, fmtMoney, fmtNumber } from '@/lib/format';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
 import { MetricStrip } from '@/components/metric-strip';
+import { PageHeader } from '@/components/ui/page-header';
 
 const TERMS = ['Due on Receipt', 'Net 7', 'Net 14', 'Net 30', 'Net 45', 'Net 60', 'Net 90', 'Custom'];
 const METHODS = ['BANK', 'CHEQUE', 'CASH', 'CARD', 'MOBILE', 'OTHER'];
@@ -50,10 +51,7 @@ export default function BillsPage() {
   ];
   return (
     <div className="nex-fade">
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-        <div><h1 className="text-[26px] font-bold text-[#171a2e]">Bill Management</h1><p className="text-[13px] text-[#64748b]">Accounts Payable workspace</p></div>
-        <Space><Button icon={<FileTextOutlined />} onClick={() => router.push('/expenses/vendor-credits')}>Vendor Credits</Button><Button icon={<ReloadOutlined />} onClick={() => router.refresh()} /><Button icon={<DollarOutlined />} onClick={() => setTab('pay')}>Pay Supplier</Button></Space>
-      </div>
+      <PageHeader title="Bill Management" description="Accounts Payable workspace" actions={<Space><Button icon={<FileTextOutlined />} onClick={() => router.push('/expenses/vendor-credits')}>Vendor Credits</Button><Button icon={<ReloadOutlined />} onClick={() => router.refresh()} /><Button icon={<DollarOutlined />} onClick={() => setTab('pay')}>Pay Supplier</Button></Space>} />
       <Card className="nex-card" styles={{ body: { padding: '18px 20px' } }}>
         <Tabs items={items} activeKey={tab} onChange={setTab} destroyOnHidden />
       </Card>
