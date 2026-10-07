@@ -263,7 +263,7 @@ export class DocumentPdfService {
     let y = headerBottom + 20;
 
     // ——— Bill to ———
-    const billLabel = isQuote ? (t.preparedForLabel || 'PREPARED FOR') : isOrder ? 'SOLD TO' : 'BILL TO';
+    const billLabel = isQuote ? (t.preparedForLabel || 'PREPARED FOR') : isOrder ? 'SOLD TO' : (vm.kind === 'payslip' ? 'EMPLOYEE' : 'BILL TO');
     const billStartY = y;
     const billColW = t.customerBlockLayout === 'side-by-side' ? contentW / 2 - 12 : 300;
     doc.fillColor(muted).font(font).fontSize(base - 2);
@@ -348,17 +348,27 @@ export class DocumentPdfService {
       at(val, valueX, y, { width: valueW, align: 'right' });
       y += useBold ? 22 : 18;
     };
-    totalLine('Subtotal', money(vm.subtotal));
-    if (vm.discount) totalLine('Discount', `− ${money(vm.discount)}`);
-    if (vm.taxTotal) totalLine('Tax', money(vm.taxTotal));
-    doc.fillColor('#e5e7eb').rect(totalLeft, y, totalBoxW, 0.5).fill();
-    y += 6;
-    if (isQuote) totalLine('QUOTE TOTAL', money(vm.total), { bold: true, size: base + 3 });
-    else {
-      totalLine('TOTAL', money(vm.total), { bold: true, size: base + 3 });
-      if (!isOrder && t.showBalanceDue !== false) {
-        totalLine('Paid', money(vm.paid));
-        totalLine('Balance Due', money(vm.balance), { bold: true, color: secondary });
+    const isPayslip = vm.kind === 'payslip';
+    if (isPayslip) {
+      const gross = Number(vm.subtotal ?? vm.grossPay ?? 0);
+      const net = Number(vm.netPay ?? vm.total ?? 0);
+      const ded = Number(vm.deductionTotal ?? Math.max(0, gross - net));
+      totalLine('Gross pay', money(gross));
+      totalLine('Total deductions', money(ded));
+      totalLine('NET PAY', money(net), { bold: true, size: base + 3 });
+    } else {
+      totalLine('Subtotal', money(vm.subtotal));
+      if (vm.discount) totalLine('Discount', `− ${money(vm.discount)}`);
+      if (vm.taxTotal) totalLine('Tax', money(vm.taxTotal));
+      doc.fillColor('#e5e7eb').rect(totalLeft, y, totalBoxW, 0.5).fill();
+      y += 6;
+      if (isQuote) totalLine('QUOTE TOTAL', money(vm.total), { bold: true, size: base + 3 });
+      else {
+        totalLine('TOTAL', money(vm.total), { bold: true, size: base + 3 });
+        if (!isOrder && t.showBalanceDue !== false) {
+          totalLine('Paid', money(vm.paid));
+          totalLine('Balance Due', money(vm.balance), { bold: true, color: secondary });
+        }
       }
     }
     y += 16;

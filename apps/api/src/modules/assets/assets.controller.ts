@@ -29,7 +29,7 @@ export class AssetsController {
   }
 
   @Get() async assets(@Req() req: any) {
-    const list = await this.prisma.asset.findMany({ where: { companyId: companyIdOf(req.user) }, include: { assetCategory: true }, orderBy: { name: 'asc' } });
+    const list = await this.prisma.asset.findMany({ where: { companyId: companyIdOf(req.user) }, include: { assetCategory: true, assignments: { where: { status: 'ASSIGNED' }, include: { employee: { select: { id: true, firstName: true, lastName: true, employeeNo: true } } } } }, orderBy: { name: 'asc' } });
     // Single authoritative Net Book Value (cost − accumulated depreciation) so the
     // register rows, dashboard and reports always reconcile.
     return list.map((a: any) => ({ ...a, bookValue: Number((Number(a.cost) - Number(a.accumulatedDepreciation || 0)).toFixed(2)) }));

@@ -5,6 +5,7 @@ import { PermissionService } from '../auth/permission.service';
 import { PerformanceCalculationService } from './performance-calculation.service';
 import { SystemKpiSourceService } from './system-kpi-source.service';
 import { KpiTemplateService } from './kpi-template.service';
+import { PerformanceCompletionService } from './performance-completion.service';
 import { round2 } from './performance.constants';
 
 type AnyReq = any;
@@ -18,6 +19,7 @@ export class PerformanceAssessmentService {
     private systemSource: SystemKpiSourceService,
     private templates: KpiTemplateService,
     private permissions: PermissionService,
+    private completion: PerformanceCompletionService,
   ) {}
 
   private async userPermissions(req: AnyReq): Promise<string[]> {
@@ -51,6 +53,9 @@ export class PerformanceAssessmentService {
   }
 
   async list(companyId: string, filters: any) {
+    // Special issue filters are driven by the shared completion service so counts reconcile.
+    if (filters.issue === 'NO_ACTIVE_TEMPLATE') return this.completion.getMissingTemplate(companyId, filters.cycleId, filters.departmentId);
+    if (filters.submissionStatus === 'MISSING' || filters.missingSubmission === 'true') return this.completion.getMissingSubmissions(companyId, filters.cycleId, filters.departmentId);
     const where: any = { companyId };
     if (filters.cycleId) where.cycleId = filters.cycleId;
     if (filters.departmentId) where.departmentId = filters.departmentId;
@@ -201,6 +206,52 @@ export class PerformanceAssessmentService {
     return this.detail(req, id);
   }
 
+  // ---------- HR submits the employee KPI section on the employee's behalf ----------
+  // Used when the employee has no system access. Requires hr.performance.manage and is audited.
+  async hrEmployeeSubmit(req: AnyReq, id: string, dto: any) {
+    const companyId = req.user.companyId!;
+    const a = await this.prisma.employeePerformanceAssessment.findFirst({
+      where: { id, companyId },
+      include: { employee: { include: { department: true, user: { select: { id: true } } } }, cycle: true, version: { include: { template: true } }, kpis: true },
+    });
+    if (!a) throw new NotFoundException('Assessment not found');
+    await this.assertNotLocked(a);
+    const perms = await this.userPermissions(req);
+    if (!this.has(perms, 'hr.performance.manage')) throw new ForbiddenException('Only HR can submit a KPI assessment on behalf of an employee');
+    if (a.employeeSubmittedAt) throw new BadRequestException('Self assessment already submitted');
+
+    for (const line of dto.kpis || []) {
+      const kpi = a.kpis.find((k: any) => k.id === line.kpiId);
+      if (!kpi) continue;
+      const data: any = { employeeComment: line.comment ?? undefined, employeeEvidence: line.evidence ?? undefined, employeeSubmittedAt: new Date() };
+      if (line.actual !== undefined && !kpi.systemDerived) {
+        data.actualValue = line.actual === '' || line.actual == null ? null : line.actual;
+        data.actualText = line.actualText ?? null;
+      }
+      if (kpi.scoringMethod === 'MANUAL' && line.score != null) data.employeeScore = line.score;
+      await this.prisma.employeePerformanceKpi.update({ where: { id: kpi.id }, data });
+    }
+    await this.refreshSystemKpis(companyId, id);
+
+    const kpis = await this.prisma.employeePerformanceKpi.findMany({ where: { assessmentId: id } });
+    const missing: string[] = [];
+    for (const k of kpis) {
+      const filled = k.actualValue != null || k.actualText || k.employeeScore != null || (k.systemDerived && k.actualValue != null);
+      if (!filled) missing.push(`${k.name}: actual result`);
+      if (k.employeeCommentRequired && !k.employeeComment) missing.push(`${k.name}: comment`);
+      if (k.evidenceRequired && !k.employeeEvidence) missing.push(`${k.name}: evidence`);
+    }
+    if (missing.length) throw new BadRequestException(`Assessment incomplete — ${Math.round(((kpis.length - missing.length) / kpis.length) * 100)}% complete. Missing: ${missing.slice(0, 6).join('; ')}${missing.length > 6 ? '…' : ''}`);
+
+    await this.prisma.employeePerformanceAssessment.update({ where: { id }, data: { employeeSubmittedAt: new Date(), status: 'PENDING_MANAGER' } });
+    await this.audit.log(companyId, req.user.sub, 'EMPLOYEE_SUBMITTED_ON_BEHALF', 'EmployeePerformanceAssessment', id, { employeeId: a.employeeId, onBehalf: true });
+    await this.notifyManager(companyId, a);
+    if (a.employee.user?.id) {
+      await this.prisma.performanceNotification.create({ data: { companyId, userId: a.employee.user.id, employeeId: a.employeeId, type: 'KPI_SUBMITTED_ON_BEHALF', title: 'Your KPI assessment was submitted by HR', body: `HR submitted your KPI assessment for "${a.cycle.name}" on your behalf.`, link: `/performance?assessment=${a.id}` } });
+    }
+    return this.detail(req, id);
+  }
+
   private async notifyManager(companyId: string, a: any) {
     if (!a.managerId) return;
     const mgr = await this.prisma.employee.findFirst({ where: { id: a.managerId }, include: { user: true } });
@@ -232,7 +283,7 @@ export class PerformanceAssessmentService {
       await this.prisma.employeePerformanceKpi.update({ where: { id: kpi.id }, data });
     }
     await this.recalculate(companyId, id);
-    await this.prisma.employeePerformanceAssessment.update({ where: { id }, data: { managerSubmittedAt: new Date(), status: 'PENDING_QA' } });
+    await this.prisma.employeePerformanceAssessment.update({ where: { id }, data: { managerSubmittedAt: new Date(), status: 'PENDING_QA', qaChangesRequestedAt: null, qaChangesReason: null } });
     await this.audit.log(companyId, req.user.sub, 'MANAGER_SUBMITTED', 'EmployeePerformanceAssessment', id, {});
     // QA assignment: if the template requires the QA reviewer to differ from the
     // manager, leave assignment to HR (notification only). Otherwise the manager may QA.
@@ -248,11 +299,102 @@ export class PerformanceAssessmentService {
   }
 
   // ---------- QA review ----------
+  /** QA queue with derived QA status, evidence completeness, variance flags and reviewer. */
+  async qaQueue(companyId: string, filters: any = {}) {
+    const where: any = { companyId, managerSubmittedAt: { not: null }, excludedReason: null };
+    if (filters.cycleId) where.cycleId = filters.cycleId;
+    if (filters.departmentId) where.departmentId = filters.departmentId;
+    const rows = await this.prisma.employeePerformanceAssessment.findMany({
+      where,
+      include: {
+        employee: { include: { department: true } },
+        cycle: { select: { id: true, name: true, qaDeadline: true, managerDeadline: true } },
+        version: { select: { version: true, template: { select: { name: true, qaRequired: true } } } },
+        kpis: true,
+        qaReviews: { orderBy: { createdAt: 'desc' } },
+      },
+      orderBy: { managerSubmittedAt: 'asc' },
+    });
+    const reviewerIds = Array.from(new Set(rows.flatMap((r) => [r.qaReviewerId, ...(r.qaReviews || []).map((q) => q.reviewerId)]).filter(Boolean))) as string[];
+    const users = reviewerIds.length ? await this.prisma.user.findMany({ where: { id: { in: reviewerIds } }, select: { id: true, firstName: true, lastName: true, email: true } }) : [];
+    const umap = new Map(users.map((u) => [u.id, `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email]));
+    const managerIds = Array.from(new Set(rows.map((r) => r.managerId).filter(Boolean))) as string[];
+    const managers = managerIds.length ? await this.prisma.employee.findMany({ where: { id: { in: managerIds } }, select: { id: true, firstName: true, lastName: true } }) : [];
+    const mmap = new Map(managers.map((m) => [m.id, `${m.firstName} ${m.lastName}`]));
+    const now = new Date();
+    return rows.map((r) => {
+      const inProgress = (r.qaReviews || []).some((q) => q.status === 'IN_PROGRESS');
+      const reviewerId = r.qaReviewerId || (r.qaReviews || []).find((q) => q.status === 'IN_PROGRESS')?.reviewerId || (r.qaReviews || [])[0]?.reviewerId || null;
+      const qaStatus = ['LOCKED', 'COMPLETED'].includes(r.status) ? 'FINALIZED'
+        : (r.status === 'APPROVED' || r.status === 'PENDING_APPROVAL') ? 'APPROVED'
+        : r.qaChangesRequestedAt ? 'CHANGES_REQUESTED'
+        : inProgress ? 'IN_REVIEW'
+        : 'READY_FOR_QA';
+      const evidenceRequired = (r.kpis || []).filter((k) => k.evidenceRequired).length;
+      const evidenceMissing = (r.kpis || []).filter((k) => k.evidenceRequired && !(k.managerEvidence || k.employeeEvidence || k.qaEvidence)).length;
+      const variances = (r.kpis || []).map((k) => (k.employeeScore != null && k.managerScore != null ? Number(k.managerScore) - Number(k.employeeScore) : null)).filter((v) => v != null) as number[];
+      const avgVariance = variances.length ? round2(variances.reduce((s, v) => s + Number(v), 0) / variances.length) : null;
+      const flagged = evidenceMissing > 0 || (avgVariance != null && Math.abs(avgVariance) >= 15) || !!r.criticalNotMet;
+      return {
+        id: r.id, employeeId: r.employeeId, employee: r.employee, department: r.employee?.department?.name || null,
+        cycle: r.cycle, templateName: r.templateName, templateVersion: r.version?.version, status: r.status,
+        managerSubmittedAt: r.managerSubmittedAt, managerName: r.managerId ? mmap.get(r.managerId) || null : null,
+        managerScore: r.totalScore != null ? Number(r.totalScore) : null,
+        finalScore: ['APPROVED', 'COMPLETED', 'LOCKED'].includes(r.status) && r.totalScore != null ? Number(r.totalScore) : null,
+        evidence: { required: evidenceRequired, missing: evidenceMissing, complete: evidenceRequired > 0 && evidenceMissing === 0 },
+        qaStatus, qaReviewer: reviewerId ? umap.get(reviewerId) || null : null, qaReviewerId: reviewerId,
+        dueDate: r.cycle?.qaDeadline || null, overdue: !!r.cycle?.qaDeadline && new Date(r.cycle.qaDeadline) < now && !['LOCKED', 'COMPLETED'].includes(r.status),
+        flagged, variance: avgVariance, criticalNotMet: r.criticalNotMet, changesReason: r.qaChangesReason,
+      };
+    }).filter((r) => (!filters.qaStatus || r.qaStatus === filters.qaStatus)
+      && (!filters.reviewerId || r.qaReviewerId === filters.reviewerId)
+      && (!filters.flagged || r.flagged)
+      && (!filters.overdue || r.overdue)
+      && (!filters.search || `${r.employee?.firstName} ${r.employee?.lastName} ${r.employee?.employeeNo}`.toLowerCase().includes(String(filters.search).toLowerCase())));
+  }
+
+  async qaSummary(companyId: string) {
+    const rows = await this.qaQueue(companyId, {});
+    return {
+      readyForQa: rows.filter((r) => r.qaStatus === 'READY_FOR_QA').length,
+      inReview: rows.filter((r) => r.qaStatus === 'IN_REVIEW').length,
+      changesRequested: rows.filter((r) => r.qaStatus === 'CHANGES_REQUESTED').length,
+      approved: rows.filter((r) => r.qaStatus === 'APPROVED').length,
+      finalized: rows.filter((r) => r.qaStatus === 'FINALIZED').length,
+      flagged: rows.filter((r) => r.flagged).length,
+      total: rows.length,
+    };
+  }
+
+  async assignQaReviewer(req: AnyReq, id: string, reviewerId: string) {
+    const companyId = req.user.companyId!;
+    const a = await this.prisma.employeePerformanceAssessment.findFirst({ where: { id, companyId } });
+    if (!a) throw new NotFoundException('Assessment not found');
+    if (!a.managerSubmittedAt) throw new BadRequestException('QA can only be assigned after manager review is completed');
+    await this.prisma.employeePerformanceAssessment.update({ where: { id }, data: { qaReviewerId: reviewerId } });
+    await this.audit.log(companyId, req.user.sub, 'QA_REVIEWER_ASSIGNED', 'EmployeePerformanceAssessment', id, { reviewerId });
+    return this.detail(req, id);
+  }
+
+  /** Request changes: return the assessment to the manager with a mandatory reason. */
+  async requestQaChanges(req: AnyReq, id: string, reason: string) {
+    const companyId = req.user.companyId!;
+    if (!reason || !reason.trim()) throw new BadRequestException('A reason is required when requesting changes');
+    const a = await this.prisma.employeePerformanceAssessment.findFirst({ where: { id, companyId } });
+    if (!a) throw new NotFoundException('Assessment not found');
+    await this.assertNotLocked(a);
+    if (!a.managerSubmittedAt) throw new BadRequestException('QA cannot start before manager review is completed');
+    await this.prisma.employeePerformanceAssessment.update({ where: { id }, data: { qaChangesRequestedAt: new Date(), qaChangesReason: reason, status: 'PENDING_MANAGER', qaSubmittedAt: null } });
+    await this.audit.log(companyId, req.user.sub, 'QA_CHANGES_REQUESTED', 'EmployeePerformanceAssessment', id, { reason });
+    return this.detail(req, id);
+  }
+
   async qaStart(req: AnyReq, id: string) {
     const companyId = req.user.companyId!;
     const a = await this.prisma.employeePerformanceAssessment.findFirst({ where: { id, companyId }, include: { employee: true } });
     if (!a) throw new NotFoundException('Assessment not found');
     await this.assertNotLocked(a);
+    if (!a.managerSubmittedAt) throw new BadRequestException('QA cannot start before manager review is completed');
     const existing = await this.prisma.performanceQaReview.findFirst({ where: { assessmentId: id, reviewerId: req.user.sub, status: 'IN_PROGRESS' } });
     if (!existing) await this.prisma.performanceQaReview.create({ data: { companyId, assessmentId: id, reviewerId: req.user.sub, status: 'IN_PROGRESS' } });
     await this.audit.log(companyId, req.user.sub, 'QA_STARTED', 'EmployeePerformanceAssessment', id, {});

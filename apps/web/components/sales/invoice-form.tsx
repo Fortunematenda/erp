@@ -34,7 +34,7 @@ export function InvoiceFormDrawer({ open, onClose, presetCustomerId }: { open: b
   const meta = useMeta();
   const [form] = Form.useForm();
   const [lines, setLines] = useState<Line[]>([{ key: 1, description: '', quantity: 1, unitPrice: 0, taxRate: 0 }]);
-  const [saving, setSaving] = useState<'draft' | 'save' | null>(null);
+  const [saving, setSaving] = useState<'draft' | 'post' | 'send' | null>(null);
   const [defaultTax, setDefaultTax] = useState(0);
   const [customerModal, setCustomerModal] = useState(false);
   const [itemModalKey, setItemModalKey] = useState<number | null>(null);
@@ -180,12 +180,24 @@ export function InvoiceFormDrawer({ open, onClose, presetCustomerId }: { open: b
           </div>
           {lines.map((l) => (
             <div key={l.key} className="grid grid-cols-[1.4fr_2fr_0.7fr_1fr_1fr_40px] gap-3 items-center py-2 border-t border-[#f0f1f6]">
-              <Select className="w-full" showSearch optionFilterProp="searchLabel" placeholder="Item" options={productOptions(meta.data?.items)} value={l.itemId} onChange={(v) => onProduct(l.key, v)} optionRender={(ori) => (
-                <div className="flex items-center justify-between gap-2 w-full">
-                  <span className="truncate">{ori.data.label}</span>
-                  {ori.data.typeBadge && <span className="text-[10px] uppercase tracking-wide text-[#64748b] shrink-0">{ori.data.typeBadge}</span>}
-                </div>
-              )} popupRender={(menu) => (<><div className="p-1">{menu}</div><Divider style={{ margin: '6px 0' }} /><Button type="text" size="small" block icon={<PlusOutlined />} onClick={() => setItemModalKey(l.key)}>Add item</Button></>)} />
+              <Select className="w-full" showSearch optionFilterProp="searchLabel" placeholder="Item" options={productOptions(meta.data?.items)} value={l.itemId} onChange={(v) => onProduct(l.key, v)}
+                optionRender={(ori) => {
+                  const opt: any = ori.data || {};
+                  const it = opt.item || {};
+                  const name = it.name || opt.label || 'Item';
+                  const sku = it.sku || '';
+                  return (
+                    <div className="flex items-center justify-between gap-2 w-full">
+                      <span className="truncate">{sku ? <span className="font-mono text-[11px] text-[#94a3b8] mr-1">{sku}</span> : null}{name}</span>
+                      {opt.typeBadge && <span className="text-[10px] uppercase tracking-wide text-[#64748b] shrink-0">{opt.typeBadge}</span>}
+                    </div>
+                  );
+                }}
+                labelRender={(props: any) => {
+                  const opt: any = productOptions(meta.data?.items).find((o: any) => o.value === props.value);
+                  return <span className="truncate">{opt?.item?.name || props.label}</span>;
+                }}
+                popupRender={(menu) => (<><div className="p-1">{menu}</div><Divider style={{ margin: '6px 0' }} /><Button type="text" size="small" block icon={<PlusOutlined />} onClick={() => setItemModalKey(l.key)}>Add item</Button></>)} />
               <Input value={l.description} onChange={(e) => updateLine(l.key, { description: e.target.value })} placeholder="Description" />
               <InputNumber className="w-full" min={0} value={l.quantity} onChange={(v) => updateLine(l.key, { quantity: Number(v || 0) })} />
               <Tooltip title="Automatically populated from the customer's price list or the product's default sales price. You may edit it if you have permission."><InputNumber className="w-full" min={0} prefix="$" value={l.unitPrice} onChange={(v) => updateLine(l.key, { unitPrice: Number(v || 0) })} /></Tooltip>

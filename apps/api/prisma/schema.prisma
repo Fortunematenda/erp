@@ -68,6 +68,22 @@ enum DeviceStatus {
   EXPIRED
 }
 
+enum FiscalEnvironment {
+  MOCK
+  SANDBOX
+  PRODUCTION
+}
+
+enum FiscalRequestStatus {
+  DRAFT
+  READY_TO_SUBMIT
+  SUBMITTED
+  AWAITING_RESPONSE
+  ADDITIONAL_INFORMATION_REQUIRED
+  APPROVED
+  REJECTED
+}
+
 enum JournalStatus {
   DRAFT
   POSTED
@@ -93,11 +109,19 @@ enum StockMovementType {
   RETURN_OUT
 }
 
+enum ItemType {
+  INVENTORY_PRODUCT
+  NON_INVENTORY_PRODUCT
+  SERVICE
+}
+
 enum PurchaseOrderStatus {
   DRAFT
+  OPEN
   APPROVED
   PART_RECEIVED
   RECEIVED
+  CLOSED
   CANCELLED
 }
 
@@ -157,6 +181,8 @@ model Company {
   tin                       String?
   vatNumber                 String?
   baseCurrency              String                          @default("USD")
+  payrollCountry            String                          @default("ZW")
+  payrollCurrency           String                          @default("USD")
   financialYearStart        Int                             @default(1)
   active                    Boolean                         @default(true)
   branches                  Branch[]
@@ -172,6 +198,9 @@ model Company {
   approvalRequests          ApprovalRequest[]
   financialYears            FinancialYear[]
   fiscalPeriods             FiscalPeriod[]
+  fiscalisationProfile      FiscalisationProfile?
+  fiscalRegistrationRequests FiscalRegistrationRequest[]
+  fiscalTaxMappings         FiscalTaxMapping[]
   bankAccounts              BankAccount[]
   bankReconciliations       BankReconciliation[]
   vendorCredits             VendorCredit[]
@@ -200,6 +229,8 @@ model Company {
   leaveTypes                LeaveType[]
   leavePolicies             LeavePolicy[]
   leaveBalances             LeaveBalance[]
+  leaveBalanceTransactions  LeaveBalanceTransaction[]
+  payrollInputs             PayrollInput[]
   leaveAccruals             LeaveAccrual[]
   benefitPlans              BenefitPlan[]
   employeeBenefits          EmployeeBenefit[]
@@ -258,6 +289,9 @@ model Company {
   employees                 Employee[]
   leads                     Lead[]
   assets                    Asset[]
+  assetAssignments          AssetAssignment[]
+  projectMembers            ProjectMember[]
+  employeeDocuments         EmployeeDocument[]
   risks                     Risk[]
   complianceObligations     ComplianceObligation[]
   auditLogs                 AuditLog[]
@@ -284,7 +318,7 @@ model Company {
   budgets                   Budget[]
   configs                   SystemConfig[]
   createdAt                 DateTime                        @default(now())
-  updatedAt                 DateTime                        @updatedAt
+  updatedAt                 DateTime                        @default(now()) @updatedAt
   applicationStageHistories ApplicationStageHistory[]
   interviewScorecards       InterviewScorecard[]
 
@@ -304,6 +338,10 @@ model Branch {
   phone                   String?
   email                   String?
   street                  String?
+  houseNumber             String?
+  suburb                  String?
+  zimraRegion             String?
+  zimraStation            String?
   province                String?
   postalCode              String?
   country                 String?
@@ -601,46 +639,46 @@ model JournalLine {
 }
 
 model Customer {
-  id             String                @id @default(uuid())
-  companyId      String
-  company        Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  code           String
-  name           String
-  firstName      String?
-  lastName       String?
-  companyName    String?
-  email          String?
-  phone          String?
-  mobile         String?
-  address1       String?
-  address2       String?
-  city           String?
-  state          String?
-  zip            String?
-  country        String?
-  notes          String?
-  taxStatus      String                @default("Taxable")
-  defaultTaxRate Decimal               @default(0) @db.Decimal(8, 4)
-  tin            String?
-  vatNumber      String?
-  creditLimit    Decimal               @default(0) @db.Decimal(18, 2)
-  paymentTerms   String?
-  status         String                @default("ACTIVE")
-  priceListId    String?
-  invoices       SalesInvoice[]
-  quotations     Quotation[]
-  salesOrders    SalesOrder[]
-  creditNotes    CreditNote[]
+  id              String                @id @default(uuid())
+  companyId       String
+  company         Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  code            String
+  name            String
+  firstName       String?
+  lastName        String?
+  companyName     String?
+  email           String?
+  phone           String?
+  mobile          String?
+  address1        String?
+  address2        String?
+  city            String?
+  state           String?
+  zip             String?
+  country         String?
+  notes           String?
+  taxStatus       String                @default("Taxable")
+  defaultTaxRate  Decimal               @default(0) @db.Decimal(8, 4)
+  tin             String?
+  vatNumber       String?
+  creditLimit     Decimal               @default(0) @db.Decimal(18, 2)
+  paymentTerms    String?
+  status          String                @default("ACTIVE")
+  priceListId     String?
+  invoices        SalesInvoice[]
+  quotations      Quotation[]
+  salesOrders     SalesOrder[]
+  creditNotes     CreditNote[]
   customerReturns CustomerReturn[]
-  interactions   CustomerInteraction[]
-  opportunities  Opportunity[]
-  receipts       Receipt[]
-  projects       Project[]
-  deliveryNotes  DeliveryNote[]
-  serviceTickets ServiceTicket[]
-  debitNotes     DebitNote[]
-  convertedLeads Lead[]                @relation("LeadConversions")
-  crmEvents      CrmEvent[]
+  interactions    CustomerInteraction[]
+  opportunities   Opportunity[]
+  receipts        Receipt[]
+  projects        Project[]
+  deliveryNotes   DeliveryNote[]
+  serviceTickets  ServiceTicket[]
+  debitNotes      DebitNote[]
+  convertedLeads  Lead[]                @relation("LeadConversions")
+  crmEvents       CrmEvent[]
 
   @@unique([companyId, code])
 }
@@ -800,6 +838,7 @@ model PurchaseOrder {
   paymentTerms       String?
   supplierReference  String?
   shipTo             String?
+  warehouseId        String?
   memo               String?
   subtotal           Decimal             @default(0) @db.Decimal(18, 2)
   discount           Decimal             @default(0) @db.Decimal(18, 2)
@@ -835,14 +874,16 @@ model InventoryItem {
   sku                     String
   name                    String
   unit                    String             @default("EA")
+  purchaseUnit            String?
+  salesUnit               String?
   hsCode                  String?
   barcode                 String?
   brand                   String?
   description             String?
   salesDescription        String?
   purchaseDescription     String?
-  /// INVENTORY_PRODUCT | NON_INVENTORY_PRODUCT | SERVICE
-  type                    String             @default("INVENTORY_PRODUCT")
+  /// Canonical item type — drives stock + accounting behaviour.
+  type                    ItemType           @default(INVENTORY_PRODUCT)
   itemCategory            String?
   categoryId              String?
   category                InventoryCategory? @relation(fields: [categoryId], references: [id])
@@ -879,6 +920,9 @@ model InventoryItem {
   priceListItems          PriceListItem[]
 
   @@unique([companyId, sku])
+  @@index([companyId])
+  @@index([companyId, type])
+  @@index([categoryId])
 }
 
 model InventoryCategory {
@@ -926,13 +970,13 @@ model Warehouse {
 }
 
 model StockMovement {
-  id          String            @id @default(uuid())
-  warehouseId String
-  warehouse   Warehouse         @relation(fields: [warehouseId], references: [id])
-  itemId      String
-  item        InventoryItem     @relation(fields: [itemId], references: [id])
-  projectId   String?
-  project     Project?          @relation(fields: [projectId], references: [id])
+  id             String            @id @default(uuid())
+  warehouseId    String
+  warehouse      Warehouse         @relation(fields: [warehouseId], references: [id])
+  itemId         String
+  item           InventoryItem     @relation(fields: [itemId], references: [id])
+  projectId      String?
+  project        Project?          @relation(fields: [projectId], references: [id])
   type           StockMovementType
   quantity       Decimal           @db.Decimal(18, 4)
   signedQuantity Decimal           @default(0) @db.Decimal(18, 4)
@@ -942,6 +986,11 @@ model StockMovement {
   batchNo        String?
   serialNo       String?
   occurredAt     DateTime          @default(now())
+  /// Monotonic insertion sequence — deterministic tie-break for running balances.
+  seq            Int               @default(autoincrement())
+
+  @@index([itemId, occurredAt])
+  @@index([warehouseId])
 }
 
 model StockReservation {
@@ -1037,6 +1086,8 @@ model Employee {
   compensationType       String                          @default("SALARIED")
   bankDetails            Json?
   taxDetails             Json?
+  statutoryExemptions    Json?
+  payrollGroup           String?
   emergencyContact       Json?
   documents              Json?
   status                 String                          @default("ACTIVE")
@@ -1064,6 +1115,9 @@ model Employee {
   leaveApprovals         LeaveRequest[]                  @relation("LeaveApprover")
   offerManaged           Offer[]
   incentives             EmployeeIncentive[]
+  assetAssignments       AssetAssignment[]
+  projectMemberships     ProjectMember[]
+  employeeDocuments      EmployeeDocument[]
   user                   User?
 
   @@unique([companyId, employeeNo])
@@ -1088,17 +1142,26 @@ model WorkCalendar {
 }
 
 model Holiday {
-  id        String   @id @default(uuid())
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  branchId  String?
-  branch    Branch?  @relation(fields: [branchId], references: [id])
-  name      String
-  date      DateTime
-  country   String?
-  region    String?
-  recurring Boolean  @default(false)
-  active    Boolean  @default(true)
+  id              String    @id @default(uuid())
+  companyId       String
+  company         Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branchId        String?
+  branch          Branch?   @relation(fields: [branchId], references: [id])
+  name            String
+  date            DateTime
+  country         String?
+  region          String?
+  recurring       Boolean   @default(false)
+  active          Boolean   @default(true)
+  type            String    @default("PUBLIC")
+  recurrence      String    @default("NONE")
+  recurrenceMonth Int?
+  recurrenceDay   Int?
+  observedDate    DateTime?
+  observedRule    String    @default("NONE")
+  paid            Boolean   @default(true)
+  scope           String    @default("COMPANY")
+  calendarId      String?
 
   @@index([companyId])
   @@index([companyId, date])
@@ -1403,6 +1466,9 @@ model EmployeePerformanceAssessment {
   departmentId              String?
   department                Department?              @relation(fields: [departmentId], references: [id])
   managerId                 String?
+  qaReviewerId              String? // assigned QA reviewer (User id)
+  qaChangesRequestedAt      DateTime?
+  qaChangesReason           String?
   versionId                 String
   version                   KpiTemplateVersion       @relation(fields: [versionId], references: [id])
   templateName              String // snapshot of template name for reporting
@@ -1577,15 +1643,42 @@ model DevelopmentPlan {
 }
 
 model StatutoryRule {
-  id            String    @id @default(uuid())
-  country       String    @default("ZW")
-  authority     String
-  code          String
-  name          String
-  validFrom     DateTime
-  validTo       DateTime?
-  configuration Json
-  active        Boolean   @default(true)
+  id                         String    @id @default(uuid())
+  country                    String    @default("ZW")
+  authority                  String
+  code                       String
+  name                       String
+  validFrom                  DateTime
+  validTo                    DateTime?
+  configuration              Json      @default("{}")
+  active                     Boolean   @default(true)
+  ruleType                   String    @default("OTHER_DEDUCTION")
+  description                String?
+  version                    Int       @default(1)
+  calculationMethod          String    @default("PERCENTAGE")
+  calculationBase            String    @default("GROSS")
+  employeeEnabled            Boolean   @default(true)
+  employerEnabled            Boolean   @default(false)
+  employeeRate               Decimal?  @db.Decimal(9, 4)
+  employerRate               Decimal?  @db.Decimal(9, 4)
+  employeeMin                Decimal?  @db.Decimal(18, 2)
+  employeeMax                Decimal?  @db.Decimal(18, 2)
+  employerMin                Decimal?  @db.Decimal(18, 2)
+  employerMax                Decimal?  @db.Decimal(18, 2)
+  maxInsurableEarnings       Decimal?  @db.Decimal(18, 2)
+  currency                   String    @default("USD")
+  roundingRule               String    @default("NEAREST_CENT")
+  payrollFrequency           String    @default("MONTHLY")
+  employeeGlAccount          String?
+  employerLiabilityGlAccount String?
+  employerExpenseGlAccount   String?
+  applicability              Json?
+  status                     String    @default("DRAFT")
+  notes                      String?
+  createdById                String?
+  updatedById                String?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
 }
 
 model Lead {
@@ -1660,6 +1753,7 @@ model Asset {
   maintenanceOrders       MaintenanceOrder[]
   depreciationLines       DepreciationLine[]
   locationHistory         AssetLocationHistory[]
+  assignments             AssetAssignment[]
 
   @@unique([companyId, assetNo])
 }
@@ -1707,9 +1801,22 @@ model FiscalDevice {
   name                 String
   serialNumber         String
   zimraDeviceId        String?
+  modelName            String?
+  modelVersion         String?
+  integratorName       String?
+  posLocation          String?
+  activationKeyEnc     String?
+  environment          FiscalEnvironment      @default(MOCK)
+  registeredAt         DateTime?
   status               DeviceStatus           @default(UNREGISTERED)
   certificateRef       String?
+  certificateThumbprint String?
   certificateExpiresAt DateTime?
+  certificateIssuedAt  DateTime?
+  certificateRenewedAt DateTime?
+  privateKeyEnc        String?
+  csrPem               String?
+  certificatePem       String?
   fiscalDayNo          Int                    @default(0)
   receiptCounter       Int                    @default(0)
   globalReceiptNo      Int                    @default(0)
@@ -1751,6 +1858,7 @@ model FiscalReceipt {
   globalReceiptNo Int
   receiptType     String        @default("FiscalInvoice")
   status          FiscalStatus  @default(PENDING)
+  environment     FiscalEnvironment @default(MOCK)
   zimraReceiptId  String?
   serverSignature String?
   receiptHash     String?
@@ -1777,11 +1885,88 @@ model FiscalIntegrationLog {
   device       FiscalDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
   operation    String
   status       String
+  environment  FiscalEnvironment @default(MOCK)
   request      Json?
   response     Json?
   errorCode    String?
   errorMessage String?
   createdAt    DateTime     @default(now())
+}
+
+model FiscalisationProfile {
+  id                        String            @id @default(uuid())
+  companyId                 String            @unique
+  company                   Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  environment               FiscalEnvironment @default(MOCK)
+
+  taxpayerName              String?
+  vatRegistered             Boolean           @default(false)
+  taxpayerEmail             String?
+  taxpayerVerified          Boolean           @default(false)
+  verifiedTaxpayerName      String?
+  verifiedTin               String?
+  verifiedAt                DateTime?
+
+  integratorName            String?
+  softwareName              String            @default("NexusERP")
+  deviceModelName           String?
+  deviceModelVersion        String?
+  technicalContactName      String?
+  technicalContactEmail     String?
+  technicalContactPhone     String?
+  businessAddress           String?
+  softwareDescription       String?
+  integrationArchitecture   String?
+  testRegistrationRef       String?
+  productionApprovalRef     String?
+  productionApprovalDate    DateTime?
+  productionApprovalEvidence String?
+
+  readinessStatus           String            @default("NOT_CONFIGURED")
+  readinessUpdatedAt        DateTime?
+  setupStep                 Int?
+  setupDraft                Json?
+  createdAt                 DateTime          @default(now())
+  updatedAt                 DateTime          @updatedAt
+}
+
+model FiscalRegistrationRequest {
+  id                String              @id @default(uuid())
+  companyId         String
+  company           Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  deviceId          String?
+  assistance        String
+  status            FiscalRequestStatus @default(DRAFT)
+  requestDate       DateTime?
+  referenceNumber   String?
+  requestedBy       String?
+  zimraContact      String?
+  responseDate      DateTime?
+  responseNotes     String?
+  approvalReference String?
+  subject           String?
+  body              String?
+  attachments       Json?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+}
+
+model FiscalTaxMapping {
+  id          String    @id @default(uuid())
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  erpTaxCode  String
+  erpTreatment String?
+  fdmsTaxId   String?
+  fdmsTaxName String?
+  fdmsTaxRate Decimal?  @db.Decimal(8, 4)
+  validFrom   DateTime?
+  validTo     DateTime?
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([companyId, erpTaxCode])
 }
 
 model AuditLog {
@@ -2170,6 +2355,13 @@ model SupplierInvoice {
   creditsApplied     Decimal                     @default(0) @db.Decimal(18, 2)
   ref                String?
   memo               String?
+  warehouseId        String?
+  /// Goods physically received when a direct (no-PO) bill is posted.
+  receiveNow         Boolean                     @default(false)
+  /// Idempotency guard: set once the direct-bill receipt movements exist.
+  stockReceivedAt    DateTime?
+  /// Tracked when a bill is posted before the goods are received (GRNI accrual).
+  unreceivedQty      Decimal?                    @db.Decimal(18, 4)
   lines              SupplierInvoiceLine[]
   payments           SupplierPayment[]
   paymentAllocations SupplierPaymentAllocation[]
@@ -2194,6 +2386,9 @@ model SupplierInvoiceLine {
   lineTotal         Decimal         @default(0) @db.Decimal(18, 2)
   accountId         String?
   accountCode       String?
+  /// Line-level source links for one PO -> many receipts -> many bills.
+  purchaseOrderLineId String?
+  grnLineId           String?
 }
 
 model SupplierInvoiceAttachment {
@@ -2238,10 +2433,12 @@ model SupplierPayment {
   reversalReason     String?
   createdBy          String?
   createdById        String?
+  idempotencyKey     String?
   allocations        SupplierPaymentAllocation[]
   createdAt          DateTime                    @default(now())
 
   @@unique([companyId, paymentNo])
+  @@unique([companyId, idempotencyKey])
 }
 
 model SupplierPaymentAllocation {
@@ -2283,29 +2480,42 @@ model StockCountLine {
 }
 
 model LeaveRequest {
-  id             String        @id @default(uuid())
-  companyId      String
-  company        Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employeeId     String
-  employee       Employee      @relation(fields: [employeeId], references: [id])
-  leaveType      String        @default("ANNUAL")
-  leaveTypeId    String?
-  leaveTypeRef   LeaveType?    @relation(fields: [leaveTypeId], references: [id])
-  startDate      DateTime
-  endDate        DateTime
-  halfDay        String?       @default("FULL")
-  days           Decimal       @db.Decimal(8, 2)
-  workCalendarId String?
-  workCalendar   WorkCalendar? @relation(fields: [workCalendarId], references: [id])
-  reason         String?
-  attachment     String?
-  approverId     String?
-  approver       Employee?     @relation("LeaveApprover", fields: [approverId], references: [id])
-  status         String        @default("PENDING")
-  approvedBy     String?
-  approvedAt     DateTime?
-  comments       String?
-  createdAt      DateTime      @default(now())
+  id              String        @id @default(uuid())
+  companyId       String
+  company         Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employeeId      String
+  employee        Employee      @relation(fields: [employeeId], references: [id])
+  leaveType       String        @default("ANNUAL")
+  leaveTypeId     String?
+  leaveTypeRef    LeaveType?    @relation(fields: [leaveTypeId], references: [id])
+  startDate       DateTime
+  endDate         DateTime
+  halfDay         String?       @default("FULL")
+  startSession    String        @default("FULL")
+  endSession      String        @default("FULL")
+  includeWeekends Boolean       @default(false)
+  includeHolidays Boolean       @default(false)
+  calendarDays    Decimal?      @db.Decimal(8, 2)
+  weekendDays     Decimal?      @db.Decimal(8, 2)
+  holidayDays     Decimal?      @db.Decimal(8, 2)
+  days            Decimal       @db.Decimal(8, 2)
+  balanceAfter    Decimal?      @db.Decimal(8, 2)
+  year            Int?
+  workCalendarId  String?
+  workCalendar    WorkCalendar? @relation(fields: [workCalendarId], references: [id])
+  reason          String?
+  attachment      String?
+  approverId      String?
+  approver        Employee?     @relation("LeaveApprover", fields: [approverId], references: [id])
+  status          String        @default("PENDING")
+  requestedById   String?
+  approvedBy      String?
+  approvedAt      DateTime?
+  rejectionReason String?
+  cancelledBy     String?
+  cancelledAt     DateTime?
+  comments        String?
+  createdAt       DateTime      @default(now())
 }
 
 model Attendance {
@@ -2343,37 +2553,72 @@ model PayrollRun {
   payDate         DateTime?
   status          String    @default("DRAFT")
   paymentStatus   String    @default("UNPAID")
+  payrollType     String    @default("REGULAR")
+  currency        String    @default("USD")
   employeeCount   Int       @default(0)
   processedAt     DateTime?
   totalGross      Decimal   @default(0) @db.Decimal(18, 2)
   totalDeductions Decimal   @default(0) @db.Decimal(18, 2)
   totalNet        Decimal   @default(0) @db.Decimal(18, 2)
+  employerCost    Decimal   @default(0) @db.Decimal(18, 2)
+  notes           String?
   journalId       String?
   payslips        Payslip[]
 
   @@unique([companyId, period, year])
 }
 
+// Payroll inputs — authoritative earnings/deductions consumed by the payroll engine.
+model PayrollInput {
+  id          String   @id @default(uuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employeeId  String
+  period      Int
+  year        Int
+  category    String
+  code        String
+  description String?
+  quantity    Decimal  @default(0) @db.Decimal(12, 2)
+  unit        String?
+  rate        Decimal? @db.Decimal(18, 4)
+  amount      Decimal  @default(0) @db.Decimal(18, 2)
+  source      String   @default("MANUAL")
+  sourceType  String?
+  sourceId    String?
+  sourceKey   String
+  status      String   @default("APPROVED")
+  reason      String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@unique([companyId, sourceKey])
+  @@index([companyId, period, year])
+  @@index([companyId, employeeId])
+}
+
 model Payslip {
-  id              String     @id @default(uuid())
-  payrollRunId    String
-  payrollRun      PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
-  employeeId      String
-  employee        Employee   @relation(fields: [employeeId], references: [id])
-  basicSalary     Decimal    @db.Decimal(18, 2)
-  grossPay        Decimal    @db.Decimal(18, 2)
-  payeTax         Decimal    @default(0) @db.Decimal(18, 2)
-  nssaDeduction   Decimal    @default(0) @db.Decimal(18, 2)
-  otherDeductions Decimal    @default(0) @db.Decimal(18, 2)
-  netPay          Decimal    @db.Decimal(18, 2)
-  employeeNssa    Decimal    @default(0) @db.Decimal(18, 2)
-  employerNssa    Decimal    @default(0) @db.Decimal(18, 2)
-  allowances      Json?
-  deductions      Json?
-  bonusAmount     Decimal    @default(0) @db.Decimal(18, 2)
-  bonusReferences Json? // [{reference, amount, assessmentId, score, plan}]
-  status          String     @default("GENERATED")
-  publishedAt     DateTime?
+  id                    String     @id @default(uuid())
+  payrollRunId          String
+  payrollRun            PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employeeId            String
+  employee              Employee   @relation(fields: [employeeId], references: [id])
+  basicSalary           Decimal    @db.Decimal(18, 2)
+  grossPay              Decimal    @db.Decimal(18, 2)
+  payeTax               Decimal    @default(0) @db.Decimal(18, 2)
+  nssaDeduction         Decimal    @default(0) @db.Decimal(18, 2)
+  otherDeductions       Decimal    @default(0) @db.Decimal(18, 2)
+  netPay                Decimal    @db.Decimal(18, 2)
+  employeeNssa          Decimal    @default(0) @db.Decimal(18, 2)
+  employerNssa          Decimal    @default(0) @db.Decimal(18, 2)
+  allowances            Json?
+  deductions            Json?
+  bonusAmount           Decimal    @default(0) @db.Decimal(18, 2)
+  bonusReferences       Json? // [{reference, amount, assessmentId, score, plan}]
+  statutoryBreakdown    Json? // [{code, name, employee, employer}]
+  employerContributions Json?
+  status                String     @default("GENERATED")
+  publishedAt           DateTime?
 
   @@unique([payrollRunId, employeeId])
 }
@@ -2563,6 +2808,7 @@ model Project {
   quotations              Quotation[]
   salesOrders             SalesOrder[]
   tasks                   ProjectTask[]
+  members                 ProjectMember[]
   notes                   ProjectNote[]
   attachments             ProjectAttachment[]
   supplierInvoices        SupplierInvoice[]
@@ -2743,18 +2989,18 @@ model FiscalPeriod {
 }
 
 model BankAccount {
-  id                  String              @id @default(uuid())
+  id                  String               @id @default(uuid())
   companyId           String
-  company             Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company             Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
   ledgerAccountId     String
-  ledgerAccount       LedgerAccount       @relation(fields: [ledgerAccountId], references: [id])
+  ledgerAccount       LedgerAccount        @relation(fields: [ledgerAccountId], references: [id])
   name                String
   bankName            String?
   accountNumberMasked String?
-  currency            String              @default("USD")
-  openingBalance      Decimal             @default(0) @db.Decimal(18, 2)
-  type                String              @default("BANK")
-  active              Boolean             @default(true)
+  currency            String               @default("USD")
+  openingBalance      Decimal              @default(0) @db.Decimal(18, 2)
+  type                String               @default("BANK")
+  active              Boolean              @default(true)
   checks              Check[]
   sequences           CheckSequence[]
   creditCardPayments  CreditCardPayment[]
@@ -3584,6 +3830,8 @@ model OnboardingTask {
   template   OnboardingTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
   title      String
   dueInDays  Int                @default(0)
+  owner      String             @default("HR") // HR | MANAGER | PAYROLL | IT | EMPLOYEE
+  category   String             @default("GENERAL") // DOCUMENTS | EQUIPMENT | ACCESS | PAYROLL | GENERAL
 }
 
 model EmployeeOnboarding {
@@ -3603,16 +3851,36 @@ model EmployeeOnboarding {
 }
 
 model LeaveType {
-  id            String         @id @default(uuid())
-  companyId     String
-  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  code          String
-  name          String
-  daysPerYear   Int            @default(20)
-  active        Boolean        @default(true)
-  policy        LeavePolicy?
-  balances      LeaveBalance[]
-  leaveRequests LeaveRequest[]
+  id                       String                    @id @default(uuid())
+  companyId                String
+  company                  Company                   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  code                     String
+  name                     String
+  daysPerYear              Int                       @default(20)
+  active                   Boolean                   @default(true)
+  description              String?
+  paid                     Boolean                   @default(true)
+  entitlementUnit          String                    @default("DAYS")
+  accrualMethod            String                    @default("ANNUAL_GRANT")
+  leaveYearBasis           String                    @default("FINANCIAL_YEAR")
+  weekendPolicy            String                    @default("EXCLUDE")
+  holidayPolicy            String                    @default("EXCLUDE")
+  allowHalfDay             Boolean                   @default(true)
+  allowNegativeBalance     Boolean                   @default(false)
+  negativeBalancePolicy    String                    @default("BLOCK")
+  minNoticeDays            Int                       @default(0)
+  maxConsecutiveDays       Int?
+  carryForwardPolicy       String                    @default("NONE")
+  carryForwardMax          Decimal?                  @db.Decimal(8, 2)
+  carryForwardPercent      Decimal?                  @db.Decimal(5, 2)
+  carryForwardExpiryMonths Int?
+  requiresAttachment       Boolean                   @default(false)
+  attachmentAfterDays      Int?
+  approvalWorkflow         String                    @default("SINGLE")
+  policy                   LeavePolicy?
+  balances                 LeaveBalance[]
+  leaveRequests            LeaveRequest[]
+  transactions             LeaveBalanceTransaction[]
 
   @@unique([companyId, code])
 }
@@ -3630,16 +3898,40 @@ model LeavePolicy {
 }
 
 model LeaveBalance {
-  id          String    @id @default(uuid())
-  companyId   String
-  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employeeId  String
-  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  leaveTypeId String
-  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
-  balance     Decimal   @default(0) @db.Decimal(8, 2)
+  id           String    @id @default(uuid())
+  companyId    String
+  company      Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employeeId   String
+  employee     Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveTypeId  String
+  leaveType    LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+  balance      Decimal   @default(0) @db.Decimal(8, 2)
+  year         Int?
+  carryForward Decimal   @default(0) @db.Decimal(8, 2)
 
   @@unique([companyId, employeeId, leaveTypeId])
+}
+
+// Auditable leave balance ledger — one row per balance-affecting event.
+model LeaveBalanceTransaction {
+  id            String    @id @default(uuid())
+  companyId     String
+  company       Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employeeId    String
+  leaveTypeId   String
+  leaveType     LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+  year          Int
+  type          String
+  reference     String?
+  change        Decimal   @db.Decimal(8, 2)
+  balanceAfter  Decimal   @db.Decimal(8, 2)
+  effectiveDate DateTime  @default(now())
+  reason        String?
+  createdById   String?
+  createdAt     DateTime  @default(now())
+
+  @@index([companyId, employeeId, leaveTypeId, year])
+  @@index([companyId, employeeId, createdAt])
 }
 
 model LeaveAccrual {
@@ -4223,4 +4515,84 @@ model QueueJob {
 
   @@index([companyId, status, createdAt])
   @@index([companyId, type])
+}
+
+// Employee asset custody — links an Asset (Asset Register) to an Employee.
+model AssetAssignment {
+  id              String    @id @default(uuid())
+  companyId       String
+  company         Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  assetId         String
+  asset           Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  employeeId      String
+  employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  assignedDate    DateTime  @default(now())
+  condition       String?   @default("GOOD")
+  location        String?
+  notes           String?
+  acknowledged    Boolean   @default(false)
+  status          String    @default("ASSIGNED")
+  returnedDate    DateTime?
+  returnCondition String?
+  returnLocation  String?
+  returnNotes     String?
+  assignedById    String?
+  returnedById    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([companyId, employeeId, status])
+  @@index([companyId, assetId])
+}
+
+// Employee participation in a Project (Projects module membership/resource).
+model ProjectMember {
+  id            String    @id @default(uuid())
+  companyId     String
+  company       Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  projectId     String
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  role          String?   @default("Member")
+  allocationPct Int       @default(100)
+  startDate     DateTime?
+  endDate       DateTime?
+  billable      Boolean   @default(true)
+  status        String    @default("ACTIVE")
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([projectId, employeeId])
+  @@index([companyId, employeeId, status])
+}
+
+// Employee documents — shared storage (dataUrl) with versioning.
+model EmployeeDocument {
+  id           String    @id @default(uuid())
+  companyId    String
+  company      Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employeeId   String
+  employee     Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  category     String    @default("OTHER")
+  title        String
+  fileName     String?
+  mime         String?
+  size         Int       @default(0)
+  dataUrl      String?
+  issueDate    DateTime?
+  expiryDate   DateTime?
+  description  String?
+  confidential Boolean   @default(false)
+  status       String    @default("VALID")
+  version      Int       @default(1)
+  parentId     String?
+  uploadedById String?
+  archivedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([companyId, employeeId, category])
+  @@index([companyId, employeeId, status])
 }

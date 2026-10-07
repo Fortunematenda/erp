@@ -251,6 +251,59 @@ export class PostingService {
     return receipt;
   }
 
+  /** GRNI clearing account (Goods Received Not Invoiced). Created on demand. */
+  async ensureGrniAccount(companyId: string, db: Db = this.prisma) {
+    const existing = await db.ledgerAccount.findFirst({ where: { companyId, code: '2050' } });
+    if (existing) return existing.code;
+    await db.ledgerAccount.create({ data: { companyId, code: '2050', name: 'Goods Received Not Invoiced', type: 'LIABILITY' } });
+    return '2050';
+  }
+
+  /** Purchase price variance account (bill price vs receipt cost). Created on demand. */
+  async ensurePpvAccount(companyId: string, db: Db = this.prisma) {
+    const existing = await db.ledgerAccount.findFirst({ where: { companyId, code: '5100' } });
+    if (existing) return existing.code;
+    await db.ledgerAccount.create({ data: { companyId, code: '5100', name: 'Purchase Price Variance', type: 'EXPENSE' } });
+    return '5100';
+  }
+
+  /**
+   * Goods receipt capitalization (GRNI accrual): Dr Inventory Asset / Cr GRNI.
+   * The matching supplier bill later clears GRNI to Accounts Payable, so inventory
+   * is capitalized exactly once per received unit.
+   */
+  async postGoodsReceipt(companyId: string, opts: { date: Date; reference: string; sourceId: string; lines: { accountCode: string; amount: number }[]; userId?: string }, db?: Prisma.TransactionClient) {
+    const grni = await this.ensureGrniAccount(companyId, db || this.prisma);
+    const dr = opts.lines.filter((l) => Number(l.amount) > 0.004).map((l) => ({ code: l.accountCode, debit: Number(Number(l.amount).toFixed(2)), credit: 0, description: 'Inventory receipt' }));
+    const total = dr.reduce((s, l) => s + l.debit, 0);
+    if (total <= 0.004) return null;
+    dr.push({ code: grni, debit: 0, credit: Number(total.toFixed(2)), description: 'Goods received not invoiced' });
+    return this.postJournal(companyId, {
+      date: opts.date,
+      description: `Goods receipt ${opts.reference}`,
+      reference: opts.reference,
+      sourceType: 'GOODS_RECEIPT',
+      sourceId: opts.sourceId,
+      lines: dr,
+      userId: opts.userId,
+    }, db);
+  }
+
+  /**
+   * Whether the goods on this bill have physically been received. True when the
+   * bill is a direct "receive now" bill, already received, or linked to a posted
+   * goods receipt. Inventory lines are always accrued to GRNI; the receipt is the
+   * event that capitalises Inventory Asset.
+   */
+  private async billGoodsReceived(companyId: string, si: any, db: Db = this.prisma) {
+    if (si.receiveNow || si.stockReceivedAt) return true;
+    if (si.purchaseOrderId) {
+      const posted = await db.goodsReceivedNote.count({ where: { companyId, purchaseOrderId: si.purchaseOrderId, status: 'POSTED' } });
+      return posted > 0;
+    }
+    return false;
+  }
+
   async postSupplierInvoice(companyId: string, supplierInvoiceId: string) {
     const si = await this.prisma.supplierInvoice.findFirst({ where: { id: supplierInvoiceId, companyId }, include: { lines: true } });
     if (!si) throw new BadRequestException('Supplier invoice not found');
@@ -259,13 +312,47 @@ export class PostingService {
       throw new BadRequestException(`Cannot post bill in status ${si.status}`);
     }
     if (!si.lines.length) throw new BadRequestException('Bill has no lines');
+
+    // Inventory lines always clear GRNI (the receipt capitalised Inventory).
+    const grniCode = await this.ensureGrniAccount(companyId);
     const byCode = await this.accountsByCode(companyId);
+
     const drLines: { code: string; debit: number; credit: number; description: string }[] = [];
+    let unreceived = 0;
+    // Receipt costs for PO-linked bills (used to clear GRNI at the accrued value).
+    const po = si.purchaseOrderId ? await this.prisma.purchaseOrder.findFirst({ where: { id: si.purchaseOrderId, companyId }, include: { lines: true } }) : null;
+    const grnRows = po ? (await this.prisma.goodsReceivedNote.findMany({ where: { companyId, purchaseOrderId: po.id, status: 'POSTED' }, include: { lines: true } })).flatMap((g) => g.lines) : [];
+    const ppvCode = await this.ensurePpvAccount(companyId);
     for (const l of si.lines) {
-      const code = await this.resolvePurchaseLineCode(companyId, l);
-      if (!byCode[code]) throw new BadRequestException(`Line account ${code} not found for "${l.description}". Add an account to every bill line.`);
+      const item = l.itemId ? await this.prisma.inventoryItem.findFirst({ where: { id: l.itemId, companyId } }) : null;
+      const isInventory = !!item && normalizeItemType(item.type) === ITEM_TYPE.INVENTORY_PRODUCT;
       const net = Number(l.lineTotal) - Number(l.taxAmount || 0);
-      drLines.push({ code, debit: Number(net.toFixed(2)), credit: 0, description: l.description });
+      if (!isInventory) {
+        const code = await this.resolvePurchaseLineCode(companyId, l);
+        if (!byCode[code]) throw new BadRequestException(`Line account ${code} not found for "${l.description}". Add an account to every bill line.`);
+        drLines.push({ code, debit: Number(net.toFixed(2)), credit: 0, description: l.description });
+        continue;
+      }
+      // Inventory: clear GRNI at the accrued receipt cost; unreceived units accrue at PO price;
+      // any remaining difference is a purchase price variance (never a second Inventory debit).
+      const poLine = po ? (l.purchaseOrderLineId ? po.lines.find((p: any) => p.id === l.purchaseOrderLineId) : po.lines.find((p: any) => p.itemId && p.itemId === l.itemId)) : null;
+      const rows = l.itemId ? grnRows.filter((r: any) => r.itemId === l.itemId) : [];
+      const grnQty = rows.reduce((s: number, r: any) => s + Number(r.quantity), 0);
+      const grnValue = rows.reduce((s: number, r: any) => s + Number(r.quantity) * Number(r.unitCost), 0);
+      const billedQty = Number(l.quantity);
+      const effectiveRecvQty = po ? grnQty : (si.receiveNow ? billedQty : 0);
+      const recvUnit = grnQty > 0 ? grnValue / grnQty : Number(poLine?.unitPrice ?? l.unitPrice);
+      const clearedQty = Math.min(billedQty, effectiveRecvQty);
+      const unreceivedQtyLine = Math.max(0, billedQty - effectiveRecvQty);
+      if (unreceivedQtyLine > 0) unreceived += unreceivedQtyLine;
+      const grniDebit = Number((clearedQty * recvUnit + unreceivedQtyLine * Number(poLine?.unitPrice ?? l.unitPrice)).toFixed(2));
+      if (!byCode[grniCode]) throw new BadRequestException(`GRNI account ${grniCode} is missing from the chart of accounts`);
+      drLines.push({ code: grniCode, debit: grniDebit, credit: 0, description: l.description });
+      const ppv = Number((net - grniDebit).toFixed(2));
+      if (Math.abs(ppv) > 0.004) {
+        if (!byCode[ppvCode]) throw new BadRequestException(`Purchase price variance account ${ppvCode} is missing from the chart of accounts`);
+        drLines.push({ code: ppvCode, debit: ppv > 0 ? ppv : 0, credit: ppv < 0 ? -ppv : 0, description: 'Purchase price variance' });
+      }
     }
     const taxTotal = Number(si.taxTotal || 0);
     if (taxTotal > 0) drLines.push({ code: '2100', debit: Number(taxTotal.toFixed(2)), credit: 0, description: 'Input VAT' });
@@ -292,11 +379,11 @@ export class PostingService {
         });
         matchStatus = diff ? 'EXCEPTION' : 'MATCHED';
       }
-      await tx.supplierInvoice.update({ where: { id: si.id }, data: { status: 'POSTED', paymentStatus: 'UNPAID', amountPaid: 0, balanceDue: Number(si.total), matchStatus } });
+      await tx.supplierInvoice.update({ where: { id: si.id }, data: { status: 'POSTED', paymentStatus: 'UNPAID', amountPaid: 0, balanceDue: Number(si.total), matchStatus, unreceivedQty: unreceived } });
       if (po) {
         const invoiced = po.lines.reduce((s, l) => s + Number(l.invoicedQty || 0), 0);
-        const received = po.lines.reduce((s, l) => s + Number(l.receivedQty || 0), 0);
-        const bs = invoiced >= received - 0.001 ? 'BILLED' : invoiced > 0 ? 'PARTIALLY_BILLED' : 'NOT_BILLED';
+        const receivedQty = po.lines.reduce((s, l) => s + Number(l.receivedQty || 0), 0);
+        const bs = invoiced >= receivedQty - 0.001 ? 'BILLED' : invoiced > 0 ? 'PARTIALLY_BILLED' : 'NOT_BILLED';
         await tx.purchaseOrder.update({ where: { id: po.id }, data: { billingStatus: bs } });
       }
     });

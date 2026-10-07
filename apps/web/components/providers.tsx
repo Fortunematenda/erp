@@ -1,13 +1,14 @@
 'use client';
 import '@ant-design/v5-patch-for-react-19';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, keepPreviousData } from '@tanstack/react-query';
 import { App as AntApp, ConfigProvider, theme } from 'antd';
 import { useState } from 'react';
 import { Toaster } from 'sonner';
 import { AuthProvider } from '@/components/auth-provider';
+import { GlobalLoadingOverlay } from '@/components/global-loading-overlay';
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  const [client] = useState(() => new QueryClient({ defaultOptions: { queries: { staleTime: 15_000, refetchOnWindowFocus: false, retry: 1 } } }));
+  const [client] = useState(() => new QueryClient({ defaultOptions: { queries: { staleTime: 15_000, gcTime: 5 * 60_000, refetchOnWindowFocus: false, retry: 1, placeholderData: keepPreviousData } } }));
   return (
     <QueryClientProvider client={client}>
       <ConfigProvider
@@ -29,6 +30,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
             motionEaseOut: 'cubic-bezier(0.22, 1, 0.36, 1)',
             colorText: '#171a2e',
             colorTextSecondary: '#5a6080',
+            colorBorder: '#cbd5e1',
+            colorBorderSecondary: '#e2e8f0',
+            colorTextPlaceholder: '#94a3b8',
+            controlOutline: 'rgba(0,51,102,.12)',
+            controlOutlineWidth: 2,
             colorBgLayout: '#f5f6fa',
             fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
             controlHeight: 40,
@@ -42,7 +48,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
             Modal: { borderRadiusLG: 16 },
             Tag: { borderRadiusSM: 8 },
             Segmented: { itemSelectedBg: '#fff' },
-            Input: { activeShadow: '0 0 0 3px rgba(0,51,102,.18)' },
+            Input: { activeShadow: '0 0 0 3px rgba(0,51,102,.15)', activeBorderColor: '#003366', hoverBorderColor: '#94a3b8' },
             Select: { optionSelectedBg: '#eef0ff' },
           },
         }}
@@ -69,6 +75,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           />
         </AntApp>
       </ConfigProvider>
+      <GlobalLoadingOverlay />
     </QueryClientProvider>
   );
 }

@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { round2 } from './performance.constants';
+import { PerformanceCompletionService } from './performance-completion.service';
 
 @Injectable()
 export class PerformanceDashboardService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private completion: PerformanceCompletionService) {}
 
   async dashboard(companyId: string, departmentId?: string) {
     const now = new Date();
@@ -34,6 +35,8 @@ export class PerformanceDashboardService {
     const avgScore = scored.length ? round2(scored.reduce((s, a) => s + Number(a.totalScore), 0) / scored.length) : null;
     const pendingIncentives = await this.prisma.performanceIncentive.count({ where: { companyId, status: 'PENDING_APPROVAL' } });
     const approvedIncentives = await this.prisma.performanceIncentive.count({ where: { companyId, status: { in: ['APPROVED', 'SENT_TO_PAYROLL', 'PAID'] }, ...(departmentId ? { employee: { departmentId } } : {}) } });
+    // Reconcile with the shared completion service so the "missing" card equals the filtered list.
+    const completion = await this.completion.counts(companyId, departmentId);
 
     // countdown for the active window
     let window: any = null;
@@ -58,9 +61,10 @@ export class PerformanceDashboardService {
       activeCycle: activeCycle ? { id: activeCycle.id, name: activeCycle.name, status: activeCycle.status, periodStart: activeCycle.periodStart, periodEnd: activeCycle.periodEnd, employeeDeadline: activeCycle.employeeDeadline, managerDeadline: activeCycle.managerDeadline, qaDeadline: activeCycle.qaDeadline, approvalDeadline: activeCycle.approvalDeadline } : null,
       window,
       counts: {
-        employeesDue: due.length,
-        submitted: submitted.length,
-        missing: due.length - submitted.length,
+        employeesDue: completion.employeesDue,
+        submitted: completion.submitted,
+        missing: completion.missing,
+        missingTemplate: completion.missingTemplate,
         managerPending: due.length - managerDone.length,
         qaPending: managerDone.length - qaDone.length,
         pendingApproval: qaDone.filter((a) => ['PENDING_APPROVAL', 'PENDING_CALIBRATION'].includes(a.status)).length,
@@ -86,8 +90,8 @@ export class PerformanceDashboardService {
     const scope = activeCycle ? { cycleId: activeCycle.id } : {};
     const assessments = await this.prisma.employeePerformanceAssessment.findMany({ where: { companyId, ...scope, excludedReason: null }, include: { employee: { include: { department: true } }, cycle: true } });
 
-    const notSubmitted = assessments.filter((a) => !a.employeeSubmittedAt);
-    if (notSubmitted.length) items.push({ key: 'NOT_SUBMITTED', severity: 'HIGH', text: `${notSubmitted.length} employee(s) have not submitted their KPI assessment`, link: '/performance?tab=assessments&missing=1', count: notSubmitted.length });
+    const comp = await this.completion.counts(companyId);
+    if (comp.missing) items.push({ key: 'NOT_SUBMITTED', severity: 'HIGH', text: `${comp.missing} employee(s) have not submitted their KPI assessment`, link: `/performance?tab=assessments&submissionStatus=MISSING&cycleId=${comp.cycleId || ''}`, count: comp.missing });
     const mgrOverdue = assessments.filter((a) => a.employeeSubmittedAt && !a.managerSubmittedAt && new Date(a.cycle.managerDeadline).getTime() < nowMs);
     if (mgrOverdue.length) items.push({ key: 'MANAGER_OVERDUE', severity: 'HIGH', text: `${mgrOverdue.length} manager review(s) overdue`, link: '/performance?tab=assessments&managerOverdue=1', count: mgrOverdue.length });
     const qaPending = assessments.filter((a) => a.managerSubmittedAt && !a.qaSubmittedAt && a.status === 'PENDING_QA');
@@ -98,17 +102,13 @@ export class PerformanceDashboardService {
     const pendingIncentives = await this.prisma.performanceIncentive.count({ where: { companyId, status: 'PENDING_APPROVAL' } });
     if (pendingIncentives) items.push({ key: 'INCENTIVES', severity: 'MEDIUM', text: `${pendingIncentives} incentive proposal(s) require approval`, link: '/performance?tab=incentives&status=PENDING_APPROVAL', count: pendingIncentives });
 
-    // departments with no KPI template for the active cycle
-    const employees = await this.prisma.employee.findMany({ where: { companyId, active: true, departmentId: { not: null } }, include: { department: true } });
-    const templates = await this.prisma.kpiTemplate.findMany({ where: { companyId, status: 'ACTIVE' } });
-    const deptMap = new Map<string, number>();
-    for (const e of employees) {
-      const covered = templates.some((t) => t.departmentId === e.departmentId && (!t.jobRole || (e.position && t.jobRole.toLowerCase() === e.position.toLowerCase())));
-      if (!covered) deptMap.set(e.departmentId!, (deptMap.get(e.departmentId!) || 0) + 1);
-    }
-    for (const [deptId, count] of deptMap) {
-      const dept = employees.find((e) => e.departmentId === deptId)?.department;
-      items.push({ key: 'MISSING_TEMPLATE', severity: 'HIGH', departmentId: deptId, text: `${dept?.name || 'Department'}: ${count} employee(s) with no active KPI template`, link: `/performance?tab=templates&departmentId=${deptId}`, count });
+    // employees with no applicable active KPI template (role-specific then department)
+    const missingTemplateRows = await this.completion.getMissingTemplate(companyId, comp.cycleId || undefined);
+    const tplByDept = new Map<string, number>();
+    for (const r of missingTemplateRows) tplByDept.set(r.departmentId, (tplByDept.get(r.departmentId) || 0) + 1);
+    for (const [deptId, count] of tplByDept) {
+      const dept = missingTemplateRows.find((r) => r.departmentId === deptId)?.employee?.department;
+      items.push({ key: 'MISSING_TEMPLATE', severity: 'HIGH', departmentId: deptId, text: `${dept?.name || 'Department'}: ${count} employee(s) with no active KPI template`, link: `/performance?tab=assessments&issue=NO_ACTIVE_TEMPLATE&departmentId=${deptId}&cycleId=${comp.cycleId || ''}`, count });
     }
 
     const criticalFailed = assessments.filter((a) => a.criticalNotMet && ['PENDING_QA', 'PENDING_APPROVAL'].includes(a.status));

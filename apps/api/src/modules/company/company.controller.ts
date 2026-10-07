@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { companyIdOf } from '../../core/context';
+import { normalizeItemType } from '../inventory/item-type';
 
 @ApiTags('Companies') @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Controller('companies')
 export class CompanyController {
@@ -28,7 +29,7 @@ export class CompanyController {
     ]);
     return {
       branches, departments, accounts, customers, suppliers,
-      items: items.map((i) => ({ ...i, type: i.type === 'INVENTORY' ? 'INVENTORY_PRODUCT' : i.type === 'NON_INVENTORY' ? 'NON_INVENTORY_PRODUCT' : i.type })),
+      items: items.map((i) => ({ ...i, type: normalizeItemType(i.type) })),
       warehouses, employees, taxRates, plans, categories, priceLists,
     };
   }

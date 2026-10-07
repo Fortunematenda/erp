@@ -1,7 +1,7 @@
 'use client';
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, DatePicker, Form, Input, InputNumber, Modal, Popconfirm, Select, Table, Tabs, message } from 'antd';
+import { Button, DatePicker, Form, Input, InputNumber, Modal, Popconfirm, Select, Table, Tabs, Tooltip, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -46,6 +46,7 @@ export default function ProjectsPage() {
   // report state
   const [range, setRange] = useState<any>(null);
   const [projectId, setProjectId] = useState('');
+  const [reportProject, setReportProject] = useState<{ id: string; name: string } | null>(null);
   const prof = useQuery({ queryKey: ['/projects/profitability', range?.[0]?.format('YYYY-MM-DD'), range?.[1]?.format('YYYY-MM-DD'), projectId], queryFn: () => {
     const p: string[] = [];
     if (range?.[0]) p.push(`from=${range[0].format('YYYY-MM-DD')}`);
@@ -100,7 +101,13 @@ export default function ProjectsPage() {
     { title: 'Profit', dataIndex: 'profit', align: 'right', width: 110, render: (v) => <span className="text-[13px] font-semibold" style={{ color: v > 0 ? '#16A34A' : v < 0 ? '#EF4444' : '#475467' }}>{fmtMoney(v)}</span> },
     { title: 'Margin %', dataIndex: 'margin', align: 'right', width: 90, render: (v) => <span className="text-[13px] font-semibold" style={{ color: v > 0 ? '#16A34A' : v < 0 ? '#EF4444' : '#475467' }}>{v.toFixed(1)}%</span> },
     { title: 'Budget', dataIndex: 'budget', align: 'right', width: 100, render: (v) => <span className="text-[12px] text-[#64748b]">{fmtMoney(v)}</span> },
-    { title: 'Variance', dataIndex: 'variance', align: 'right', width: 100, render: (v) => <span className="text-[12px] font-semibold" style={{ color: v > 0 ? '#16A34A' : v < 0 ? '#EF4444' : '#475467' }}>{fmtMoney(v)}</span> },
+    { title: <Tooltip title="Budget − Actual Cost (positive = under budget)">Budget Remaining</Tooltip>, dataIndex: 'variance', align: 'right', width: 130, render: (v) => <span className="text-[12px] font-semibold" style={{ color: v > 0 ? '#16A34A' : v < 0 ? '#EF4444' : '#475467' }}>{fmtMoney(v)}</span> },
+    { ...ACTIONS_COL, render: (_v, r: any) => (
+      <RowActionsMenu items={[
+        { key: 'report', label: 'View Project Report', icon: <EyeOutlined />, onClick: () => setReportProject({ id: r.id, name: r.name }) },
+        { key: 'project', label: 'Open Project', onClick: () => router.push(`/projects/${r.id}`) },
+      ]} />
+    ) },
   ];
 
   return (
@@ -134,7 +141,7 @@ export default function ProjectsPage() {
                     <Metric label="Total Revenue" value={fmtMoney(sum.totalRevenue)} />
                     <Metric label="Total Costs" value={fmtMoney(sum.totalCosts)} />
                     <Metric label="Total Profit" value={fmtMoney(sum.totalProfit)} color={profitColor} />
-                    <Metric label="Average Margin" value={prof.isLoading ? '–' : `${sum.avgMargin.toFixed(2)}%`} color={marginColor} />
+                    <Metric label="Overall Margin" value={prof.isLoading ? '–' : `${sum.avgMargin.toFixed(2)}%`} color={marginColor} />
                   </div>
                 </div>
 
@@ -150,6 +157,8 @@ export default function ProjectsPage() {
           },
         ]}
       />
+
+      {reportProject && <ProjectReportDrawer projectId={reportProject.id} projectName={reportProject.name} from={range?.[0]?.format('YYYY-MM-DD')} to={range?.[1]?.format('YYYY-MM-DD')} onClose={() => setReportProject(null)} />}
 
       <Modal open={open} onCancel={() => setOpen(false)} title="New Project" okText="Save" cancelText="Cancel" onOk={save} confirmLoading={saving} width={680} okButtonProps={{ loading: saving }}>
         <Form form={form} layout="vertical" className="mt-2">

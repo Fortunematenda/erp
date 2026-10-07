@@ -45,7 +45,10 @@ function allowedCoaTypes(allowedTypes?: string[]): { types: string[]; cashOnly: 
 // - account-type badge on every option
 // - search by code / name / type
 // - contextual filtering via allowedTypes (e.g. ['BANK','CASH','UNDEPOSITED_FUNDS'])
-export function AccountSelector({ value, onChange, allowedTypes, placeholder = 'Select account', allowClear = true, className, postingOnly }: { value?: string | null; onChange?: (v: string | undefined) => void; allowedTypes?: string[]; placeholder?: string; allowClear?: boolean; className?: string; postingOnly?: boolean }) {
+// Accounts that cannot be a bill/expense line destination (mirrors backend validation).
+const NON_LINE_RE = /payable|receivable|equity|capital|retained|vat|tax payable|cash|bank|petty|undeposited|wallet|deposit/i;
+
+export function AccountSelector({ value, onChange, allowedTypes, placeholder = 'Select account', allowClear = true, className, postingOnly, billLine }: { value?: string | null; onChange?: (v: string | undefined) => void; allowedTypes?: string[]; placeholder?: string; allowClear?: boolean; className?: string; postingOnly?: boolean; billLine?: boolean }) {
   const meta = useMeta();
   const accounts = useMemo(() => (Array.isArray(meta.data?.accounts) ? meta.data?.accounts : []), [meta.data]);
   const { types, cashOnly } = useMemo(() => allowedCoaTypes(allowedTypes), [allowedTypes]);
@@ -53,7 +56,8 @@ export function AccountSelector({ value, onChange, allowedTypes, placeholder = '
   const filtered = useMemo(() => accounts
     .filter((a: any) => a.active !== false)
     .filter((a: any) => (!types.length || types.includes(a.type)) && (!cashOnly || cashLike(a)))
-    .sort((a: any, b: any) => String(a.code).localeCompare(String(b.code))), [accounts, types, cashOnly]);
+    .filter((a: any) => !billLine || (!cashLike(a) && !NON_LINE_RE.test(`${a.code} ${a.name}`)))
+    .sort((a: any, b: any) => String(a.code).localeCompare(String(b.code))), [accounts, types, cashOnly, billLine]);
 
   const tree = useMemo(() => {
     const byId: Record<string, any> = {};
@@ -66,21 +70,40 @@ export function AccountSelector({ value, onChange, allowedTypes, placeholder = '
     return out;
   }, [filtered]);
 
-  const options = useMemo(() => tree.map((a: any) => {
-    const t = findType(a);
-    return {
-      value: a.id,
-      searchText: `${a.code} ${a.name} ${a.type} ${t.label}`.toLowerCase(),
-      disabled: postingOnly ? a.hasChildren : false,
-      label: (
-        <div className="flex items-center gap-2" style={{ paddingLeft: a.depth * 16 }}>
-          <span className="font-mono text-[12px] text-[#64748b]">{a.code}</span>
-          <span className="text-[13px] text-[#171a2e] flex-1 truncate">{a.name}</span>
-          <Tag className="!text-[10px] !px-1.5 !leading-4 !m-0" style={{ color: t.color, background: `${t.color}14`, borderColor: `${t.color}33` }}>{t.label}</Tag>
-        </div>
-      ),
-    };
-  }), [tree]);
+  const options = useMemo(() => {
+    const opts: any[] = tree.map((a: any) => {
+      const t = findType(a);
+      return {
+        value: a.id,
+        searchText: `${a.code} ${a.name} ${a.type} ${t.label}`.toLowerCase(),
+        disabled: postingOnly ? a.hasChildren : false,
+        label: (
+          <div className="flex items-center gap-2" style={{ paddingLeft: a.depth * 16 }}>
+            <span className="font-mono text-[12px] text-[#64748b]">{a.code}</span>
+            <span className="text-[13px] text-[#171a2e] flex-1 truncate">{a.name}</span>
+            <Tag className="!text-[10px] !px-1.5 !leading-4 !m-0" style={{ color: t.color, background: `${t.color}14`, borderColor: `${t.color}33` }}>{t.label}</Tag>
+          </div>
+        ),
+      };
+    });
+    // Keep the current value visible even if it is filtered out (e.g. an invalid
+    // cash/bank account) so the user can see and change it.
+    if (value && !tree.some((a: any) => a.id === value)) {
+      const acc = accounts.find((a: any) => a.id === value);
+      if (acc) opts.unshift({
+        value: acc.id,
+        searchText: `${acc.code} ${acc.name}`.toLowerCase(),
+        label: (
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[12px] text-[#b91c1c]">{acc.code}</span>
+            <span className="text-[13px] text-[#b91c1c] flex-1 truncate">{acc.name}</span>
+            <Tag className="!text-[10px] !px-1.5 !leading-4 !m-0" color="red">not allowed</Tag>
+          </div>
+        ),
+      });
+    }
+    return opts;
+  }, [tree, value, accounts, postingOnly]);
 
   return (
     <Select

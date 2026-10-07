@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, DatePicker, Drawer, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, message } from 'antd';
 import { api } from '@/lib/api';
+import dayjs from 'dayjs';
 import { Can } from '@/components/Can';
 import { SoftBadge } from '@/components/crud-page';
 import { fmtDate, fmtDateTime } from '@/lib/format';
@@ -23,8 +24,11 @@ export function CycleDrawer({ open, onClose, cycleId, onCreated }: { open: boole
       const c = detail.data;
       form.setFieldsValue({
         name: c.name, cycleType: c.cycleType, description: c.description,
-        periodStart: c.periodStart, periodEnd: c.periodEnd, submissionOpens: c.submissionOpens,
-        employeeDeadline: c.employeeDeadline, managerDeadline: c.managerDeadline, qaDeadline: c.qaDeadline, approvalDeadline: c.approvalDeadline,
+        periodStart: c.periodStart ? dayjs(c.periodStart) : undefined, periodEnd: c.periodEnd ? dayjs(c.periodEnd) : undefined,
+        submissionOpens: c.submissionOpens ? dayjs(c.submissionOpens) : undefined,
+        employeeDeadline: c.employeeDeadline ? dayjs(c.employeeDeadline) : undefined,
+        managerDeadline: c.managerDeadline ? dayjs(c.managerDeadline) : undefined,
+        qaDeadline: c.qaDeadline ? dayjs(c.qaDeadline) : undefined, approvalDeadline: c.approvalDeadline ? dayjs(c.approvalDeadline) : undefined,
         includeNewHires: c.includeNewHires, departmentIds: c.departments?.map((d: any) => d.id) || [],
       });
     } else if (!isEdit) { form.resetFields(); }

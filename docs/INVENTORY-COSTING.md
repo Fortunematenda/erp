@@ -4,13 +4,21 @@
 - **Current/authoritative: WEIGHTED_AVERAGE** (per item). Valuation = `onHand × avgCost`, where `avgCost` = (Σ receipt unitCost × qty) / (Σ receipt qty). Exposed via `GET /inventory/valuation`.
 - FIFO/AVCO **not implemented** as actual cost layers (would need a `CostLayer` table + per-issue layer allocation). The company/valuation-method config field is reserved; FIFO would require cost layers and is documented as future work rather than faking average as FIFO.
 
-## Inventory receipt GL / no double-count
-Chosen single-authoritative approach (avoids double posting):
-- **GRN post** (`POST /procurement/grns/:id/post`) updates quantity/cost only (creates `StockMovement RECEIPT`) and increments PO line `receivedQty`. **No journal.**
-- **Supplier invoice post** (`POST /procurement/supplier-invoices/:id/post`) is the financial recognition:
-  - stock items: `Dr 1200 Inventory` (+ `Dr 2100 Input VAT`) / `Cr 2000 AP`
-  - expense items: `Dr 6000 Expense` (+ `Dr 2100 Input VAT`) / `Cr 2000 AP`
-- Therefore inventory value is capitalized once (at bill posting), never twice.
+## Inventory receipt GL / GRNI accrual (no double-count)
+Adopted the **GRNI (Goods Received Not Invoiced)** accrual model. Inventory is
+capitalised exactly once — by the goods receipt — and the bill clears GRNI:
+- **GRN post** (`POST /procurement/grns/:id/post`) creates the `StockMovement RECEIPT`,
+  increments PO line `receivedQty`, and posts `Dr Inventory Asset / Cr 2050 GRNI`
+  for the received value (`sourceType = GOODS_RECEIPT`).
+- **Supplier invoice post** (`POST /procurement/supplier-invoices/:id/post`):
+  - inventory items: `Dr 2050 GRNI` (+ `Dr 2100 Input VAT`) / `Cr 2000 AP` (clears GRNI)
+  - expense/non-inventory/service items: `Dr 6000 Expense` (+ `Dr 2100 Input VAT`) / `Cr 2000 AP`
+- A **direct bill with goods received now** (`receiveNow`) creates the receipt (GRNI
+  posting) then the bill clears GRNI → net `Dr Inventory / Cr AP`.
+- A **bill before goods** debits `2050 GRNI` and records `unreceivedQty`; no stock is
+  shown until the receipt arrives (`Dr Inventory / Cr GRNI`).
+- Net effect is always `Dr Inventory / Cr AP` for received inventory, never twice.
+- GRNI account `2050` is created on demand per company.
 
 ## COGS posting (sales dispatch)
 `POST /sales/deliveries/:id/dispatch`:

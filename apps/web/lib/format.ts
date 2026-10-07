@@ -13,7 +13,12 @@ export function fmtMoney(value: any, currency = 'USD') {
 export function fmtNumber(value: any, digits = 0) {
   const n = Number(value);
   if (!Number.isFinite(n)) return '—';
-  return new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n);
+  const d = Number.isInteger(digits) && digits >= 0 && digits <= 20 ? digits : 0;
+  try {
+    return new Intl.NumberFormat('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }).format(n);
+  } catch {
+    return n.toFixed(d);
+  }
 }
 
 export function fmtDate(value: any) {

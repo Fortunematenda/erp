@@ -1,8 +1,8 @@
 'use client';
 
-export function StatCard({ icon, label, value, hint, color, gradient }: { icon: React.ReactNode; label: string; value: React.ReactNode; hint?: string; color?: string; gradient?: string }) {
+export function StatCard({ icon, label, value, hint, color, gradient, onClick }: { icon: React.ReactNode; label: string; value: React.ReactNode; hint?: string; color?: string; gradient?: string; onClick?: () => void }) {
   return (
-    <div className="nex-stat nex-card-hover" style={{ background: gradient || '#fff' }}>
+    <div className={`nex-stat nex-card-hover ${onClick ? 'cursor-pointer' : ''}`} style={{ background: gradient || '#fff' }} onClick={onClick} role={onClick ? 'button' : undefined}>
       <div className="flex items-center gap-4">
         <div className="nex-stat-icon" style={gradient ? { backgroundImage: gradient } : color ? { background: color } : {}}>{icon}</div>
         <div className="min-w-0">

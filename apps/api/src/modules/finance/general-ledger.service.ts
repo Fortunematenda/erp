@@ -122,6 +122,8 @@ export class GeneralLedgerService {
       REVERSAL: { label: 'Reversal', route: '/finance/journals' },
       ASSET_DISPOSAL: { label: 'Asset Disposal', route: '/finance/accounts' },
       COGS: { label: 'Cost of Goods Sold', route: '/finance/accounts' },
+      COGS_DIRECT_INVOICE: { label: 'Cost of Goods Sold', route: '/sales/invoices' },
+      GOODS_RECEIPT: { label: 'Goods Receipt', route: '/procurement' },
       DEPRECIATION: { label: 'Depreciation', route: '/finance/accounts' },
       PAYROLL: { label: 'Payroll', route: '/finance/accounts' },
     };
@@ -148,7 +150,7 @@ export class GeneralLedgerService {
     const account = await this.prisma.ledgerAccount.findFirst({ where: { id: accountId, companyId } });
     if (!account) throw new NotFoundException('Account not found');
     const from = opts.from ? new Date(String(opts.from)) : new Date('1000-01-01');
-    const to = opts.to ? new Date(String(opts.to).concat('T23:59:59')) : new Date('9999-12-31');
+    const to = opts.to ? (String(opts.to).includes('T') ? new Date(String(opts.to)) : new Date(String(opts.to).concat('T23:59:59'))) : new Date('9999-12-31');
     const search = (opts.search || '').trim().toLowerCase();
     const page = Math.max(1, Number(opts.page || 1));
     const pageSize = Math.min(100, Math.max(10, Number(opts.pageSize || 50)));
@@ -204,9 +206,23 @@ export class GeneralLedgerService {
     const startIdx = (page - 1) * pageSize;
     const pageRows = grandRows.slice(startIdx, startIdx + pageSize);
 
+    // Contra accounts (other accounts on the same journal) and counterparty (payee).
+    const journalIds = [...new Set(pageRows.map((r) => r.line.journalId))];
+    const [siblings, payees] = await Promise.all([
+      journalIds.length ? this.prisma.journalLine.findMany({ where: { journalId: { in: journalIds }, accountId: { not: accountId } }, select: { journalId: true, account: { select: { id: true, code: true, name: true } } } }) : [],
+      this.payeeByJournal(companyId, pageRows.map((r) => r.line.journal)),
+    ]);
+    const contraByJournal = new Map<string, { id: string; code: string; name: string }[]>();
+    for (const s of siblings) {
+      const arr = contraByJournal.get(s.journalId) || [];
+      if (!arr.some((a) => a.id === s.account.id)) arr.push(s.account);
+      contraByJournal.set(s.journalId, arr);
+    }
+
     const rows = await Promise.all(pageRows.map(async (r) => {
       const j = r.line.journal;
       const src = rowsSource[r.line.id] || await resolve(r);
+      const contra = contraByJournal.get(j.id) || [];
       return {
         id: r.line.id,
         date: j.date,
@@ -214,6 +230,9 @@ export class GeneralLedgerService {
         journalNumber: j.number,
         description: r.line.description || j.description,
         reference: src.number || '', sourceType: j.sourceType, sourceLabel: src.label, sourceRoute: src.route,
+        payee: payees.get(j.id) ?? null,
+        contraAccounts: contra.map((a) => ({ code: a.code, name: a.name })),
+        contraSummary: contra.length === 0 ? null : contra.length === 1 ? `${contra[0].code} ${contra[0].name}` : `Split (${contra.length} accounts)`,
         debit: Number(r.line.debit), credit: Number(r.line.credit),
         runningBalance: r._run,
       };
@@ -229,5 +248,28 @@ export class GeneralLedgerService {
       pageTotals: { debit: Number(rawDebit(pageRows).toFixed(2)), credit: Number(rawCredit(pageRows).toFixed(2)) },
       grandTotals: { debit: grand.debit, credit: grand.credit, closing: Number(run.toFixed(2)) },
     };
+  }
+
+  /** Counterparty (payee) name per journal, resolved from the source document. Never invented. */
+  private async payeeByJournal(companyId: string, journals: any[]): Promise<Map<string, string | null>> {
+    const out = new Map<string, string | null>();
+    const load = async (type: string, fn: (ids: string[]) => Promise<any[]>, pick: (d: any) => string | null) => {
+      const ids = journals.filter((j) => j.sourceType === type && j.sourceId).map((j) => j.sourceId as string);
+      if (!ids.length) return;
+      const docs = await fn(ids);
+      const map = new Map(docs.map((d) => [d.id, pick(d)]));
+      for (const j of journals) if (j.sourceType === type && j.sourceId) out.set(j.id, map.get(j.sourceId) ?? null);
+    };
+    await Promise.all([
+      load('SUPPLIER_INVOICE', (ids) => this.prisma.supplierInvoice.findMany({ where: { companyId, id: { in: ids } }, select: { id: true, supplier: { select: { name: true } } } }), (d) => d.supplier?.name || null),
+      load('SUPPLIER_PAYMENT', (ids) => this.prisma.supplierPayment.findMany({ where: { companyId, id: { in: ids } }, select: { id: true, supplier: { select: { name: true } } } }), (d) => d.supplier?.name || null),
+      load('SUPPLIER_PAYMENT_REVERSAL', (ids) => this.prisma.supplierPayment.findMany({ where: { companyId, id: { in: ids } }, select: { id: true, supplier: { select: { name: true } } } }), (d) => d.supplier?.name || null),
+      load('VENDOR_CREDIT', (ids) => this.prisma.vendorCredit.findMany({ where: { companyId, id: { in: ids } }, select: { id: true, supplier: { select: { name: true } } } }), (d) => d.supplier?.name || null),
+      load('SALES_INVOICE', (ids) => this.prisma.salesInvoice.findMany({ where: { companyId, id: { in: ids } }, select: { id: true, customer: { select: { name: true } } } }), (d) => d.customer?.name || null),
+      load('RECEIPT', (ids) => this.prisma.receipt.findMany({ where: { companyId, id: { in: ids } }, select: { id: true, customer: { select: { name: true } } } }), (d) => d.customer?.name || null),
+      load('CREDIT_NOTE', (ids) => this.prisma.creditNote.findMany({ where: { companyId, id: { in: ids } }, select: { id: true, customer: { select: { name: true } } } }), (d) => d.customer?.name || null),
+      load('DEBIT_NOTE', (ids) => this.prisma.debitNote.findMany({ where: { companyId, id: { in: ids } }, select: { id: true, customer: { select: { name: true } } } }), (d) => d.customer?.name || null),
+    ]);
+    return out;
   }
 }

@@ -28,6 +28,8 @@ export function CreditNotesWorkspace() {
   const sp = useSearchParams();
   const { message } = App.useApp();
   const list = useQuery({ queryKey: ['/sales/credit-notes'], queryFn: () => api('/sales/credit-notes') });
+  const devices = useQuery({ queryKey: ['fiscal-devices'], queryFn: () => api('/fiscalisation/devices') });
+  const fiscalConfig = useQuery({ queryKey: ['fiscal-config'], queryFn: () => api('/fiscalisation/config') });
   const [q, setQ] = useState('');
   const [doc, setDoc] = useState('');
   const [app, setApp] = useState('');
@@ -40,6 +42,19 @@ export function CreditNotesWorkspace() {
   async function doApi(url: string, method: 'POST' | 'PATCH' | 'DELETE' = 'POST', body?: any) {
     try { await api(url, { method, body: body ? JSON.stringify(body) : undefined }); message.success('Done'); qc.invalidateQueries({ queryKey: ['/sales/credit-notes'] }); qc.invalidateQueries({ queryKey: ['/sales/invoices'] }); } catch (e: any) { message.error(e.message); }
   }
+
+  async function doFiscal(r: any) {
+    const list2 = devices.data || [];
+    const dev = list2.find((d: any) => d.status === 'ACTIVE' && d.branchId === r.branchId) || list2.find((d: any) => d.status === 'ACTIVE');
+    if (!dev) { message.error('No active fiscal device configured. Configure one under Fiscalisation → ZIMRA FDMS.'); return; }
+    try {
+      if (dev.dayStatus !== 'OPEN') await api(`/fiscalisation/devices/${dev.id}/open-day`, { method: 'POST' });
+      const res = await api(`/fiscalisation/devices/${dev.id}/fiscalise-credit-note`, { method: 'POST', body: JSON.stringify({ creditNoteId: r.id }) });
+      message.success(res?.zimraReceiptId ? `Fiscalised — receipt ${res.zimraReceiptId}` : 'Credit note fiscalised');
+      ['/sales/credit-notes', '/sales/invoices', 'fiscal-receipts', 'fiscal-devices'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+    } catch (e: any) { message.error(e.message); }
+  }
+  const fiscalEnv = String(fiscalConfig.data?.environment || fiscalConfig.data?.mode || 'MOCK').toUpperCase();
 
   const rows = useMemo(() => {
     const base = Array.isArray(list.data) ? list.data : [];
@@ -72,7 +87,7 @@ export function CreditNotesWorkspace() {
     { title: 'Application', dataIndex: 'applicationStatus', width: 130, render: (v) => <StatusPill status={String(v || '').replace(/_/g, ' ')} /> },
     { title: 'Fiscal', dataIndex: 'fiscalStatus', width: 110, render: (v) => <StatusPill status={String(v || '—').replace(/_/g, ' ')} /> },
     { title: 'Doc', dataIndex: 'status', width: 100, render: (v) => <StatusPill status={v} /> },
-    { ...ACTIONS_COL, render: (_, r) => <CreditActions r={r} onView={() => setView(r)} onApply={() => setApplyCn(r)} onAction={doApi} /> },
+    { ...ACTIONS_COL, render: (_, r) => <CreditActions r={r} env={fiscalEnv} onView={() => setView(r)} onApply={() => setApplyCn(r)} onAction={doApi} onFiscal={() => doFiscal(r)} /> },
   ];
 
   return (
@@ -102,12 +117,14 @@ export function CreditNotesWorkspace() {
   );
 }
 
-function CreditActions({ r, onView, onApply, onAction }: { r: any; onView: () => void; onApply: () => void; onAction: (url: string, m?: 'POST' | 'PATCH' | 'DELETE', b?: any) => Promise<void> }) {
+function CreditActions({ r, env, onView, onApply, onAction, onFiscal }: { r: any; env: string; onView: () => void; onApply: () => void; onAction: (url: string, m?: 'POST' | 'PATCH' | 'DELETE', b?: any) => Promise<void>; onFiscal: () => void }) {
   const canApply = r.status === 'POSTED' && r.applicationStatus !== 'APPLIED' && Number(r.total || 0) - Number(r.appliedAmount || 0) > 0.001;
   const isDraft = r.status === 'DRAFT';
+  const canFiscal = r.status === 'POSTED' && !r.fiscalReceipt && !['FISCALISED', 'PENDING', 'SUBMITTED'].includes(r.fiscalStatus);
   return (
     <RowActionsMenu items={[
       { key: 'view', icon: <EyeOutlined />, label: 'View / Edit', onClick: onView },
+      { key: 'fiscal', icon: <RobotOutlined />, label: 'Fiscalise', hidden: !canFiscal, confirm: { title: 'Confirm credit note fiscalisation', content: `Credit Note: ${r.creditNoteNo}\nOriginal invoice: ${r.invoice?.invoiceNo || '—'}\nCredit amount: ${fmtMoney(r.total)}\nReason: ${r.reason || '—'}\nEnvironment: ${env}\n\nThis submits a fiscal credit note referencing the original fiscal transaction. Confirm the amount and reason are correct.`, okText: 'Confirm Fiscalisation' }, onClick: onFiscal },
       { key: 'apply', icon: <ThunderboltOutlined />, label: 'Apply Credit', disabled: !canApply, disabledReason: 'Credit is not available to apply', onClick: onApply },
       { key: 'void', icon: <UndoOutlined />, danger: true, label: 'Void', disabled: r.status !== 'POSTED', disabledReason: 'Only posted credit notes can be voided', confirm: 'Void this posted credit note? (reverses GL)', onClick: () => onAction(`/sales/credit-notes/${r.id}/void`) },
       { key: 'delete', icon: <DeleteOutlined />, danger: true, label: 'Delete', disabled: !isDraft, disabledReason: 'Only draft credit notes can be deleted', confirm: 'Delete draft credit note?', onClick: () => onAction(`/sales/credit-notes/${r.id}`, 'DELETE') },

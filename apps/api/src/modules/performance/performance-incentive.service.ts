@@ -150,4 +150,18 @@ export class PerformanceIncentiveService {
     await this.audit.log(companyId, req.user.sub, 'INCENTIVE_REJECTED', 'PerformanceIncentive', id, { reference: inc.reference, reason });
     return this.prisma.performanceIncentive.findUnique({ where: { id } });
   }
+
+  /** Send an approved incentive to the payroll run covering the assessment cycle period (idempotent). */
+  async sendToPayroll(req: AnyReq, id: string) {
+    const companyId = req.user.companyId!;
+    const inc = await this.prisma.performanceIncentive.findFirst({ where: { id, companyId }, include: { assessment: { include: { cycle: true } } } });
+    if (!inc) throw new NotFoundException('Incentive not found');
+    if (inc.status === 'SENT_TO_PAYROLL' || inc.status === 'PAID') throw new BadRequestException({ message: `Already included in Payroll Run ${inc.payrollInputRef}.`, reference: inc.payrollInputRef, code: 'ALREADY_SENT' });
+    if (inc.status !== 'APPROVED') throw new BadRequestException('Only an approved incentive can be sent to payroll');
+    const periodEnd = inc.assessment?.cycle?.periodEnd ? new Date(inc.assessment.cycle.periodEnd) : new Date();
+    const runRef = `PAYROLL-${periodEnd.getFullYear()}-${periodEnd.getMonth() + 1}`;
+    await this.prisma.performanceIncentive.update({ where: { id }, data: { status: 'SENT_TO_PAYROLL', payrollInputRef: runRef } });
+    await this.audit.log(companyId, req.user.sub, 'INCENTIVE_SENT_TO_PAYROLL', 'PerformanceIncentive', id, { reference: inc.reference, amount: inc.amount, payrollInputRef: runRef });
+    return this.prisma.performanceIncentive.findUnique({ where: { id }, include: { employee: true, assessment: { include: { cycle: true } }, plan: true } });
+  }
 }

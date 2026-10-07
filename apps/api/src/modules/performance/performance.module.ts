@@ -10,6 +10,7 @@ import { PerformanceIncentiveService } from './performance-incentive.service';
 import { PerformanceDashboardService } from './performance-dashboard.service';
 import { PerformanceCalculationService } from './performance-calculation.service';
 import { SystemKpiSourceService } from './system-kpi-source.service';
+import { PerformanceCompletionService } from './performance-completion.service';
 
 @Module({
   imports: [AuthModule, PrismaModule, CommonModule],
@@ -22,7 +23,8 @@ import { SystemKpiSourceService } from './system-kpi-source.service';
     PerformanceDashboardService,
     PerformanceCalculationService,
     SystemKpiSourceService,
+    PerformanceCompletionService,
   ],
-  exports: [PerformanceCalculationService],
+  exports: [PerformanceCalculationService, PerformanceCompletionService],
 })
 export class PerformanceModule {}
