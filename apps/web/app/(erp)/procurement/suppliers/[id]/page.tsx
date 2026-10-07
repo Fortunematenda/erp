@@ -373,7 +373,7 @@ function OrdersTab({ rows, onAction, onNew }: { rows: any[]; onAction: (a: strin
   ];
   return (
     <div>
-      <div className="flex justify-end mb-3"><Button icon={<PlusOutlined />} onClick={onNew}>+ Purchase Order</Button></div>
+      <div className="flex justify-end mb-3"><Button icon={<PlusOutlined />} onClick={onNew}>Purchase Order</Button></div>
       <Table rowKey="id" dataSource={rows} columns={cols} pagination={false} size="small" scroll={{ x: true }} />
     </div>
   );

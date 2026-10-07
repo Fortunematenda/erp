@@ -414,7 +414,7 @@ function InventoryItemsTab({ initialType = '' }: { initialType?: string }) {
         <Button onClick={clear}>Clear</Button>
         <div className="ml-auto flex items-center gap-2">
           <Dropdown menu={{ items: ['sales-by-item', 'best-sellers', 'slow-moving', 'dead-stock', 'sales-by-category', 'stock-by-category'].map((k) => ({ key: k, label: k.replace(/-/g, ' ') })), onClick: ({ key }) => { setReports(key); } }} trigger={['click']}><Button icon={<FileTextOutlined />}>Reports ▾</Button></Dropdown>
-          <Button icon={<ReloadOutlined />} onClick={refresh} /><Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>+ Product / Service</Button>
+          <Button icon={<ReloadOutlined />} onClick={refresh} /><Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>Product / Service</Button>
         </div>
       </div>
       <Table rowKey="id" loading={list.isLoading} dataSource={arr(data.rows)} columns={perfCols} scroll={{ x: true }} onChange={onTableChange}

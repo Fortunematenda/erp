@@ -13,15 +13,21 @@ import { fmtMoney } from '@/lib/format';
 import { invoiceDisplayStatus, isInvoiceDraft } from '@/lib/invoice-status';
 import { CurrencyValue, CustomerAvatar, EmptyState, FilterBar, StatusPill, SummaryCard } from '@/components/sales-ui';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
-import { PageHeader } from '@/components/ui/page-header';
-import { ErrorState } from '@/components/ui/error-state';
 import { letterheadHtml } from '@/components/documents/document-letterhead';
+
+/** Authoritative fiscal display: an accepted receipt always means FISCALISED. */
+function fiscalDisplayStatus(r: any): string {
+  if (r?.fiscalReceipt) return 'FISCALISED';
+  if (r?.fiscalRequired === false) return 'NOT_REQUIRED';
+  return r?.fiscalStatus || 'READY';
+}
 
 export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { customerId?: string; embedded?: boolean; hideCustomer?: boolean }) {
   const qc = useQueryClient();
   const router = useRouter();
   const list = useQuery({ queryKey: ['/sales/invoices'], queryFn: () => api('/sales/invoices') });
   const devices = useQuery({ queryKey: ['fiscal-devices'], queryFn: () => api('/fiscalisation/devices') });
+  const fiscalConfig = useQuery({ queryKey: ['fiscal-config'], queryFn: () => api('/fiscalisation/config') });
   const [q, setQ] = useState('');
   const [invStatus, setInvStatus] = useState('');
   const [payStatus, setPayStatus] = useState('');
@@ -40,7 +46,7 @@ export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { cust
     if (q) r = r.filter((i: any) => `${i.invoiceNo} ${i.customer?.name || ''}`.toLowerCase().includes(q.toLowerCase()));
     if (invStatus) r = r.filter((i: any) => i.invoiceStatus === invStatus);
     if (payStatus) r = r.filter((i: any) => i.paymentStatus === payStatus);
-    if (fiscStatus) r = r.filter((i: any) => i.fiscalStatus === fiscStatus);
+    if (fiscStatus) r = r.filter((i: any) => fiscalDisplayStatus(i) === fiscStatus);
     if (range?.[0] && range?.[1]) r = r.filter((i: any) => dayjs(i.invoiceDate).isAfter(dayjs(range[0])) && dayjs(i.invoiceDate).isBefore(dayjs(range[1]).add(1, 'day')));
     return r;
   }, [list.data, customerId, q, invStatus, payStatus, fiscStatus, range]);
@@ -210,8 +216,23 @@ export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { cust
 
   async function post(r: any) { try { await api(`/sales/invoices/${r.id}/finalize`, { method: 'POST', body: JSON.stringify({ action: 'POST' }) }); notify.success('Invoice posted — awaiting payment'); qc.invalidateQueries({ queryKey: ['/sales/invoices'] }); qc.invalidateQueries({ queryKey: ['sales-register'] }); } catch (e: any) { notify.error(e.message); } }
   async function del(r: any) { try { await api(`/sales/invoices/${r.id}`, { method: 'DELETE' }); notify.success('Invoice deleted'); qc.invalidateQueries({ queryKey: ['/sales/invoices'] }); qc.invalidateQueries({ queryKey: ['sales-register'] }); } catch (e: any) { notify.error(e.message); } }
-  async function fiscal(r: any) { const dev = (devices.data || []).find((d: any) => d.status === 'ACTIVE' && d.dayStatus === 'OPEN'); if (!dev) { notify.warning('No open fiscal day on an active device'); return; } try { await api(`/fiscalisation/devices/${dev.id}/fiscalise`, { method: 'POST', body: JSON.stringify({ invoiceId: r.id }) }); notify.success('Fiscalised'); qc.invalidateQueries({ queryKey: ['/sales/invoices'] }); } catch (e: any) { notify.error(e.message); } }
-  const canFiscal = (r: any) => { const recv = (r.receipts || []).reduce((s: number, x: any) => s + Number(x.amount), 0); return recv >= Number(r.total) - 0.001 && r.fiscalStatus !== 'FISCALISED'; };
+  async function fiscal(r: any) {
+    const list = devices.data || [];
+    // Device-selection: prefer the device assigned to the invoice's branch, else any active device.
+    const dev = list.find((d: any) => d.status === 'ACTIVE' && d.branchId === r.branchId) || list.find((d: any) => d.status === 'ACTIVE');
+    if (!dev) { notify.error('No active fiscal device configured. Configure a device under Fiscalisation → ZIMRA FDMS first.'); return; }
+    try {
+      if (dev.dayStatus !== 'OPEN') await api(`/fiscalisation/devices/${dev.id}/open-day`, { method: 'POST' });
+      const res = await api(`/fiscalisation/devices/${dev.id}/fiscalise`, { method: 'POST', body: JSON.stringify({ invoiceId: r.id }) });
+      notify.success(res?.zimraReceiptId ? `Fiscalised — receipt ${res.zimraReceiptId}` : 'Invoice fiscalised');
+      ['/sales/invoices', 'fiscal-receipts', 'fiscal-devices', 'fiscal-dashboard', 'sales-register'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+    } catch (e: any) { notify.error(e.message); }
+  }
+  const canFiscal = (r: any) => {
+    const life = String(r.invoiceStatus || r.status || '').toUpperCase();
+    return !isInvoiceDraft(r) && life !== 'VOID' && r.fiscalRequired !== false && !r.fiscalReceipt
+      && !['FISCALISED', 'PENDING', 'SUBMITTED'].includes(r.fiscalStatus);
+  };
 
   const columns: ColumnsType<any> = [
     { title: 'Invoice #', dataIndex: 'invoiceNo', width: 130, render: (v, r) => <Link href={`/sales/invoices/${r.id}/edit`} className="font-mono text-[12px] font-semibold text-[#003366] hover:text-[#0b4a8f] hover:underline">{v}</Link> },
@@ -225,11 +246,12 @@ export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { cust
         : <span className={`text-[13px] font-semibold ${Number(v) > 0 ? 'text-[#F97316]' : 'text-[#16A34A]'}`}>{fmtMoney(Number(v || 0))}</span>
     ) },
     { title: 'Status', key: 'displayStatus', width: 150, render: (_v, r) => <StatusPill status={invoiceDisplayStatus(r)} /> },
+    { title: 'Fiscal Status', key: 'fiscalDisplayStatus', width: 130, render: (_v, r) => <StatusPill status={fiscalDisplayStatus(r)} /> },
     { ...ACTIONS_COL, render: (_, r: any) => (
       <RowActionsMenu items={[
         { key: 'view', label: isInvoiceDraft(r) ? 'Edit' : 'View', icon: <EyeOutlined />, onClick: () => router.push(`/sales/invoices/${r.id}/edit`) },
         { key: 'post', label: 'Save & Post', icon: <FileDoneOutlined />, hidden: !isInvoiceDraft(r), onClick: () => post(r) },
-        { key: 'fiscal', label: 'Fiscalise', icon: <RobotOutlined />, hidden: !canFiscal(r), onClick: () => fiscal(r) },
+        { key: 'fiscal', label: 'Fiscalise', icon: <RobotOutlined />, hidden: !canFiscal(r), confirm: { title: `Confirm invoice fiscalisation`, content: `Invoice: ${r.invoiceNo}\nCustomer: ${r.customer?.name || '—'}\nInvoice amount: ${fmtMoney(r.total)}\nPayment status: ${invoiceDisplayStatus(r)}\nCurrent fiscal status: ${fiscalDisplayStatus(r)}\nEnvironment: ${String(fiscalConfig.data?.environment || fiscalConfig.data?.mode || 'MOCK').toUpperCase()}\n\nYou are about to submit this invoice for fiscalisation. Once accepted, the fiscal transaction cannot be freely edited or submitted again.`, okText: 'Confirm Fiscalisation' }, onClick: () => fiscal(r) },
         { key: 'delete', label: 'Delete', icon: <DeleteOutlined />, danger: true, hidden: !isInvoiceDraft(r), confirm: 'Delete invoice?', onClick: () => del(r) },
       ]} />
     ) },
@@ -247,16 +269,15 @@ export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { cust
   return (
     <div className="nex-fade">
       {!embedded && (
-        <PageHeader
-          title="Invoices"
-          description="Create, send and track customer invoices"
-          actions={<>
+        <div className="flex items-center justify-between mb-6">
+          <div><h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">Invoices</h1><p className="text-[13px] text-[#64748b] mt-1">Create, send and track customer invoices</p></div>
+          <div className="flex items-center gap-2">
             <Link href="/sales/invoices/template">
               <Button icon={<SettingOutlined />} aria-label="Invoice template settings" title="Invoice template" />
             </Link>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => router.push('/sales/invoices/new')}>New Invoice</Button>
-          </>}
-        />
+          </div>
+        </div>
       )}
       {!embedded && <div className="grid grid-cols-2 xl:grid-cols-4 gap-5 mb-6">{kpis.map((k) => <SummaryCard key={k.label} icon={k.icon} label={k.label} value={k.value} tone={k.tone} valueColor={k.valueColor} />)}</div>}
       <FilterBar extra={<span>{totals.count} invoices · {totals.drafts} draft · {totals.paidCount} paid</span>}>
@@ -270,8 +291,7 @@ export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { cust
         <Button icon={<ExportOutlined />} onClick={exportCsv}>Export</Button>
       </FilterBar>
       <div className="nex-card">
-        {list.isError ? <ErrorState title="Could not load invoices" message={(list.error as Error)?.message} onRetry={() => list.refetch()} />
-          : rows.length === 0 && !list.isLoading ? <EmptyState title="No invoices yet" description="Create your first invoice to start billing customers." action={<Button type="primary" icon={<PlusOutlined />} onClick={() => router.push('/sales/invoices/new')}>New Invoice</Button>} /> : (<>
+        {rows.length === 0 ? <EmptyState title="No invoices yet" description="Create your first invoice to start billing customers." action={<Button type="primary" icon={<PlusOutlined />} onClick={() => router.push('/sales/invoices/new')}>New Invoice</Button>} /> : (<>
           {sel.length > 0 && (<div className="px-4 py-3 flex items-center gap-3 flex-wrap bg-[#f8faff] border-b border-[#eef0f6]"><span className="text-[13px] font-medium text-[#344054]">{sel.length} selected</span><Button type="primary" icon={<FileDoneOutlined />} loading={busy} onClick={bulkPost}>Save & Post</Button><Button icon={<ExportOutlined />} onClick={exportCsv}>Export</Button><Popconfirm title={`Delete ${sel.length} selected invoices?`} onConfirm={bulkDel}><Button danger icon={<DeleteOutlined />} loading={busy}>Delete</Button></Popconfirm><div className="ml-auto"><Button size="small" onClick={() => setSel([])}>Clear</Button></div></div>)}
           <Table
             rowKey="id"

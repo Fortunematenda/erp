@@ -17,6 +17,7 @@ import { PricingService } from './pricing.service';
 import { QuotationStatusService } from './quotation-status.service';
 import { POSTED_INVOICE_EDIT_MESSAGE, SalesIntegrityService } from './sales-integrity.service';
 import { InventoryMovementService } from '../inventory/inventory-movement.service';
+import { ItemResolverService } from '../inventory/item-resolver.service';
 import { getTransactionPostingMode } from '../finance/transaction-mode';
 import { isStockTracked } from '../inventory/item-type';
 
@@ -35,6 +36,7 @@ export class SalesController {
     private quoteStatus: QuotationStatusService,
     private integrity: SalesIntegrityService,
     private stock: InventoryMovementService,
+    private itemResolver: ItemResolverService,
   ) {}
 
   /**
@@ -526,6 +528,8 @@ export class SalesController {
     await this.integrity.assertCustomer(companyId, dto.customerId);
     await this.integrity.assertProducts(companyId, dto.lines);
     await this.integrity.assertCurrency(companyId, dto.currency || 'USD');
+    // Shared resolver: fill item-master sales description/unit/tax when omitted.
+    await this.itemResolver.applySalesDefaults(companyId, { customerId: dto.customerId, currency: dto.currency || 'USD', lines: dto.lines as any[] });
     await this.integrity.applyPricing(companyId, { customerId: dto.customerId, currency: dto.currency || 'USD', lines: dto.lines as any[] });
     const { mapped, subtotal, taxTotal, total } = this.computeLines(dto.lines);
     const invoiceNo = dto.invoiceNo || await this.numbering.next(companyId, 'INV');
@@ -1412,27 +1416,47 @@ export class SalesController {
     }
   }
 
-  /** Direct invoices (no prior dispatched delivery) issue stock exactly once on post. */
+  /** Direct invoices (no prior dispatched delivery) issue stock exactly once on post,
+   *  posting COGS at the weighted-average inventory cost (never the selling price). */
   private async issueDirectInvoiceStock(companyId: string, invoiceId: string, userId: string) {
     const plan = await this.directInvoiceStockPlan(companyId, invoiceId);
     if (!plan) return;
     const { inv, warehouse, needed } = plan;
+    const cogs = await this.ensureCogsAccount(companyId);
     await this.prisma.$transaction(async (tx) => {
       const fresh = await tx.salesInvoice.findFirst({ where: { id: invoiceId, stockIssuedAt: null } });
       if (!fresh) return;
+      let cogsTotal = 0;
       for (const line of inv.lines) {
         if (!line.itemId) continue;
         const row = needed.get(line.itemId);
         if (!row) continue;
+        const bal = await this.stock.balance(companyId, line.itemId, warehouse.id, tx);
+        const unitCost = Number(bal.avgCost || 0);
+        cogsTotal += unitCost * Number(line.quantity);
         await this.stock.create(companyId, {
           warehouseId: warehouse.id,
           itemId: line.itemId,
           type: 'ISSUE',
           quantity: Number(line.quantity),
-          unitCost: Number(row.item.purchaseCost || 0),
+          unitCost,
           reference: inv.invoiceNo,
           occurredAt: inv.invoiceDate,
         }, userId, tx);
+      }
+      if (cogsTotal > 0.005) {
+        await this.posting.postJournal(companyId, {
+          date: inv.invoiceDate,
+          description: `COGS ${inv.invoiceNo}`,
+          reference: inv.invoiceNo,
+          sourceType: 'COGS_DIRECT_INVOICE',
+          sourceId: inv.id,
+          lines: [
+            { code: cogs.code, debit: Number(cogsTotal.toFixed(2)), credit: 0, description: 'Cost of sales' },
+            { code: '1200', debit: 0, credit: Number(cogsTotal.toFixed(2)), description: 'Inventory reduction' },
+          ],
+          userId,
+        }, tx);
       }
       await tx.salesInvoice.update({ where: { id: invoiceId }, data: { stockIssuedAt: new Date() } });
     });
@@ -1520,6 +1544,15 @@ export class SalesController {
     if (['DISPATCHED', 'DELIVERED'].includes(dn.status)) return dn;
     if (!['DRAFT', 'PICKED', 'READY_TO_DISPATCH'].includes(dn.status)) return dn;
     if (!dn.warehouseId) throw new BadRequestException('Delivery requires a warehouse');
+    // Double-issue guard: if an invoice for this order already issued stock, do not issue again.
+    if (dn.salesOrderId) {
+      const alreadyIssued = await this.prisma.salesInvoice.findFirst({ where: { companyId, sourceSalesOrderId: dn.salesOrderId, stockIssuedAt: { not: null } } });
+      if (alreadyIssued) {
+        await this.prisma.deliveryNote.update({ where: { id }, data: { status: 'DISPATCHED' } });
+        await this.deliveryTrail(companyId, id, 'DELIVERY_DISPATCHED', 'Delivery Dispatched', `Delivery ${dn.deliveryNo} dispatched — stock already issued by invoice ${alreadyIssued.invoiceNo}.`, req.user.sub);
+        return this.prisma.deliveryNote.findUnique({ where: { id }, include: { lines: true, salesOrder: { include: { lines: true } } } });
+      }
+    }
     const cogs = await this.ensureCogsAccount(companyId);
     const byItem = await this.prisma.inventoryItem.findMany({ where: { companyId, id: { in: dn.lines.filter((l) => l.itemId).map((l) => l.itemId) as string[] } }, include: { movements: true } });
     const avgCostFor = (itemId?: string) => {

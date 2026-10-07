@@ -10,6 +10,8 @@ export class ReqLineDto {
   @IsOptional() @Type(() => Number) @IsNumber() taxRate?: number;
   @IsOptional() @IsString() accountId?: string;
   @IsOptional() @IsString() accountCode?: string;
+  @IsOptional() @IsString() purchaseOrderLineId?: string;
+  @IsOptional() @IsString() grnLineId?: string;
 }
 
 export class CreateRequisitionDto {
@@ -30,7 +32,21 @@ export class CreatePurchaseOrderDto {
   @IsOptional() @IsString() shipTo?: string;
   @IsOptional() @IsString() memo?: string;
   @IsOptional() @IsString() requisitionId?: string;
+  @IsOptional() @IsString() warehouseId?: string;
   @IsArray() @ValidateNested({ each: true }) @Type(() => ReqLineDto) lines!: ReqLineDto[];
+}
+
+export class UpdatePurchaseOrderDto {
+  @IsOptional() @IsString() supplierId?: string;
+  @IsOptional() @IsString() orderDate?: string;
+  @IsOptional() @IsString() expectedDate?: string;
+  @IsOptional() @IsString() currency?: string;
+  @IsOptional() @IsString() paymentTerms?: string;
+  @IsOptional() @IsString() supplierReference?: string;
+  @IsOptional() @IsString() shipTo?: string;
+  @IsOptional() @IsString() memo?: string;
+  @IsOptional() @IsString() warehouseId?: string;
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => ReqLineDto) lines?: ReqLineDto[];
 }
 
 export class CreateGrnDto {
@@ -52,6 +68,8 @@ export class CreateSupplierInvoiceDto {
   @IsOptional() @IsString() currency?: string;
   @IsOptional() @IsString() ref?: string;
   @IsOptional() @IsString() memo?: string;
+  @IsOptional() @IsString() warehouseId?: string;
+  @IsOptional() @IsBoolean() receiveNow?: boolean;
   @IsArray() @ValidateNested({ each: true }) @Type(() => ReqLineDto) lines!: ReqLineDto[];
 }
 
@@ -70,6 +88,7 @@ export class CreateSupplierPaymentDto {
   @IsOptional() @IsString() referenceNo?: string;
   @IsOptional() @IsString() note?: string;
   @IsOptional() @IsString() payFromAccountId?: string;
+  @IsOptional() @IsString() idempotencyKey?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => PaymentAllocationDto) allocations?: PaymentAllocationDto[];
 }
 

@@ -8,6 +8,7 @@ import { CountLineDto, CreateAdjustmentDto, CreateCountDto, CreateMovementDto, I
 import { NumberingService } from '../../core/common/numbering.service';
 import { AuditService } from '../../core/common/audit.service';
 import { InventoryMovementService } from './inventory-movement.service';
+import { ItemResolverService } from './item-resolver.service';
 import { PostingService } from '../finance/posting.service';
 import { ITEM_TYPE, isService, isStockTracked, normalizeItemType, trackingStatus, itemTypeFromTracking } from './item-type';
 
@@ -19,6 +20,7 @@ export class InventoryController {
     private audit: AuditService,
     private movementService: InventoryMovementService,
     private posting: PostingService,
+    private itemResolver: ItemResolverService,
   ) {}
 
   private sign = (t: string) => ['RECEIPT', 'TRANSFER_IN', 'ADJUSTMENT_IN', 'RETURN_IN'].includes(t) ? 1 : -1;
@@ -64,6 +66,33 @@ export class InventoryController {
     if (reason === 'OPENING_BALANCE') return 'RECEIPT';
     if (delta > 0) return 'ADJUSTMENT_IN';
     return 'ADJUSTMENT_OUT';
+  }
+
+  /**
+   * Item account mappings must belong to the company and be of the correct type.
+   * This prevents silent fallback to a default (and wrong) account at posting.
+   */
+  private async validateItemAccounts(companyId: string, data: any) {
+    const rules: Array<{ field: string; label: string; allow: string[] }> = [
+      { field: 'incomeAccountId', label: 'Income / Sales account', allow: ['REVENUE'] },
+      { field: 'cogsAccountId', label: 'COGS account', allow: ['EXPENSE'] },
+      { field: 'inventoryAssetAccountId', label: 'Inventory Asset account', allow: ['ASSET'] },
+      { field: 'expenseAccountId', label: 'Expense account', allow: ['EXPENSE'] },
+      { field: 'adjustmentAccountId', label: 'Adjustment account', allow: ['EXPENSE', 'REVENUE'] },
+    ];
+    for (const r of rules) {
+      const id = data?.[r.field];
+      if (!id) continue;
+      const acc = await this.prisma.ledgerAccount.findFirst({ where: { id, companyId } });
+      if (!acc) throw new BadRequestException(`${r.label} was not found for this company.`);
+      if (!r.allow.includes(String(acc.type).toUpperCase())) {
+        throw new BadRequestException(`${r.label} must be a ${r.allow.join(' / ')} account (got ${acc.code} ${acc.name}).`);
+      }
+    }
+    if (data?.defaultWarehouseId) {
+      const wh = await this.prisma.warehouse.findFirst({ where: { id: data.defaultWarehouseId, companyId } });
+      if (!wh) throw new BadRequestException('Default warehouse was not found for this company.');
+    }
   }
 
   // ----- Inventory categories -----
@@ -142,14 +171,10 @@ export class InventoryController {
     const where: any = { companyId };
     if (q.q) where.OR = [{ sku: { contains: q.q, mode: 'insensitive' } }, { name: { contains: q.q, mode: 'insensitive' } }, { barcode: { contains: q.q, mode: 'insensitive' } }, { description: { contains: q.q, mode: 'insensitive' } }, { hsCode: { contains: q.q, mode: 'insensitive' } }];
     if (q.type) {
-      const nt = normalizeItemType(String(q.type));
-      // Accept legacy short codes in filters too
-      where.type = { in: [nt, ...(nt === ITEM_TYPE.INVENTORY_PRODUCT ? ['INVENTORY'] : nt === ITEM_TYPE.NON_INVENTORY_PRODUCT ? ['NON_INVENTORY'] : [])] };
+      where.type = normalizeItemType(String(q.type));
     } else if (q.tracking) {
       const fromTracking = itemTypeFromTracking(String(q.tracking));
-      if (fromTracking) {
-        where.type = { in: [fromTracking, ...(fromTracking === ITEM_TYPE.INVENTORY_PRODUCT ? ['INVENTORY'] : fromTracking === ITEM_TYPE.NON_INVENTORY_PRODUCT ? ['NON_INVENTORY'] : [])] };
-      }
+      if (fromTracking) where.type = fromTracking;
     }
     if (q.categoryId) where.categoryId = q.categoryId;
     if (q.active !== undefined) where.active = q.active === 'true' || q.active === true;
@@ -190,42 +215,51 @@ export class InventoryController {
     const pageSize = Math.max(1, Number(q.pageSize) || 25);
     return { rows: filtered.slice((page - 1) * pageSize, page * pageSize), total: filtered.length, page, pageSize };
   }
-  @Post('items') async createItem(@Req() req: any, @Body() dto: ItemDto) {
+  @Post('items')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('inventory.items.manage')
+  async createItem(@Req() req: any, @Body() dto: ItemDto) {
     const companyId = companyIdOf(req.user);
     const sku = dto.sku || await this.numbering.next(companyId, 'SKU');
+    const dupSku = await this.prisma.inventoryItem.findFirst({ where: { companyId, sku } });
+    if (dupSku) throw new BadRequestException(`SKU "${sku}" already exists for this company.`);
     let cat: any = null;
     if (dto.categoryId) cat = await this.prisma.inventoryCategory.findFirst({ where: { id: dto.categoryId, companyId } });
     const itemType = normalizeItemType(dto.type || ITEM_TYPE.INVENTORY_PRODUCT);
     const stock = isStockTracked(itemType);
-    const item = await this.prisma.inventoryItem.create({
-      data: {
-        companyId, sku, name: dto.name, unit: dto.unit || (itemType === ITEM_TYPE.SERVICE ? 'Hour' : 'EA'),
-        hsCode: dto.hsCode, barcode: stock || itemType === ITEM_TYPE.NON_INVENTORY_PRODUCT ? dto.barcode : undefined,
-        brand: dto.brand, description: dto.description, salesDescription: dto.salesDescription, purchaseDescription: dto.purchaseDescription,
-        type: itemType, itemCategory: dto.itemCategory, categoryId: cat?.id, imageUrl: dto.imageUrl,
-        reorderLevel: stock ? (dto.reorderLevel ?? 0) : 0,
-        reorderQuantity: stock ? (dto.reorderQuantity ?? 0) : 0,
-        safetyStock: stock ? (dto.safetyStock ?? 0) : 0,
-        sellingPrice: dto.sellingPrice ?? 0, minSellingPrice: dto.minSellingPrice, purchaseCost: dto.purchaseCost ?? 0,
-        costingMethod: stock ? (dto.costingMethod || 'WEIGHTED_AVERAGE') : null,
-        trackBatch: stock ? (dto.trackBatch ?? false) : false,
-        trackSerial: stock ? (dto.trackSerial ?? false) : false,
-        trackExpiry: stock ? (dto.trackExpiry ?? false) : false,
-        salesTaxCode: dto.salesTaxCode ?? cat?.salesTaxCode, purchaseTaxCode: dto.purchaseTaxCode ?? cat?.purchaseTaxCode,
-        incomeAccountId: dto.incomeAccountId ?? cat?.incomeAccountId,
-        cogsAccountId: stock ? (dto.cogsAccountId ?? cat?.cogsAccountId) : undefined,
-        inventoryAssetAccountId: stock ? (dto.inventoryAssetAccountId ?? cat?.inventoryAssetAccountId) : undefined,
-        expenseAccountId: !stock ? (dto.expenseAccountId ?? cat?.expenseAccountId ?? dto.cogsAccountId) : (dto.expenseAccountId ?? cat?.expenseAccountId),
-        adjustmentAccountId: stock ? dto.adjustmentAccountId : undefined,
-        defaultWarehouseId: stock ? dto.defaultWarehouseId : undefined,
-        preferredSupplierId: dto.preferredSupplierId, supplierSku: dto.supplierSku, leadTimeDays: dto.leadTimeDays,
-        allowDiscount: dto.allowDiscount ?? true, active: dto.active ?? true,
-      },
-    });
+    const data: any = {
+      companyId, sku, name: dto.name, unit: dto.unit || (itemType === ITEM_TYPE.SERVICE ? 'Hour' : 'EA'),
+      purchaseUnit: dto.purchaseUnit, salesUnit: dto.salesUnit,
+      hsCode: dto.hsCode, barcode: stock || itemType === ITEM_TYPE.NON_INVENTORY_PRODUCT ? dto.barcode : undefined,
+      brand: dto.brand, description: dto.description, salesDescription: dto.salesDescription, purchaseDescription: dto.purchaseDescription,
+      type: itemType, itemCategory: dto.itemCategory, categoryId: cat?.id, imageUrl: dto.imageUrl,
+      reorderLevel: stock ? (dto.reorderLevel ?? 0) : 0,
+      reorderQuantity: stock ? (dto.reorderQuantity ?? 0) : 0,
+      safetyStock: stock ? (dto.safetyStock ?? 0) : 0,
+      sellingPrice: dto.sellingPrice ?? 0, minSellingPrice: dto.minSellingPrice, purchaseCost: dto.purchaseCost ?? 0,
+      costingMethod: stock ? (dto.costingMethod || 'WEIGHTED_AVERAGE') : null,
+      trackBatch: stock ? (dto.trackBatch ?? false) : false,
+      trackSerial: stock ? (dto.trackSerial ?? false) : false,
+      trackExpiry: stock ? (dto.trackExpiry ?? false) : false,
+      salesTaxCode: dto.salesTaxCode ?? cat?.salesTaxCode, purchaseTaxCode: dto.purchaseTaxCode ?? cat?.purchaseTaxCode,
+      incomeAccountId: dto.incomeAccountId ?? cat?.incomeAccountId,
+      cogsAccountId: stock ? (dto.cogsAccountId ?? cat?.cogsAccountId) : undefined,
+      inventoryAssetAccountId: stock ? (dto.inventoryAssetAccountId ?? cat?.inventoryAssetAccountId) : undefined,
+      expenseAccountId: !stock ? (dto.expenseAccountId ?? cat?.expenseAccountId ?? dto.cogsAccountId) : (dto.expenseAccountId ?? cat?.expenseAccountId),
+      adjustmentAccountId: stock ? dto.adjustmentAccountId : undefined,
+      defaultWarehouseId: stock ? dto.defaultWarehouseId : undefined,
+      preferredSupplierId: dto.preferredSupplierId, supplierSku: dto.supplierSku, leadTimeDays: dto.leadTimeDays,
+      allowDiscount: dto.allowDiscount ?? true, active: dto.active ?? true,
+    };
+    await this.validateItemAccounts(companyId, data);
+    const item = await this.prisma.inventoryItem.create({ data });
     await this.audit.log(companyId, req.user.sub, 'CREATE', 'InventoryItem', item.id, { sku, type: itemType });
     return item;
   }
-  @Patch('items/:id') async updateItem(@Req() req: any, @Param('id') id: string, @Body() dto: Partial<ItemDto>) {
+  @Patch('items/:id')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('inventory.items.manage')
+  async updateItem(@Req() req: any, @Param('id') id: string, @Body() dto: Partial<ItemDto>) {
     const companyId = companyIdOf(req.user);
     const existing = await this.prisma.inventoryItem.findFirst({
       where: { id, companyId },
@@ -264,6 +298,7 @@ export class InventoryController {
       }
     }
 
+    await this.validateItemAccounts(companyId, data);
     await this.prisma.inventoryItem.updateMany({ where: { id, companyId }, data });
     const changes: Record<string, { from: any; to: any }> = {};
     for (const key of ['name', 'sku', 'barcode', 'sellingPrice', 'purchaseCost', 'categoryId', 'unit', 'active', 'reorderLevel', 'description', 'type'] as const) {
@@ -309,6 +344,8 @@ export class InventoryController {
   }
 
   @Post('items/:id/restore')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('inventory.items.manage')
   async restoreItem(@Req() req: any, @Param('id') id: string) {
     const companyId = companyIdOf(req.user);
     await this.prisma.inventoryItem.updateMany({ where: { id, companyId }, data: { active: true } });
@@ -316,7 +353,10 @@ export class InventoryController {
     return this.prisma.inventoryItem.findFirst({ where: { id, companyId } });
   }
 
-  @Delete('items/:id') async deleteItem(@Req() req: any, @Param('id') id: string) {
+  @Delete('items/:id')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('inventory.items.manage')
+  async deleteItem(@Req() req: any, @Param('id') id: string) {
     const companyId = companyIdOf(req.user);
     const item = await this.prisma.inventoryItem.findFirst({
       where: { id, companyId },
@@ -336,7 +376,138 @@ export class InventoryController {
     return { ok: true };
   }
 
+  /**
+   * Read-only reconciliation across the inventory subledger, GRNI, AP subledger and
+   * the GL control accounts. Never auto-posts adjustments — flags differences for review.
+   */
+  @Get('reconciliation') async reconciliation(@Req() req: any) {
+    const companyId = companyIdOf(req.user);
+    const items = await this.prisma.inventoryItem.findMany({ where: { companyId }, select: { id: true, sku: true, name: true, type: true } });
+    const stockItems = items.filter((i) => isStockTracked(i.type));
+    let ledgerOnHand = 0, stockValue = 0;
+    const lines: any[] = [];
+    for (const it of stockItems) {
+      const b = await this.movementService.balance(companyId, it.id);
+      ledgerOnHand += b.onHand; stockValue += b.value;
+      lines.push({ itemId: it.id, sku: it.sku, name: it.name, ledgerOnHand: b.onHand, displayedOnHand: b.onHand, onHandDifference: 0, value: b.value, avgCost: b.avgCost });
+    }
+    const byCode = await this.posting.accountsByCode(companyId);
+    const acctNet = async (code: string) => {
+      const a = byCode[code]; if (!a) return 0;
+      const rows = await this.prisma.journalLine.findMany({ where: { accountId: a.id, journal: { companyId } } });
+      return rows.reduce((s, l) => s + Number(l.debit) - Number(l.credit), 0);
+    };
+    const inventoryGl = await acctNet('1200');
+    const grniGl = await acctNet('2050');
+    const apGl = await acctNet('2000');
+    const bills = await this.prisma.supplierInvoice.findMany({ where: { companyId, status: 'POSTED' }, select: { total: true, amountPaid: true, creditsApplied: true } });
+    const apSubledger = bills.reduce((s, b) => s + (Number(b.total) - Number(b.amountPaid) - Number(b.creditsApplied)), 0);
+    const journals = await this.prisma.journalEntry.findMany({ where: { companyId, status: 'POSTED' }, include: { lines: true } });
+    const unbalanced = journals.filter((j) => Math.abs(j.lines.reduce((s, l) => s + Number(l.debit), 0) - j.lines.reduce((s, l) => s + Number(l.credit), 0)) > 0.02).length;
+    const dupAgg = await this.prisma.stockMovement.groupBy({ by: ['itemId', 'type', 'reference'], where: { item: { companyId } }, _count: { _all: true } });
+    const duplicates = dupAgg.filter((g) => g._count._all > 1 && g.reference).length;
+    return {
+      companyId,
+      inventory: { ledgerOnHand: Number(ledgerOnHand.toFixed(4)), stockValue: Number(stockValue.toFixed(2)), inventoryGl: Number(inventoryGl.toFixed(2)), valueDifference: Number((stockValue - inventoryGl).toFixed(2)), items: lines },
+      grni: { glBalance: Number(grniGl.toFixed(2)) },
+      ap: { subledger: Number(apSubledger.toFixed(2)), control: Number((-apGl).toFixed(2)), difference: Number((apSubledger + apGl).toFixed(2)) },
+      journals: { posted: journals.length, unbalanced },
+      stockMovements: { duplicateSourceGroups: duplicates },
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
   // ----- Item detail 360 -----
+  /** Resolve item purchase/sale defaults (shared resolver) for document prefill. */
+  @Get('items/:id/resolve') async resolveItem(@Req() req: any, @Param('id') id: string, @Query() q: any) {
+    const companyId = companyIdOf(req.user);
+    if (String(q.purpose || 'purchase').toLowerCase() === 'sale') {
+      return this.itemResolver.resolveForSale(companyId, id, { customerId: q.customerId, currency: q.currency, quantity: q.quantity ? Number(q.quantity) : undefined });
+    }
+    return this.itemResolver.resolveForPurchase(companyId, id);
+  }
+
+  /**
+   * Product / inventory history: signed movements with running balance, source links,
+   * counterparty and summary. Running balance = period opening + chronological signed
+   * movements (deterministic by occurredAt then id); filtered rows keep their true balance.
+   */
+  @Get('items/:id/history') async itemHistory(@Req() req: any, @Param('id') id: string, @Query() q: any) {
+    const companyId = companyIdOf(req.user);
+    const item = await this.prisma.inventoryItem.findFirst({ where: { id, companyId } });
+    if (!item) throw new BadRequestException('Item not found');
+    const all = await this.prisma.stockMovement.findMany({ where: { itemId: id, warehouse: { companyId } }, include: { warehouse: { select: { id: true, name: true } } }, orderBy: [{ occurredAt: 'asc' }, { seq: 'asc' }] });
+    const warehouseId: string | undefined = q.warehouseId;
+    const scoped = warehouseId ? all.filter((m) => m.warehouseId === warehouseId) : all;
+    const fromDate = q.from ? new Date(q.from) : null;
+    const toDate = q.to ? new Date(q.to) : null;
+    const opening = fromDate ? scoped.filter((m) => new Date(m.occurredAt) < fromDate).reduce((s, m) => s + Number(m.signedQuantity || 0), 0) : 0;
+    let running = opening;
+    const withBalance = scoped.map((m) => {
+      const at = new Date(m.occurredAt);
+      const inPeriod = (!fromDate || at >= fromDate) && (!toDate || at <= toDate);
+      if (inPeriod) running += Number(m.signedQuantity || 0);
+      return { m, balance: running, inPeriod };
+    });
+    const refs = [...new Set(scoped.map((m) => m.reference).filter(Boolean))] as string[];
+    const [invs, dns, grns, pos] = await Promise.all([
+      refs.length ? this.prisma.salesInvoice.findMany({ where: { companyId, invoiceNo: { in: refs } }, select: { id: true, invoiceNo: true, customer: { select: { name: true } } } }) : [],
+      refs.length ? this.prisma.deliveryNote.findMany({ where: { companyId, deliveryNo: { in: refs } }, select: { id: true, deliveryNo: true, customer: { select: { name: true } } } }) : [],
+      refs.length ? this.prisma.goodsReceivedNote.findMany({ where: { companyId, grnNo: { in: refs } }, select: { id: true, grnNo: true, supplier: { select: { name: true } } } }) : [],
+      refs.length ? this.prisma.purchaseOrder.findMany({ where: { companyId, poNo: { in: refs } }, select: { id: true, poNo: true, supplier: { select: { name: true } } } }) : [],
+    ]);
+    const invBy = new Map(invs.map((x) => [x.invoiceNo, x]));
+    const dnBy = new Map(dns.map((x) => [x.deliveryNo, x]));
+    const grnBy = new Map(grns.map((x) => [x.grnNo, x]));
+    const poBy = new Map(pos.map((x) => [x.poNo, x]));
+    const srcOf = (ref?: string | null) => {
+      if (!ref) return { label: null, route: null, counterparty: null };
+      const i = invBy.get(ref); if (i) return { label: 'Invoice', route: `/sales/invoices?invoiceId=${i.id}`, counterparty: i.customer?.name || null };
+      const d = dnBy.get(ref); if (d) return { label: 'Delivery', route: `/sales/deliveries?deliveryId=${d.id}`, counterparty: d.customer?.name || null };
+      const g = grnBy.get(ref); if (g) return { label: 'Goods Receipt', route: `/procurement?grnId=${g.id}`, counterparty: g.supplier?.name || null };
+      const p = poBy.get(ref); if (p) return { label: 'Purchase Order', route: `/procurement?poId=${p.id}`, counterparty: p.supplier?.name || null };
+      return { label: null, route: null, counterparty: null };
+    };
+    let rows = withBalance.filter((x) => x.inPeriod).map(({ m, balance }) => {
+      const src = srcOf(m.reference);
+      const signed = Number(m.signedQuantity || 0);
+      return {
+        id: m.id, occurredAt: m.occurredAt, type: m.type, warehouse: m.warehouse?.name || null, warehouseId: m.warehouseId,
+        qtyIn: signed > 0 ? signed : 0, qtyOut: signed < 0 ? -signed : 0, signedQuantity: signed,
+        runningBalance: Number(balance.toFixed(4)), unitCost: Number(m.unitCost), valueChange: Number((signed * Number(m.unitCost)).toFixed(2)),
+        reference: m.reference, notes: m.notes, sourceLabel: src.label, sourceRoute: src.route, counterparty: src.counterparty,
+      };
+    });
+    if (q.type) rows = rows.filter((r) => r.type === String(q.type).toUpperCase());
+    if (q.q) { const s = String(q.q).toLowerCase(); rows = rows.filter((r) => `${r.reference || ''} ${r.notes || ''} ${r.counterparty || ''} ${r.type}`.toLowerCase().includes(s)); }
+    const period = withBalance.filter((x) => x.inPeriod).map((x) => x.m);
+    const mag = (pred: (t: string) => boolean) => period.filter((m) => pred(m.type)).reduce((s, m) => s + Math.abs(Number(m.signedQuantity || 0)), 0);
+    const balance = await this.movementService.balance(companyId, id);
+    const warehouses = await this.prisma.warehouse.findMany({ where: { companyId }, select: { id: true, name: true } });
+    const whBreakdown = [];
+    for (const w of warehouses) {
+      if (!all.some((m) => m.warehouseId === w.id)) continue;
+      const b = await this.movementService.balance(companyId, id, w.id);
+      whBreakdown.push({ warehouseId: w.id, warehouse: w.name, onHand: b.onHand, value: b.value });
+    }
+    const summary = {
+      currentStock: balance.onHand,
+      periodOpening: opening,
+      received: mag((t) => t === 'RECEIPT'),
+      issued: mag((t) => t === 'ISSUE'),
+      transfersIn: mag((t) => t === 'TRANSFER_IN'),
+      transfersOut: mag((t) => t === 'TRANSFER_OUT'),
+      netAdjustments: period.filter((m) => m.type.startsWith('ADJUSTMENT')).reduce((s, m) => s + Number(m.signedQuantity || 0), 0),
+      returns: period.filter((m) => m.type.startsWith('RETURN')).reduce((s, m) => s + Number(m.signedQuantity || 0), 0),
+      inventoryValue: balance.value,
+      avgCost: balance.avgCost,
+    };
+    return {
+      item: { id: item.id, sku: item.sku, name: item.name, type: normalizeItemType(item.type), unit: item.unit, stockTracked: isStockTracked(item.type) },
+      summary, warehouses: whBreakdown, rows,
+      filters: { warehouseId: warehouseId || null, from: q.from || null, to: q.to || null, type: q.type || null, q: q.q || null },
+    };
+  }
   @Get('items/:id') async itemDetail(@Req() req: any, @Param('id') id: string) {
     const companyId = companyIdOf(req.user);
     const item = await this.prisma.inventoryItem.findFirst({ where: { id, companyId } });

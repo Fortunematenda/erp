@@ -5,6 +5,8 @@ export class ItemDto {
   @IsOptional() @IsString() sku?: string;
   @IsString() name!: string;
   @IsOptional() @IsString() unit?: string;
+  @IsOptional() @IsString() purchaseUnit?: string;
+  @IsOptional() @IsString() salesUnit?: string;
   @IsOptional() @IsString() hsCode?: string;
   @IsOptional() @IsString() barcode?: string;
   @IsOptional() @IsString() brand?: string;
@@ -20,8 +22,8 @@ export class ItemDto {
   @IsOptional() @Type(() => Number) @IsNumber() reorderQuantity?: number;
   @IsOptional() @Type(() => Number) @IsNumber() safetyStock?: number;
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) sellingPrice?: number;
-  @IsOptional() @Type(() => Number) @IsNumber() minSellingPrice?: number;
-  @IsOptional() @Type(() => Number) @IsNumber() purchaseCost?: number;
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) minSellingPrice?: number;
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) purchaseCost?: number;
   @IsOptional() @IsString() costingMethod?: string;
   @IsOptional() @IsBoolean() trackBatch?: boolean;
   @IsOptional() @IsBoolean() trackSerial?: boolean;

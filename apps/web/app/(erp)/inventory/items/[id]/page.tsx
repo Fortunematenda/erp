@@ -11,6 +11,7 @@ import { fmtDate, fmtMoney, fmtNumber } from '@/lib/format';
 import { ItemFormDrawer } from '@/components/inventory/item-form-drawer';
 import { StockAdjustmentDrawer } from '@/components/inventory/stock-adjustment-drawer';
 import { TransferDrawer } from '@/components/inventory/transfer-drawer';
+import { ItemHistory } from '@/components/inventory/item-history';
 import { ITEM_TYPE_BADGE, ITEM_TYPE_TONE, TRACKING_TONE, isStockTracked, itemTypeLabel, normalizeItemType, trackingLabel, trackingStatus } from '@/lib/item-type';
 import { MetricStrip } from '@/components/metric-strip';
 
@@ -91,7 +92,7 @@ export default function ItemDetail() {
     { key: 'overview', label: 'Details', children: <Descriptions column={3} size="small" bordered items={detailRows.map((v) => ({ key: v.label, label: v.label, children: <span className="text-[13px]">{v.value ?? '—'}</span> }))} /> },
     ...(tracked ? [
       { key: 'stock', label: 'Stock', children: <Table rowKey="warehouseId" dataSource={stock} columns={stockCols} pagination={false} size="small" /> },
-      { key: 'movements', label: 'Movements', children: <Table rowKey="id" dataSource={movements} columns={moveCols} pagination={false} size="small" /> },
+      { key: 'history', label: 'History', children: <ItemHistory itemId={item.id} /> },
     ] : []),
     { key: 'sales', label: 'Sales', children: <Table rowKey="invoiceId" dataSource={perf.sales || []} columns={salesCols} pagination={false} size="small" /> },
     { key: 'pricing', label: 'Pricing', children: <Table rowKey="id" dataSource={priceListItems} columns={priceCols} pagination={false} size="small" /> },

@@ -19,7 +19,6 @@ import { BillManagementList } from '@/components/bill-management-list';
 import { fmtDate, fmtMoney, fmtNumber } from '@/lib/format';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
 import { MetricStrip } from '@/components/metric-strip';
-import { PageHeader } from '@/components/ui/page-header';
 
 const TERMS = ['Due on Receipt', 'Net 7', 'Net 14', 'Net 30', 'Net 45', 'Net 60', 'Net 90', 'Custom'];
 const METHODS = ['BANK', 'CHEQUE', 'CASH', 'CARD', 'MOBILE', 'OTHER'];
@@ -51,7 +50,10 @@ export default function BillsPage() {
   ];
   return (
     <div className="nex-fade">
-      <PageHeader title="Bill Management" description="Accounts Payable workspace" actions={<Space><Button icon={<FileTextOutlined />} onClick={() => router.push('/expenses/vendor-credits')}>Vendor Credits</Button><Button icon={<ReloadOutlined />} onClick={() => router.refresh()} /><Button icon={<DollarOutlined />} onClick={() => setTab('pay')}>Pay Supplier</Button></Space>} />
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+        <div><h1 className="text-[26px] font-bold text-[#171a2e]">Bill Management</h1><p className="text-[13px] text-[#64748b]">Accounts Payable workspace</p></div>
+        <Space><Button icon={<FileTextOutlined />} onClick={() => router.push('/expenses/vendor-credits')}>Vendor Credits</Button><Button icon={<ReloadOutlined />} onClick={() => router.refresh()} /><Button icon={<DollarOutlined />} onClick={() => setTab('pay')}>Pay Supplier</Button></Space>
+      </div>
       <Card className="nex-card" styles={{ body: { padding: '18px 20px' } }}>
         <Tabs items={items} activeKey={tab} onChange={setTab} destroyOnHidden />
       </Card>
@@ -270,6 +272,8 @@ function PayBillTab({ onPay }: { onPay: (ids: string[]) => void }) {
 function BillDetailModal({ billId, onClose, onPay }: { billId: string; onClose: () => void; onPay: (id: string) => void }) {
   const { data: bill, isLoading } = useQuery({ queryKey: ['/procurement/bills', billId], queryFn: () => api(`/procurement/bills/${billId}`) });
   const [tab, setTab] = useState('details');
+  const [creditOpen, setCreditOpen] = useState(false);
+  const related = useQuery({ queryKey: ['/procurement/purchase-orders', bill?.purchaseOrderId, 'related'], queryFn: () => api(`/procurement/purchase-orders/${bill!.purchaseOrderId}/related`), enabled: !!bill?.purchaseOrderId });
   if (isLoading) return <Drawer open onClose={onClose} title="Bill" width={980}><div className="p-4 text-[#8a90ad]">Loading bill…</div></Drawer>;
   if (!bill) return null;
   const payable = bill.status === 'POSTED' && Number(bill.remaining) > 0.005;
@@ -297,10 +301,12 @@ function BillDetailModal({ billId, onClose, onPay }: { billId: string; onClose: 
     { key: 'attachments', label: 'Attachments', children: arr(bill.attachments).length ? <div className="space-y-2">{arr(bill.attachments).map((a: any) => <div key={a.id} className="rounded-xl border p-3 flex items-center gap-3"><FileTextOutlined /><div className="flex-1 truncate">{a.name}</div><Tooltip title="Preview"><Button size="small" icon={<EyeOutlined />} onClick={() => window.open(a.dataUrl, '_blank')} /></Tooltip></div>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No attachments" /> },
     { key: 'flow', label: 'Document Flow', children: <div className="space-y-2">
       <FlowRow type="Purchase Order" ref={bill.purchaseOrder?.poNo || '—'} href={bill.purchaseOrderId ? `/documents/purchase-order/${bill.purchaseOrderId}` : undefined} />
-      <FlowRow type="Goods Receipt" ref="—" />
+      {((related.data?.goodsReceipts || []) as any[]).map((g: any) => <FlowRow key={g.id} type="Goods Receipt" ref={g.grnNo} href={`/documents/goods-received-note/${g.id}`} />)}
+      {bill.purchaseOrderId && !(related.data?.goodsReceipts || []).length && <FlowRow type="Goods Receipt" ref="—" />}
       <FlowRow type="Supplier Bill" ref={bill.invoiceNo} href={`/documents/supplier-invoice/${bill.id}`} />
+      {((related.data?.vendorCredits || []) as any[]).map((c: any) => <FlowRow key={c.id} type="Vendor Credit" ref={c.vendorCreditNo} href="/expenses/vendor-credits" />)}
       {(bill.payments || []).map((p: any) => <FlowRow key={p.id} type="Supplier Payment" ref={p.paymentNo} href="/procurement" />)}
-      <FlowRow type="Journal Entry" ref="—" href="/finance/journals" />
+      <FlowRow type="Journal Entry" ref={bill.invoiceNo} href="/finance/journals" />
     </div> },
     { key: 'trail', label: 'Bill Trail', children: <div className="space-y-2">
       {[{ t: `Bill ${bill.invoiceNo} created`, d: bill.createdAt }, ...(bill.status === 'POSTED' ? [{ t: 'Bill posted', d: bill.createdAt }] : []), ...arr(bill.payments).map((p: any) => ({ t: `Payment ${p.paymentNo} · ${fmtMoney(p.applied)}`, d: p.paidAt }))].map((e, i) => <div key={i} className="flex items-center gap-3 rounded-xl border p-3"><CheckCircleOutlined className="text-[#003366]" /><div className="flex-1"><div className="text-[13px] text-[#171a2e]">{e.t}</div><div className="text-[11px] text-[#8a90ad]">{fmtDate(e.d)}</div></div></div>)}
@@ -309,7 +315,7 @@ function BillDetailModal({ billId, onClose, onPay }: { billId: string; onClose: 
   ];
   return (
     <Drawer open onClose={onClose} width={980} title={<span>Supplier Bill <b>{bill.invoiceNo}</b></span>}
-      extra={<Space wrap>{payable && <Button type="primary" icon={<PayCircleOutlined />} onClick={() => onPay(bill.id)}>{Number(bill.amountPaid) > 0.005 ? 'Pay Balance' : 'Make Payment'}</Button>}<Tooltip title="Print"><a href={`/documents/supplier-invoice/${bill.id}`} target="_blank"><Button icon={<PrinterOutlined />} /></a></Tooltip>{bill.status === 'DRAFT' && <Button icon={<CheckCircleOutlined />} onClick={() => { api(`/procurement/supplier-invoices/${bill.id}/finalize`, { method: 'POST', body: JSON.stringify({ action: 'POST' }) }).then(() => { message.success('Bill posted — awaiting payment'); onClose(); }).catch((e) => message.error(e.message)); }}>Save & Post</Button>}</Space>}>
+      extra={<Space wrap>{payable && <Button type="primary" icon={<PayCircleOutlined />} onClick={() => onPay(bill.id)}>{Number(bill.amountPaid) > 0.005 ? 'Pay Balance' : 'Make Payment'}</Button>}{payable && <Button icon={<RollbackOutlined />} onClick={() => setCreditOpen(true)}>Create Credit</Button>}<Tooltip title="Print"><a href={`/documents/supplier-invoice/${bill.id}`} target="_blank"><Button icon={<PrinterOutlined />} /></a></Tooltip>{bill.status === 'DRAFT' && <Button icon={<CheckCircleOutlined />} onClick={() => { api(`/procurement/supplier-invoices/${bill.id}/finalize`, { method: 'POST', body: JSON.stringify({ action: 'POST', confirmMissingReceipt: true }) }).then(() => { message.success('Bill posted — awaiting payment'); onClose(); }).catch((e) => message.error(e.message)); }}>Save & Post</Button>}</Space>}>
       <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-[#f8f9ff] px-4 py-3">
         <MetricStrip
           className="flex-1 mb-0 !bg-transparent !shadow-none !border-0"
@@ -323,6 +329,40 @@ function BillDetailModal({ billId, onClose, onPay }: { billId: string; onClose: 
         <div className="flex items-center gap-2"><StatusTag value={bill.status} /><StatusTag value={bill.paymentStatus} /></div>
       </div>
       <Tabs items={tabs} activeKey={tab} onChange={setTab} destroyOnHidden />
+      <CreateVendorCreditDrawer open={creditOpen} bill={bill} onClose={() => setCreditOpen(false)} onDone={() => { onClose(); }} />
+    </Drawer>
+  );
+}
+
+function CreateVendorCreditDrawer({ open, bill, onClose, onDone }: { open: boolean; bill: any; onClose: () => void; onDone: () => void }) {
+  const qc = useQueryClient();
+  const [amount, setAmount] = useState(0);
+  const [reason, setReason] = useState('Price adjustment');
+  const [date, setDate] = useState<any>(dayjs());
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (open) { setAmount(Math.max(0, Number(bill?.remaining || 0))); setReason('Price adjustment'); setDate(dayjs()); } }, [open]); // eslint-disable-line
+  async function submit() {
+    if (!(amount > 0)) return message.error('Enter a credit amount');
+    setBusy(true);
+    try {
+      const vc = await api('/finance/vendor-credits', { method: 'POST', body: JSON.stringify({ supplierId: bill.supplierId, reason, creditDate: date?.format('YYYY-MM-DD'), sourceInvoiceId: bill.id, lines: [{ description: reason, quantity: 1, unitPrice: amount, taxRate: 0 }] }) });
+      await api(`/finance/vendor-credits/${vc.id}/post`, { method: 'POST', body: '{}' });
+      await api(`/finance/vendor-credits/${vc.id}/apply`, { method: 'POST', body: JSON.stringify({ supplierInvoiceId: bill.id, amount }) });
+      message.success('Vendor credit created and applied');
+      ['/procurement/bills', '/finance/vendor-credits', '/finance/ledger', '/procurement/dashboard'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+      onDone();
+    } catch (e: any) { message.error(e.message); }
+    finally { setBusy(false); }
+  }
+  return (
+    <Drawer open={open} onClose={onClose} width={480} title={`Create Vendor Credit — ${bill?.invoiceNo || ''}`}
+      extra={<Space><Button onClick={onClose}>Cancel</Button><Button type="primary" loading={busy} onClick={submit}>Create & Apply</Button></Space>}>
+      <div className="space-y-4">
+        <div><div className="text-[12px] text-[#64748b] mb-1">Credit Amount</div><InputNumber className="w-full" min={0} prefix="$" value={amount} onChange={(v) => setAmount(Number(v || 0))} /></div>
+        <div><div className="text-[12px] text-[#64748b] mb-1">Reason</div><Input value={reason} onChange={(e) => setReason(e.target.value)} /></div>
+        <div><div className="text-[12px] text-[#64748b] mb-1">Credit Date</div><DatePicker className="w-full" value={date} onChange={setDate} /></div>
+        <div className="text-[12px] text-[#94a3b8]">This creates a price-adjustment credit (no stock movement) linked to bill {bill?.invoiceNo}, posts it and applies it to the bill. To return physical goods, use the Vendor Credits page with a stock return.</div>
+      </div>
     </Drawer>
   );
 }
