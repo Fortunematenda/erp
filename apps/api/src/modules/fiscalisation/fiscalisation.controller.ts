@@ -23,6 +23,7 @@ export class FiscalisationController {
   // ---------- Setup profile & wizard ----------
   @UseGuards(PermissionsGuard) @RequirePermissions('fiscalisation.view') @Get('profile') profile(@Req() req: any) { return this.fiscal.profile(companyIdOf(req.user)); }
   @UseGuards(PermissionsGuard) @RequirePermissions('fiscalisation.configuration.manage') @Put('profile') saveProfile(@Req() req: any, @Body() body: any) { return this.fiscal.saveProfile(companyIdOf(req.user), this.userId(req), body); }
+  @UseGuards(PermissionsGuard) @RequirePermissions('fiscalisation.configuration.manage') @Put('company') saveCompany(@Req() req: any, @Body() body: any) { return this.fiscal.saveCompanyDetails(companyIdOf(req.user), this.userId(req), body || {}); }
   @UseGuards(PermissionsGuard) @RequirePermissions('fiscalisation.view') @Get('readiness') readiness(@Req() req: any, @Query('target') target?: string) { return this.fiscal.readiness(companyIdOf(req.user), (target || 'PRODUCTION').toUpperCase() as any); }
 
   // ---------- Taxpayer verification ----------

@@ -12,6 +12,7 @@ import { fmtMoney } from '@/lib/format';
 import { CurrencyValue, StatusPill } from '@/components/sales-ui';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
 import { ProjectReportDrawer } from '@/components/project-report-drawer';
+import { PageHeader } from '@/components/ui/page-header';
 
 const PROJECT_STATUS = ['Active', 'Planning', 'On Hold', 'Completed', 'Cancelled'];
 

@@ -1,5 +1,6 @@
 'use client';
 import { useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Alert, App, Button, Drawer, Form, Input, InputNumber, Modal, Segmented, Select, Space, Switch, Table, Tag, Tooltip,
@@ -43,6 +44,7 @@ const READINESS_META: Record<string, { color: string; label: string }> = {
 
 export function FiscalisationSetup() {
   const { message, modal } = App.useApp();
+  const router = useRouter();
   const qc = useQueryClient();
   const [switchTarget, setSwitchTarget] = useState<string | null>(null);
   const [reason, setReason] = useState('');
@@ -56,10 +58,20 @@ export function FiscalisationSetup() {
   const [deviceOpen, setDeviceOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardStep, setWizardStep] = useState<number | null>(null);
+  const [companyOpen, setCompanyOpen] = useState(false);
+  const [branchOpen, setBranchOpen] = useState(false);
+  const [certOpen, setCertOpen] = useState(false);
+  const [csrOpen, setCsrOpen] = useState(false);
+  const [csr, setCsr] = useState('');
+  const [creatingDevice, setCreatingDevice] = useState(false);
   const taxFormRef = useRef<any>(null);
   const [deviceForm] = Form.useForm();
   const [profileForm] = Form.useForm();
   const [reqForm] = Form.useForm();
+  const [companyForm] = Form.useForm();
+  const [branchForm] = Form.useForm();
+  const [certForm] = Form.useForm();
 
   const profile = useQuery({ queryKey: ['fiscal-profile'], queryFn: () => api('/fiscalisation/profile') });
   const readiness = useQuery({ queryKey: ['fiscal-readiness'], queryFn: () => api('/fiscalisation/readiness?target=PRODUCTION') });
@@ -68,17 +80,18 @@ export function FiscalisationSetup() {
   const requests = useQuery({ queryKey: ['fiscal-requests'], queryFn: () => api('/fiscalisation/requests') });
   const logs = useQuery({ queryKey: ['fiscal-logs'], queryFn: () => api('/fiscalisation/integration-logs') });
   const classification = useQuery({ queryKey: ['fiscal-classification'], queryFn: () => api('/fiscalisation/classification') });
+  const branches = useQuery({ queryKey: ['fiscal-branches'], queryFn: () => api('/fiscalisation/branches') });
 
   const env = profile.data?.environment || 'MOCK';
   const rd = readiness.data;
   const rdMeta = READINESS_META[rd?.status || 'NOT_CONFIGURED'] || READINESS_META.NOT_CONFIGURED;
 
-  const refresh = () => ['fiscal-profile', 'fiscal-readiness', 'fiscal-devices', 'fiscal-tax-mappings', 'fiscal-requests', 'fiscal-logs', 'fiscal-config', 'fiscal-dashboard'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+  const refresh = () => ['fiscal-profile', 'fiscal-readiness', 'fiscal-devices', 'fiscal-branches', 'fiscal-tax-mappings', 'fiscal-requests', 'fiscal-logs', 'fiscal-config', 'fiscal-dashboard', 'fiscal-classification'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 
   async function run(key: string, fn: () => Promise<any>, okMsg: string) {
     setBusy(key);
-    try { await fn(); message.success(okMsg); refresh(); }
-    catch (e: any) { message.error(e.message || 'Operation failed'); }
+    try { await fn(); message.success(okMsg); refresh(); return true; }
+    catch (e: any) { message.error(e.message || 'Operation failed'); return false; }
     finally { setBusy(null); }
   }
 
@@ -112,7 +125,38 @@ export function FiscalisationSetup() {
   }
 
   async function saveProfile(values: any) {
-    await run('profile', () => api('/fiscalisation/profile', { method: 'PUT', body: JSON.stringify(values) }), 'Profile saved');
+    if (await run('profile', () => api('/fiscalisation/profile', { method: 'PUT', body: JSON.stringify(values) }), 'Profile saved')) setProfileOpen(false);
+  }
+
+  function openCompany() {
+    companyForm.setFieldsValue({
+      legalName: rd?.company?.name || profile.data?.taxpayerName || '',
+      tin: rd?.company?.tin || '',
+      vatNumber: rd?.company?.vatNumber || '',
+    });
+    setCompanyOpen(true);
+  }
+
+  async function saveCompany(values: any) {
+    if (await run('company', () => api('/fiscalisation/company', { method: 'PUT', body: JSON.stringify(values) }), 'Company details saved')) setCompanyOpen(false);
+  }
+
+  function openBranch() {
+    const current = branches.data?.[0];
+    branchForm.setFieldsValue(current || {});
+    setBranchOpen(true);
+  }
+
+  async function saveBranch(values: any) {
+    if (!values.id) { message.warning('Select a branch first. Branches are created in Administration.'); return; }
+    if (await run('branch', () => api(`/fiscalisation/branches/${values.id}`, { method: 'PUT', body: JSON.stringify(values) }), 'Branch saved')) setBranchOpen(false);
+  }
+
+  function openDeviceCreate() {
+    setCreatingDevice(true);
+    deviceForm.resetFields();
+    deviceForm.setFieldsValue({ branchId: branches.data?.[0]?.id, environment: env });
+    setDeviceOpen(true);
   }
 
   async function verifyTaxpayer() {
@@ -127,6 +171,7 @@ export function FiscalisationSetup() {
 
   function openDeviceEdit() {
     if (!selectedDevice) return;
+    setCreatingDevice(false);
     deviceForm.setFieldsValue({
       id: selectedDevice.id, name: selectedDevice.name, serialNumber: selectedDevice.serialNumber,
       modelName: selectedDevice.modelName, modelVersion: selectedDevice.modelVersion, integratorName: selectedDevice.integratorName,
@@ -140,8 +185,166 @@ export function FiscalisationSetup() {
     const id = values.id;
     const payload = { ...values };
     delete payload.id;
-    await run('device', () => api(`/fiscalisation/devices/${id}`, { method: 'PUT', body: JSON.stringify(payload) }), 'Device saved');
-    setDeviceOpen(false);
+    const ok = id
+      ? await run('device', () => api(`/fiscalisation/devices/${id}`, { method: 'PUT', body: JSON.stringify(payload) }), 'Device saved')
+      : await run('device', () => api('/fiscalisation/devices', { method: 'POST', body: JSON.stringify(payload) }), 'Device created');
+    if (ok) { setDeviceOpen(false); setCreatingDevice(false); }
+  }
+
+  function requireDevice() {
+    if (selectedDevice) return selectedDevice;
+    message.warning('Add a fiscal device first.');
+    openDeviceCreate();
+    return null;
+  }
+
+  async function generateCsr(deviceId: string) {
+    await run('csr', async () => {
+      const res = await api(`/fiscalisation/devices/${deviceId}/generate-csr`, { method: 'POST' });
+      setCsr(res.csrPem || '');
+      setCsrOpen(true);
+    }, 'CSR generated');
+  }
+
+  async function installCertificate(values: { certificatePem: string }) {
+    const device = requireDevice();
+    if (!device) return;
+    if (await run('cert', () => api(`/fiscalisation/devices/${device.id}/certificate`, { method: 'POST', body: JSON.stringify({ certificatePem: values.certificatePem }) }), 'Certificate installed')) {
+      setCertOpen(false);
+      certForm.resetFields();
+    }
+  }
+
+  function openTax() {
+    const rows = taxMappings.data || [];
+    if (!rows.length) {
+      message.info('Add a tax rate first, then map it here.');
+      router.push('/finance/tax-rates');
+      return;
+    }
+    setTaxEdit(rows.find((r: any) => !r.fdmsTaxId) || rows[0]);
+    document.getElementById('fiscal-tax-mapping')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function openWizard(step: number) {
+    setWizardStep(step);
+    setWizardOpen(true);
+  }
+
+  function handleAction(item: any) {
+    const href = String(item?.action?.href || '');
+    if (href.startsWith('http')) {
+      window.open(href, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    if (href === '/settings/company') { openCompany(); return; }
+    if (href.startsWith('/inventory')) { router.push('/inventory'); return; }
+    if (href.startsWith('/finance/')) { router.push(href); return; }
+    if (href.startsWith('/administration')) { router.push(href); return; }
+    switch (item.key) {
+      case 'tin':
+      case 'name':
+        openCompany();
+        return;
+      case 'vatNumber':
+        openCompany();
+        return;
+      case 'vatStatus':
+      case 'samples':
+      case 'approval':
+      case 'evidence':
+        openProfileEdit();
+        setProfileOpen(true);
+        return;
+      case 'verified':
+      case 'identity':
+      case 'belongsToTaxpayer':
+        verifyTaxpayer();
+        return;
+      case 'selected':
+      case 'address':
+      case 'contact':
+        openBranch();
+        return;
+      case 'pos':
+      case 'model':
+      case 'modelVersion':
+      case 'activationKey':
+      case 'prodCredentials':
+      case 'deviceRules':
+      case 'serial':
+        if (selectedDevice) openDeviceEdit();
+        else openDeviceCreate();
+        return;
+      case 'registered':
+      case 'prodDevice': {
+        const device = requireDevice();
+        if (device) run('register', () => api(`/fiscalisation/devices/${device.id}/register`, { method: 'POST' }), 'Device registered');
+        return;
+      }
+      case 'privateKey':
+      case 'csr': {
+        const device = requireDevice();
+        if (device) generateCsr(device.id);
+        return;
+      }
+      case 'certificate':
+      case 'certValid':
+      case 'prodCert':
+      case 'certDevice':
+      case 'keyAvailable':
+        if (requireDevice()) setCertOpen(true);
+        return;
+      case 'mtls':
+      case 'getConfig':
+      case 'taxpayerConfig':
+      case 'operatingMode':
+      case 'qrConfig': {
+        const device = requireDevice();
+        if (device) run('sync', () => api(`/fiscalisation/devices/${device.id}/sync-config`, { method: 'POST' }), 'Configuration synchronised');
+        return;
+      }
+      case 'fiscalDayConfig':
+        router.push('/fiscalisation?tab=dashboard');
+        return;
+      case 'taxes':
+      case 'taxMappings':
+        openTax();
+        return;
+      case 'classification':
+        router.push('/inventory');
+        return;
+      case 'testingComplete':
+      case 'deviceRegistration':
+      case 'taxpayerVerification':
+      case 'configSync':
+      case 'dayOpen':
+      case 'invoiceSubmit':
+      case 'creditSubmit':
+      case 'debitSubmit':
+      case 'signature':
+      case 'dayClose':
+      case 'rendering':
+      case 'qr':
+      case 'isolation':
+        openWizard(7);
+        return;
+      case 'currency':
+        router.push('/finance/currency');
+        return;
+      case 'invoiceMapping':
+      case 'creditMapping':
+      case 'debitMapping':
+        if (selectedDevice) openWizard(3);
+        else openDeviceCreate();
+        return;
+      case 'finalCheck':
+        setProdOpen(true);
+        return;
+      default:
+        if (href && href !== '/fiscalisation?tab=setup') router.push(href);
+        else openWizard(0);
+    }
   }
 
   async function prepareEmail() {
@@ -153,13 +356,11 @@ export function FiscalisationSetup() {
   }
 
   async function saveRequest(values: any) {
-    await run('req', () => api('/fiscalisation/requests', { method: 'POST', body: JSON.stringify({ ...values, subject: email?.subject, body: email?.body }) }), 'Request recorded');
-    setRequestOpen(false);
+    if (await run('req', () => api('/fiscalisation/requests', { method: 'POST', body: JSON.stringify({ ...values, subject: email?.subject, body: email?.body }) }), 'Request recorded')) setRequestOpen(false);
   }
 
   async function saveTaxMapping(values: any) {
-    await run('tax', () => api('/fiscalisation/tax-mappings', { method: 'PUT', body: JSON.stringify(values) }), 'Tax mapping saved');
-    setTaxEdit(null);
+    if (await run('tax', () => api('/fiscalisation/tax-mappings', { method: 'PUT', body: JSON.stringify(values) }), 'Tax mapping saved')) setTaxEdit(null);
   }
 
   const requestCols: ColumnsType<any> = [
@@ -205,7 +406,7 @@ export function FiscalisationSetup() {
           </div>
           <div className="flex items-center gap-3">
             <Tag color={rdMeta.color} className="!m-0">{rdMeta.label}</Tag>
-            <Button type="primary" icon={<RocketOutlined />} onClick={() => setWizardOpen(true)}>Setup Wizard</Button>
+            <Button type="primary" icon={<RocketOutlined />} onClick={() => { setWizardStep(null); setWizardOpen(true); }}>Setup Wizard</Button>
             <Button icon={<SyncOutlined />} loading={busy === 'reconcile'} onClick={() => run('reconcile', () => api('/fiscalisation/reconcile', { method: 'POST' }), 'Fiscal statuses reconciled from accepted receipts')}>Reconcile statuses</Button>
             <Segmented
               value={env}
@@ -257,11 +458,7 @@ export function FiscalisationSetup() {
                       </div>
                     </div>
                     <div className="shrink-0">
-                      {i.status === 'OK' ? null : i.action ? (
-                        i.action.href?.startsWith('http')
-                          ? <a href={i.action.href} target="_blank" rel="noreferrer" className="text-[#1d5fb5]">{i.action.label}</a>
-                          : <a href={i.action.href} className="text-[#1d5fb5]">{i.action.label}</a>
-                      ) : <Tag color={STATUS_META[i.status]?.color}>{STATUS_META[i.status]?.label}</Tag>}
+                      {i.status === 'OK' ? null : <ReadinessAction item={i} onAction={handleAction} />}
                     </div>
                   </div>
                 ))}
@@ -297,9 +494,9 @@ export function FiscalisationSetup() {
         <div className="flex items-center justify-between mb-4">
           <div className="text-[14px] font-semibold text-[#171a2e]">Fiscal Device &amp; ZIMRA Credentials</div>
           <Space>
-            <Button size="small" icon={<SyncOutlined />} loading={busy === 'sync'} onClick={() => selectedDevice && run('sync', () => api(`/fiscalisation/devices/${selectedDevice.id}/sync-config`, { method: 'POST' }), 'Configuration synchronised')}>Synchronise Config</Button>
-            <Button size="small" icon={<SafetyCertificateOutlined />} loading={busy === 'register'} onClick={() => selectedDevice && run('register', () => api(`/fiscalisation/devices/${selectedDevice.id}/register`, { method: 'POST' }), 'Device registered')}>Register Device</Button>
-            <Button size="small" onClick={() => { openDeviceEdit(); }} disabled={!selectedDevice}>Edit</Button>
+            <Button size="small" icon={<SyncOutlined />} loading={busy === 'sync'} onClick={() => { const device = requireDevice(); if (device) run('sync', () => api(`/fiscalisation/devices/${device.id}/sync-config`, { method: 'POST' }), 'Configuration synchronised'); }}>Synchronise Config</Button>
+            <Button size="small" icon={<SafetyCertificateOutlined />} loading={busy === 'register'} onClick={() => { const device = requireDevice(); if (device) run('register', () => api(`/fiscalisation/devices/${device.id}/register`, { method: 'POST' }), 'Device registered'); }}>Register Device</Button>
+            <Button size="small" onClick={() => (selectedDevice ? openDeviceEdit() : openDeviceCreate())}>{selectedDevice ? 'Edit' : 'Add device'}</Button>
           </Space>
         </div>
         {selectedDevice ? (
@@ -313,14 +510,14 @@ export function FiscalisationSetup() {
             <Field label="Certificate" value={selectedDevice.certificateExpiresAt ? <Tag color={new Date(selectedDevice.certificateExpiresAt) > new Date() ? 'green' : 'red'}>{fmtDate(selectedDevice.certificateExpiresAt)}</Tag> : <Tag color="red">Missing</Tag>} />
             <Field label="Status" value={<Tag>{selectedDevice.status}</Tag>} />
           </div>
-        ) : <div className="text-[13px] text-[#94a3b8]">No fiscal device configured for this company. Add one from the Setup wizard or Devices.</div>}
+        ) : <div className="text-[13px] text-[#94a3b8]">No fiscal device configured for this company. <button type="button" className="text-[#1d5fb5] hover:underline" onClick={openDeviceCreate}>Add a device</button> or use the Setup wizard.</div>}
       </div>
 
       {/* Tax mapping */}
-      <div className="nex-card p-5">
+      <div id="fiscal-tax-mapping" className="nex-card p-5">
         <div className="flex items-center justify-between mb-3">
           <div className="text-[14px] font-semibold text-[#171a2e]">Tax Mapping (ERP → FDMS)</div>
-          <Button size="small" icon={<PlusOutlined />} onClick={() => taxMappings.data?.[0] && setTaxEdit(taxMappings.data[0])} disabled={!taxMappings.data?.length}>Configure</Button>
+          <Button size="small" icon={<PlusOutlined />} onClick={openTax}>Configure</Button>
         </div>
         <Table rowKey="erpTaxCode" size="small" loading={taxMappings.isLoading} dataSource={taxMappings.data || []} columns={taxCols} pagination={false} />
       </div>
@@ -352,8 +549,8 @@ export function FiscalisationSetup() {
             </div>
             {classification.data.items?.length > 0 && (
               <Table rowKey="id" size="small" dataSource={classification.data.items} pagination={{ pageSize: 5 }} columns={[
-                { title: 'SKU', dataIndex: 'sku', width: 130 },
-                { title: 'Name', dataIndex: 'name' },
+                { title: 'SKU', dataIndex: 'sku', width: 130, render: (v) => <button type="button" className="text-[#1d5fb5] hover:underline" onClick={() => router.push('/inventory')}>{v}</button> },
+                { title: 'Name', dataIndex: 'name', render: (v) => <button type="button" className="text-left text-[#171a2e] hover:text-[#1d5fb5] hover:underline" onClick={() => router.push('/inventory')}>{v}</button> },
                 { title: 'HS Code', dataIndex: 'hsCode', width: 120, render: (v) => v || <Tag color="red">Missing</Tag> },
                 { title: 'Tax Code', dataIndex: 'salesTaxCode', width: 120, render: (v) => v || <Tag color="orange">Missing</Tag> },
               ]} />
@@ -371,8 +568,44 @@ export function FiscalisationSetup() {
         <Table rowKey="id" size="small" loading={logs.isLoading} dataSource={logs.data || []} columns={logCols} pagination={{ pageSize: 10 }} />
       </div>
 
+      <Modal open={companyOpen} title="Company Details" onCancel={() => setCompanyOpen(false)} onOk={() => companyForm.submit()} confirmLoading={busy === 'company'} forceRender destroyOnHidden={false}>
+        <Form form={companyForm} layout="vertical" onFinish={saveCompany}>
+          <Form.Item name="legalName" label="Registered Name" rules={[{ required: true, message: 'Registered name is required' }]}><Input /></Form.Item>
+          <Form.Item name="tin" label="Company TIN"><Input /></Form.Item>
+          <Form.Item name="vatNumber" label="VAT Number"><Input /></Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal open={branchOpen} title="Branch Registration" onCancel={() => setBranchOpen(false)} onOk={() => branchForm.submit()} confirmLoading={busy === 'branch'} width={680} forceRender destroyOnHidden={false}>
+        <Form form={branchForm} layout="vertical" onFinish={saveBranch} className="grid grid-cols-2 gap-x-4">
+          <Form.Item name="id" label="Branch" rules={[{ required: true, message: 'Select a branch' }]} className="col-span-2">
+            <Select options={(branches.data || []).map((b: any) => ({ value: b.id, label: b.name }))} placeholder="Select branch" onChange={(id) => { const b = (branches.data || []).find((x: any) => x.id === id); if (b) branchForm.setFieldsValue(b); }} />
+          </Form.Item>
+          <Form.Item name="name" label="Branch Name"><Input /></Form.Item>
+          <Form.Item name="phone" label="Phone"><Input /></Form.Item>
+          <Form.Item name="email" label="Email"><Input type="email" /></Form.Item>
+          <Form.Item name="houseNumber" label="House Number"><Input /></Form.Item>
+          <Form.Item name="street" label="Street"><Input /></Form.Item>
+          <Form.Item name="city" label="City"><Input /></Form.Item>
+          <Form.Item name="province" label="Province"><Input /></Form.Item>
+          <Form.Item name="zimraRegion" label="ZIMRA Region"><Input /></Form.Item>
+          <Form.Item name="zimraStation" label="ZIMRA Station"><Input /></Form.Item>
+          <div className="col-span-2 text-[12px] text-[#64748b]">New branches are created in <button type="button" className="text-[#1d5fb5] hover:underline" onClick={() => router.push('/administration')}>Administration</button>. This form updates the fiscal registration details for an existing branch.</div>
+        </Form>
+      </Modal>
+
+      <Modal open={certOpen} title="Install Device Certificate" onCancel={() => setCertOpen(false)} onOk={() => certForm.submit()} confirmLoading={busy === 'cert'} forceRender destroyOnHidden={false}>
+        <Form form={certForm} layout="vertical" onFinish={installCertificate}>
+          <Form.Item name="certificatePem" label="Certificate (PEM)" rules={[{ required: true, message: 'Paste the certificate issued by ZIMRA' }]}><Input.TextArea rows={8} placeholder="-----BEGIN CERTIFICATE-----" /></Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal open={csrOpen} title="Certificate Signing Request" onCancel={() => setCsrOpen(false)} footer={<Button type="primary" onClick={() => { navigator.clipboard?.writeText(csr); message.success('CSR copied'); }}>Copy CSR</Button>} destroyOnHidden>
+        <Input.TextArea rows={12} value={csr} readOnly />
+      </Modal>
+
       {/* Profile edit modal */}
-      <Modal open={profileOpen} title="Company Taxpayer Profile" onCancel={() => setProfileOpen(false)} onOk={() => profileForm.submit()} confirmLoading={busy === 'profile'} width={720} destroyOnHidden>
+      <Modal open={profileOpen} title="Company Taxpayer Profile" onCancel={() => setProfileOpen(false)} onOk={() => profileForm.submit()} confirmLoading={busy === 'profile'} width={720} forceRender destroyOnHidden={false}>
         <Form form={profileForm} layout="vertical" onFinish={saveProfile} className="grid grid-cols-2 gap-x-4">
           <Form.Item name="taxpayerName" label="Registered Taxpayer Name"><Input /></Form.Item>
           <Form.Item name="taxpayerEmail" label="Taxpayer Email"><Input type="email" /></Form.Item>
@@ -394,11 +627,12 @@ export function FiscalisationSetup() {
       </Modal>
 
       {/* Device edit modal */}
-      <Modal open={deviceOpen} title="Fiscal Device & Credentials" onCancel={() => setDeviceOpen(false)} onOk={() => deviceForm.submit()} confirmLoading={busy === 'device'} width={680} destroyOnHidden>
+      <Modal open={deviceOpen} title={creatingDevice ? 'Add Fiscal Device' : 'Fiscal Device & Credentials'} onCancel={() => { setDeviceOpen(false); setCreatingDevice(false); }} onOk={() => deviceForm.submit()} confirmLoading={busy === 'device'} width={680} forceRender destroyOnHidden={false}>
         <Form form={deviceForm} layout="vertical" onFinish={saveDevice} className="grid grid-cols-2 gap-x-4">
           <Form.Item name="id" hidden><Input /></Form.Item>
+          {creatingDevice && <Form.Item name="branchId" label="Branch" rules={[{ required: true, message: 'Select a branch' }]} className="col-span-2"><Select options={(branches.data || []).map((b: any) => ({ value: b.id, label: b.name }))} placeholder="Select branch" /></Form.Item>}
           <Form.Item name="name" label="Device Name"><Input /></Form.Item>
-          <Form.Item name="serialNumber" label="Serial Number"><Input /></Form.Item>
+          <Form.Item name="serialNumber" label="Serial Number" rules={[{ required: true, message: 'Serial number is required' }]}><Input /></Form.Item>
           <Form.Item name="modelName" label="Registered Model Name"><Input /></Form.Item>
           <Form.Item name="modelVersion" label="Registered Model Version"><Input /></Form.Item>
           <Form.Item name="integratorName" label="Registered Integrator"><Input /></Form.Item>
@@ -441,9 +675,7 @@ export function FiscalisationSetup() {
                     <div className="text-[13px] font-medium text-[#171a2e]">{b.label} <Tag color={STATUS_META[b.status]?.color}>{STATUS_META[b.status]?.label}</Tag></div>
                     <div className="text-[12px] text-[#94a3b8]">{b.category} · {b.reason || b.whereToObtain || 'Requirement outstanding'}</div>
                   </div>
-                  {b.action && (b.action.href?.startsWith('http')
-                    ? <a href={b.action.href} target="_blank" rel="noreferrer" className="text-[12px] text-[#1d5fb5] shrink-0">{b.action.label}</a>
-                    : <a href={b.action.href} className="text-[12px] text-[#1d5fb5] shrink-0">{b.action.label}</a>)}
+                  <ReadinessAction item={b} onAction={handleAction} />
                 </div>
               ))}
             </div>
@@ -478,7 +710,7 @@ export function FiscalisationSetup() {
       </Drawer>
 
       {/* Record request modal */}
-      <Modal open={requestOpen} title="Record ZIMRA Request" onCancel={() => setRequestOpen(false)} onOk={() => reqForm.submit()} confirmLoading={busy === 'req'} destroyOnHidden>
+      <Modal open={requestOpen} title="Record ZIMRA Request" onCancel={() => setRequestOpen(false)} onOk={() => reqForm.submit()} confirmLoading={busy === 'req'} forceRender destroyOnHidden={false}>
         <Form form={reqForm} layout="vertical" onFinish={saveRequest}>
           <Form.Item name="assistance" label="Assistance Needed" initialValue="New fiscal-device registration">
             <Select options={['New fiscal-device registration', 'Existing device activation details', 'Device registration verification', 'Virtual fiscalisation testing', 'Production onboarding', 'Certificate/registration problem', 'Fiscal-day issue', 'Other FDMS assistance'].map((v) => ({ value: v }))} />
@@ -491,7 +723,7 @@ export function FiscalisationSetup() {
         </Form>
       </Modal>
 
-      <FiscalisationWizard open={wizardOpen} onClose={() => setWizardOpen(false)} />
+      <FiscalisationWizard open={wizardOpen} initialStep={wizardStep} onClose={() => { setWizardOpen(false); setWizardStep(null); refresh(); }} />
     </div>
   );
 }
@@ -507,6 +739,11 @@ function TaxMappingForm({ mapping, onFinish, onReady }: { mapping: any; onFinish
       <Form.Item name="fdmsTaxRate" label="FDMS Tax Rate %"><InputNumber className="w-full" /></Form.Item>
     </Form>
   );
+}
+
+function ReadinessAction({ item, onAction }: { item: any; onAction: (item: any) => void }) {
+  const label = item.action?.label || STATUS_META[item.status]?.label || 'Open';
+  return <button type="button" className="text-[12px] text-[#1d5fb5] hover:underline shrink-0 text-left" onClick={() => onAction(item)}>{label}</button>;
 }
 
 function Field({ label, value }: { label: string; value: any }) {

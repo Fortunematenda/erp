@@ -29,6 +29,8 @@ coverage/
 .nyc_output/
 test-results/
 playwright-report/
+blob-report/
+storybook-static/
 .turbo/
 .nx/
 .cache/
@@ -95,3 +97,6 @@ Desktop.ini
 docker-compose.override.yml
 
 env
+
+*storybook.log
+storybook-static

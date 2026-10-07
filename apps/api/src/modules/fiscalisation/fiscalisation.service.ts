@@ -461,6 +461,23 @@ export class FiscalisationService {
     return this.profile(companyId);
   }
 
+  async saveCompanyDetails(companyId: string, userId: string | undefined, data: any) {
+    const company = await this.prisma.company.findUnique({ where: { id: companyId } });
+    if (!company) throw new BadRequestException('Company not found');
+    const legalName = data.legalName != null ? String(data.legalName).trim() : company.legalName;
+    if (!legalName) throw new BadRequestException('Registered name is required');
+    const saved = await this.prisma.company.update({
+      where: { id: companyId },
+      data: {
+        legalName,
+        tin: data.tin != null ? (String(data.tin).trim() || null) : company.tin,
+        vatNumber: data.vatNumber != null ? (String(data.vatNumber).trim() || null) : company.vatNumber,
+      },
+    });
+    await this.audit.log(companyId, userId, 'fiscal.company.update', 'Company', companyId, { module: 'fiscalisation', metadata: { fields: ['legalName', 'tin', 'vatNumber'] } });
+    return { id: saved.id, name: saved.legalName, tin: saved.tin, vatNumber: saved.vatNumber, baseCurrency: saved.baseCurrency };
+  }
+
   async createDevice(companyId: string, userId: string | undefined, data: any) {
     const branch = await this.prisma.branch.findFirst({ where: { id: data.branchId, companyId } });
     if (!branch) throw new BadRequestException('Branch not found');

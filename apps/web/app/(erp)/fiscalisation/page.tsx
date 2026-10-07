@@ -1,5 +1,5 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { App, Button, Col, DatePicker, Drawer, Empty, Input, InputNumber, Row, Select, Space, Table, Tabs, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -13,6 +13,7 @@ import { useSearchParams } from 'next/navigation';
 import dayjs from 'dayjs';
 import { api } from '@/lib/api';
 import { StatusPill, EmptyState } from '@/components/sales-ui';
+import { PageHeader } from '@/components/ui/page-header';
 import { StatCard } from '@/components/stat-card';
 import { FiscalisationSetup } from '@/components/fiscalisation-setup';
 import { FiscalisationReports } from '@/components/fiscalisation-reports';
@@ -38,6 +39,10 @@ export default function Fiscalisation() {
 
   const searchParams = useSearchParams();
   const [tab, setTab] = useState(searchParams.get('tab') || 'setup');
+  useEffect(() => {
+    const next = searchParams.get('tab');
+    if (next) setTab(next);
+  }, [searchParams]);
   const [busy, setBusy] = useState(false);
   const [selReceipt, setSelReceipt] = useState<any>(null);
   const [selDay, setSelDay] = useState<any>(null);

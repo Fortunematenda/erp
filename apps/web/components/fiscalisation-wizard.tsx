@@ -11,12 +11,13 @@ const STEP_TITLES = [
 
 const STATUS_COLOR: Record<string, string> = { OK: 'green', MISSING: 'red', INCOMPLETE: 'orange', WARNING: 'gold' };
 
-export function FiscalisationWizard({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function FiscalisationWizard({ open, onClose, initialStep }: { open: boolean; onClose: () => void; initialStep?: number | null }) {
   const { message } = App.useApp();
   const qc = useQueryClient();
   const [step, setStep] = useState(0);
   const [busy, setBusy] = useState(false);
   const [csr, setCsr] = useState<string>('');
+  const [companyForm] = Form.useForm();
   const [profileForm] = Form.useForm();
   const [branchForm] = Form.useForm();
   const [deviceForm] = Form.useForm();
@@ -32,7 +33,16 @@ export function FiscalisationWizard({ open, onClose }: { open: boolean; onClose:
   const device = devices.data?.[0];
   const company = readiness.data?.company;
 
-  useEffect(() => { if (open && profile.data?.setupStep != null) setStep(profile.data.setupStep); }, [open, profile.data?.setupStep]);
+  useEffect(() => {
+    if (!open) return;
+    if (initialStep != null) setStep(initialStep);
+    else if (profile.data?.setupStep != null) setStep(profile.data.setupStep);
+  }, [open, initialStep, profile.data?.setupStep]);
+
+  useEffect(() => {
+    if (!open || step !== 0) return;
+    companyForm.setFieldsValue({ legalName: company?.name, tin: company?.tin, vatNumber: company?.vatNumber });
+  }, [open, step, company?.name, company?.tin, company?.vatNumber, companyForm]);
 
   const refresh = () => ['fiscal-profile', 'fiscal-readiness', 'fiscal-devices', 'fiscal-branches', 'fiscal-tax-mappings'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 
@@ -80,11 +90,11 @@ export function FiscalisationWizard({ open, onClose }: { open: boolean; onClose:
       await run(() => api('/fiscalisation/devices', { method: 'POST', body: JSON.stringify(values) }), 'Device created');
     }
   }
-  async function saveCredentials(values: any) { if (!device) return message.warning('Create a device first.'); await run(() => api(`/fiscalisation/devices/${device.id}`, { method: 'PUT', body: JSON.stringify(values) }), 'Credentials saved'); }
-  async function generateCsr() { if (!device) return; await run(async () => { const r = await api(`/fiscalisation/devices/${device.id}/generate-csr`, { method: 'POST' }); setCsr(r.csrPem); }, 'CSR generated'); }
-  async function installCert() { if (!device) return; const pem = credForm.getFieldValue('certificatePem'); await run(() => api(`/fiscalisation/devices/${device.id}/certificate`, { method: 'POST', body: JSON.stringify({ certificatePem: pem }) }), 'Certificate installed'); }
-  async function registerDevice() { if (!device) return; await run(() => api(`/fiscalisation/devices/${device.id}/register`, { method: 'POST' }), 'Device registration submitted'); }
-  async function syncConfig() { if (!device) return; await run(() => api(`/fiscalisation/devices/${device.id}/sync-config`, { method: 'POST' }), 'Configuration synchronised'); }
+  async function saveCredentials(values: any) { if (!device) return message.warning('Save a fiscal device on the previous step first.'); await run(() => api(`/fiscalisation/devices/${device.id}`, { method: 'PUT', body: JSON.stringify(values) }), 'Credentials saved'); }
+  async function generateCsr() { if (!device) return message.warning('Save a fiscal device first.'); await run(async () => { const r = await api(`/fiscalisation/devices/${device.id}/generate-csr`, { method: 'POST' }); setCsr(r.csrPem); }, 'CSR generated'); }
+  async function installCert() { if (!device) return message.warning('Save a fiscal device first.'); const pem = credForm.getFieldValue('certificatePem'); if (!pem) return message.warning('Paste the certificate issued by ZIMRA.'); await run(() => api(`/fiscalisation/devices/${device.id}/certificate`, { method: 'POST', body: JSON.stringify({ certificatePem: pem }) }), 'Certificate installed'); }
+  async function registerDevice() { if (!device) return message.warning('Save a fiscal device first.'); await run(() => api(`/fiscalisation/devices/${device.id}/register`, { method: 'POST' }), 'Device registration submitted'); }
+  async function syncConfig() { if (!device) return message.warning('Save a fiscal device first.'); await run(() => api(`/fiscalisation/devices/${device.id}/sync-config`, { method: 'POST' }), 'Configuration synchronised'); }
   async function saveTax(values: any) { await run(() => api('/fiscalisation/tax-mappings', { method: 'PUT', body: JSON.stringify(values) }), 'Tax mapping saved'); }
   async function activate() { await run(() => api('/fiscalisation/production/activate', { method: 'POST', body: JSON.stringify({ confirm: true, reason: 'Setup wizard' }) }), 'Production activated'); onClose(); }
 
@@ -93,12 +103,14 @@ export function FiscalisationWizard({ open, onClose }: { open: boolean; onClose:
       case 0:
         return (
           <div className="space-y-3 text-[13px]">
-            <Alert type="info" showIcon message="These details are linked to your NexusERP Company master. Update them in Company settings if they are incorrect." />
-            <ReadRow label="Registered Name" value={company?.name} />
-            <ReadRow label="TIN" value={company?.tin} />
-            <ReadRow label="VAT Number" value={company?.vatNumber} />
-            <ReadRow label="Base Currency" value={company?.baseCurrency} />
-            {!company?.tin && <Alert type="warning" showIcon message="A TIN is required before fiscalisation. Add it to your company profile." />}
+            <Alert type="info" showIcon message="These details are the company master used for ZIMRA." />
+            <Form form={companyForm} layout="vertical" onFinish={(values) => run(() => api('/fiscalisation/company', { method: 'PUT', body: JSON.stringify(values) }), 'Company details saved')}>
+              <Form.Item name="legalName" label="Registered Name" rules={[{ required: true, message: 'Registered name is required' }]}><Input /></Form.Item>
+              <Form.Item name="tin" label="TIN"><Input /></Form.Item>
+              <Form.Item name="vatNumber" label="VAT Number"><Input /></Form.Item>
+              <div className="text-[12px] text-[#64748b] mb-3">Base currency: {company?.baseCurrency || '—'}</div>
+              <Button onClick={() => companyForm.submit()} loading={busy}>Save company details</Button>
+            </Form>
           </div>
         );
       case 1:

@@ -1,12 +1,12 @@
 'use client';
 import React from 'react';
-import { Avatar, Empty } from 'antd';
-import { SoftBadge, statusTone } from '@/components/crud-page';
+import { Avatar } from 'antd';
 import { fmtMoney } from '@/lib/format';
+import { ERPEmptyState } from '@/components/erp/erp-feedback';
+import { ERPFilterBar, ERPStatusBadge } from '@/components/erp/erp-data';
 
 export function StatusPill({ status, tone }: { status?: string; tone?: string }) {
-  const s = String(status || 'Draft');
-  return <SoftBadge tone={tone || statusTone(s)}>{s.replace(/_/g, ' ')}</SoftBadge>;
+  return <ERPStatusBadge status={status} tone={tone} />;
 }
 
 export function SummaryCard({ icon, label, value, tone = '#003366', hint, valueColor }: { icon: React.ReactNode; label: string; value: React.ReactNode; tone?: string; hint?: string; valueColor?: string }) {
@@ -44,14 +44,7 @@ export function CurrencyValue({ value, className = '' }: { value: any; className
 }
 
 export function EmptyState({ title, description, action }: { title: string; description?: string; action?: React.ReactNode }) {
-  return (
-    <div className="text-center py-14">
-      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={null} />
-      <div className="text-[15px] font-semibold text-[#171a2e] mt-2">{title}</div>
-      {description && <div className="text-[13px] text-[#64748b] mt-1 max-w-sm mx-auto">{description}</div>}
-      {action && <div className="mt-5">{action}</div>}
-    </div>
-  );
+  return <ERPEmptyState title={title} description={description} action={action} />;
 }
 
 export function FormSection({ title }: { title: string }) {
@@ -87,11 +80,6 @@ export function DetailGrid({ items, cols = 1 }: { items: [string, React.ReactNod
 }
 
 export function FilterBar({ children, extra }: { children: React.ReactNode; extra?: React.ReactNode }) {
-  return (
-    <div className="nex-card nex-filter-bar mb-4 px-4 py-3.5 flex flex-wrap items-center gap-3">
-      {children}
-      {extra ? <div className="ml-auto text-[12px] font-medium text-[#475569]">{extra}</div> : null}
-    </div>
-  );
+  return <ERPFilterBar extra={extra}>{children}</ERPFilterBar>;
 }
 

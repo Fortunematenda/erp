@@ -1,15 +1,14 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Avatar, Button, ColorPicker, Drawer, Dropdown, Grid, Layout, Menu, Popover, Select, Space, Typography } from 'antd';
+import type { LucideIcon } from 'lucide-react';
 import {
-  AccountBookOutlined, ApartmentOutlined, AppstoreOutlined, AuditOutlined, BankOutlined, BarChartOutlined, BulbOutlined,
-  BarsOutlined, BgColorsOutlined, BookOutlined, CalculatorOutlined, CalendarOutlined, CloudServerOutlined,
-  ContactsOutlined, ControlOutlined, DashboardOutlined, DollarOutlined, FileDoneOutlined, FileTextOutlined, LogoutOutlined, CreditCardOutlined,
-  CarOutlined,
-  MenuFoldOutlined, MenuOutlined, MenuUnfoldOutlined, PercentageOutlined, PrinterOutlined, ProfileOutlined, RightOutlined, SafetyCertificateOutlined,
-  SettingOutlined, ShopOutlined, ShoppingCartOutlined, SolutionOutlined, SwapOutlined, TeamOutlined, ToolOutlined,
-  UndoOutlined, UserOutlined, WalletOutlined, ApiOutlined, CheckOutlined, MailOutlined, AimOutlined,
-} from '@ant-design/icons';
+  ArrowLeftRight, Banknote, BarChart3, BookOpen, Building2, Calculator, Calendar, Check, ChevronRight,
+  CircleDollarSign, ClipboardCheck, Contact, CreditCard, FileCheck, FileText, FolderKanban, Landmark,
+  LayoutDashboard, LayoutGrid, Lightbulb, List, LogOut, Mail, Menu as MenuIcon, Palette, PanelLeftClose,
+  PanelLeftOpen, Percent, Plug, Printer, Receipt, RotateCcw, Scale, Server, Settings, ShieldCheck,
+  ShoppingCart, Store, Target, Truck, Undo2, User, Users, Wallet, Wrench,
+} from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-store';
 import { api } from '@/lib/api';
@@ -20,19 +19,22 @@ import { RouteProgress } from '@/components/route-progress';
 
 const { Sider, Header, Content } = Layout;
 
+function NavIcon({ icon: Icon, size = 18 }: { icon: LucideIcon; size?: number }) {
+  return <Icon size={size} strokeWidth={1.75} aria-hidden className="nex-nav-icon" />;
+}
+
 const nav = [
   {
     key: 'grp-overview', label: 'Overview', children: [
-      { key: '/dashboard', label: 'Dashboard', icon: <DashboardOutlined /> },
-      { key: '/reports', label: 'Reports & BI', icon: <BarChartOutlined /> },
+      { key: '/dashboard', label: 'Dashboard', icon: <NavIcon icon={LayoutDashboard} /> },
+      { key: '/reports', label: 'Reports & BI', icon: <NavIcon icon={BarChart3} /> },
     ],
   },
   {
     key: 'grp-commercial', label: 'Commercial', children: [
       {
-        key: '/sales', label: 'Sales & Revenue', icon: <ShoppingCartOutlined />, color: '#0ea5e9', children: [
+        key: '/sales', label: 'Sales & Revenue', icon: <NavIcon icon={ShoppingCart} />, children: [
           { key: '/sales', label: 'Dashboard' },
-          { key: '/sales/customers', label: 'Customers' },
           { key: '/sales/quotations', label: 'Quotations' },
           { key: '/sales/orders', label: 'Orders' },
           { key: '/sales/invoices', label: 'Invoices' },
@@ -44,11 +46,16 @@ const nav = [
           { key: '/sales/reports', label: 'Sales Reports' },
         ],
       },
-      { key: '/crm', label: 'Customers & CRM', icon: <ContactsOutlined /> },
-        { key: '/procurement', label: 'Procurement', icon: <ShopOutlined /> },
-        { key: '/inventory', label: 'Products & Services', icon: <AppstoreOutlined /> },
+      {
+        key: '/crm', label: 'Customers & CRM', icon: <NavIcon icon={Contact} />, children: [
+          { key: '/crm', label: 'Dashboard' },
+          { key: '/sales/customers', label: 'Customers' },
+        ],
+      },
+        { key: '/procurement', label: 'Procurement', icon: <NavIcon icon={Store} /> },
+        { key: '/inventory', label: 'Products & Services', icon: <NavIcon icon={LayoutGrid} /> },
         {
-          key: '/expenses', label: 'Expenses', icon: <WalletOutlined />, color: '#f59e0b', children: [
+          key: '/expenses', label: 'Expenses', icon: <NavIcon icon={Wallet} />, children: [
             { key: '/expenses/bills', label: 'Bill Management' },
             { key: '/expenses/enter-bill', label: 'Enter Bill' },
             { key: '/expenses/pay-bill', label: 'Pay Bill' },
@@ -63,7 +70,7 @@ const nav = [
   {
     key: 'grp-ops', label: 'Operations', children: [
       {
-        key: '/finance', label: 'Finance & Accounting', icon: <DollarOutlined />, color: '#003366', children: [
+        key: '/finance', label: 'Finance & Accounting', icon: <NavIcon icon={CircleDollarSign} />, children: [
           { key: '/finance', label: 'Dashboard' },
           { key: '/finance/accounts', label: 'Chart of Accounts' },
           { key: '/finance/journals', label: 'Journal Entries' },
@@ -84,25 +91,25 @@ const nav = [
           { key: '/finance/vat-report', label: 'VAT Report' },
         ],
       },
-      { key: '/projects', label: 'Projects', icon: <AppstoreOutlined /> },
-      { key: '/hr', label: 'HR & Payroll', icon: <TeamOutlined />, color: '#f43f5e', children: [
+      { key: '/projects', label: 'Projects', icon: <NavIcon icon={FolderKanban} /> },
+      { key: '/hr', label: 'HR & Payroll', icon: <NavIcon icon={Users} />, children: [
         { key: '/hr', label: 'Dashboard' },
         { key: '/hr/payroll-rules', label: 'Payroll Rules' },
         { key: '/hr/recruitment', label: 'Recruitment' },
         { key: '/hr/onboarding', label: 'Onboarding' },
         { key: '/hr/leave-benefits', label: 'Leave & Benefits' },
       ] },
-      { key: '/performance', label: 'Performance', icon: <AimOutlined />, color: '#7c3aed' },
-      { key: '/assets', label: 'Assets', icon: <ToolOutlined /> },
-      { key: '/compliance', label: 'Compliance & Risk', icon: <SafetyCertificateOutlined /> },
+      { key: '/performance', label: 'Performance', icon: <NavIcon icon={Target} /> },
+      { key: '/assets', label: 'Assets', icon: <NavIcon icon={Wrench} /> },
+      { key: '/compliance', label: 'Compliance & Risk', icon: <NavIcon icon={ShieldCheck} /> },
     ],
   },
   {
     key: 'grp-platform', label: 'Platform', children: [
-      { key: '/fiscalisation', label: 'Fiscalisation', icon: <CloudServerOutlined /> },
-      { key: '/integrations', label: 'Integrations', icon: <ApiOutlined /> },
+      { key: '/fiscalisation', label: 'Fiscalisation', icon: <NavIcon icon={Server} /> },
+      { key: '/integrations', label: 'Integrations', icon: <NavIcon icon={Plug} /> },
       {
-        key: '/administration', label: 'Administration', icon: <SettingOutlined />, color: '#64748b', children: [
+        key: '/administration', label: 'Administration', icon: <NavIcon icon={Settings} />, children: [
           { key: '/administration', label: 'Dashboard' },
           { key: '/administration/workflows', label: 'Workflows & Approvals' },
           { key: '/administration/my-approvals', label: 'My Approvals' },
@@ -179,17 +186,14 @@ const PAGE_TITLES: Record<string, [string, string]> = {
 
 type SidebarTheme = { bg: string; text: string };
 const DEFAULT_THEME: SidebarTheme = { bg: '#003366', text: '#ffffff' };
+const LIGHT_SIDEBAR = '#f7f8fb';
 const SWATCHES: SidebarTheme[] = [
   { bg: '#003366', text: '#ffffff' },
   { bg: '#0b4a8f', text: '#ffffff' },
   { bg: '#0f172a', text: '#ffffff' },
-  { bg: '#059669', text: '#ffffff' },
-  { bg: '#dc2626', text: '#ffffff' },
-  { bg: '#1d5fb5', text: '#ffffff' },
   { bg: '#0e7490', text: '#ffffff' },
-  { bg: '#f43f5e', text: '#ffffff' },
-  { bg: '#1d4ed8', text: '#ffffff' },
-  { bg: '#f8fafc', text: '#0f172a' },
+  { bg: '#f7f8fb', text: '#171a2e' },
+  { bg: '#ffffff', text: '#171a2e' },
 ];
 
 function hexLuminance(hex: string) {
@@ -202,39 +206,43 @@ function hexLuminance(hex: string) {
 }
 
 const QUICK_MODULES = [
-  { key: '/sales', label: 'Sales', icon: <ShoppingCartOutlined />, color: '#0ea5e9' },
-  { key: '/crm', label: 'Customers & CRM', icon: <ContactsOutlined />, color: '#0b4a8f' },
-  { key: '/procurement', label: 'Procurement', icon: <ShopOutlined />, color: '#f59e0b' },
-  { key: '/inventory', label: 'Products & Services', icon: <AppstoreOutlined />, color: '#10b981' },
-  { key: '/finance', label: 'Finance', icon: <DollarOutlined />, color: '#003366' },
-  { key: '/hr', label: 'HR & Payroll', icon: <TeamOutlined />, color: '#f43f5e' },
-  { key: '/assets', label: 'Assets', icon: <ToolOutlined />, color: '#14b8a6' },
-  { key: '/compliance', label: 'Compliance', icon: <SafetyCertificateOutlined />, color: '#f97316' },
-  { key: '/reports', label: 'Reports & BI', icon: <BarChartOutlined />, color: '#0ea5e9' },
-  { key: '/fiscalisation', label: 'Fiscalisation', icon: <CloudServerOutlined />, color: '#22c55e' },
-  { key: '/integrations', label: 'Integrations', icon: <ApiOutlined />, color: '#1d5fb5' },
-  { key: '/administration', label: 'Administration', icon: <SettingOutlined />, color: '#64748b' },
+  { key: '/sales', label: 'Sales', icon: <NavIcon icon={ShoppingCart} /> },
+  { key: '/crm', label: 'Customers & CRM', icon: <NavIcon icon={Contact} /> },
+  { key: '/procurement', label: 'Procurement', icon: <NavIcon icon={Store} /> },
+  { key: '/inventory', label: 'Products & Services', icon: <NavIcon icon={LayoutGrid} /> },
+  { key: '/finance', label: 'Finance', icon: <NavIcon icon={CircleDollarSign} /> },
+  { key: '/hr', label: 'HR & Payroll', icon: <NavIcon icon={Users} /> },
+  { key: '/assets', label: 'Assets', icon: <NavIcon icon={Wrench} /> },
+  { key: '/compliance', label: 'Compliance', icon: <NavIcon icon={ShieldCheck} /> },
+  { key: '/reports', label: 'Reports & BI', icon: <NavIcon icon={BarChart3} /> },
+  { key: '/fiscalisation', label: 'Fiscalisation', icon: <NavIcon icon={Server} /> },
+  { key: '/integrations', label: 'Integrations', icon: <NavIcon icon={Plug} /> },
+  { key: '/administration', label: 'Administration', icon: <NavIcon icon={Settings} /> },
 ];
 
 const PAGE_ICONS: Record<string, React.ReactNode> = {
-  '/sales': <DashboardOutlined />, '/sales/customers': <ContactsOutlined />, '/sales/quotations': <FileTextOutlined />,
-  '/sales/orders': <ProfileOutlined />,   '/sales/invoices': <FileDoneOutlined />, '/sales/deliveries': <CarOutlined />, '/sales/receipts': <WalletOutlined />,
-  '/sales/credit-notes': <UndoOutlined />,
-  '/sales/debit-notes': <ProfileOutlined />,
-  '/sales/register': <BarsOutlined />,
-  '/sales/reports': <BarChartOutlined />,
-  '/finance': <DashboardOutlined />, '/finance/accounts': <AccountBookOutlined />, '/finance/journals': <BookOutlined />,
-  '/finance/ledger': <BarsOutlined />, '/finance/trial-balance': <SolutionOutlined />,   '/finance/reports': <BarChartOutlined />, '/finance/ar-aging': <TeamOutlined />, '/finance/ap-aging': <ShopOutlined />, '/finance/costing': <AppstoreOutlined />, '/projects': <AppstoreOutlined />, '/hr': <TeamOutlined />, '/hr/payroll-rules': <PercentageOutlined />, '/hr/recruitment': <UserOutlined />, '/hr/onboarding': <SolutionOutlined />, '/hr/leave-benefits': <CalendarOutlined />,
-  '/finance/reconciliation': <SwapOutlined />, '/finance/cash-bank': <BankOutlined />, '/finance/periods': <CalendarOutlined />, '/finance/budgets': <CalculatorOutlined />, '/finance/budget-control': <ControlOutlined />, '/finance/tax-rates': <PercentageOutlined />, '/finance/currency': <DollarOutlined />, '/finance/vat-report': <AccountBookOutlined />,
-  '/expenses/bills': <FileTextOutlined />, '/expenses/enter-bill': <FileDoneOutlined />, '/expenses/pay-bill': <WalletOutlined />, '/expenses/write-check': <FileDoneOutlined />, '/expenses/credit-card-charges': <CreditCardOutlined />, '/expenses/vendor-credits': <SwapOutlined />, '/expenses/check-printing': <PrinterOutlined />,
-  '/administration': <SettingOutlined />, '/administration/workflows': <AuditOutlined />, '/administration/my-approvals': <CheckOutlined />, '/administration/security': <SafetyCertificateOutlined />, '/administration/integrations-config': <ApiOutlined />, '/administration/email-templates': <MailOutlined />, '/administration/data-jobs': <ApiOutlined />,
+  '/sales': <NavIcon icon={LayoutDashboard} />, '/crm': <NavIcon icon={LayoutDashboard} />, '/sales/customers': <NavIcon icon={Contact} />, '/sales/quotations': <NavIcon icon={FileText} />,
+  '/sales/orders': <NavIcon icon={ClipboardCheck} />, '/sales/invoices': <NavIcon icon={FileCheck} />, '/sales/deliveries': <NavIcon icon={Truck} />, '/sales/receipts': <NavIcon icon={Wallet} />,
+  '/sales/credit-notes': <NavIcon icon={Undo2} />,
+  '/sales/debit-notes': <NavIcon icon={Receipt} />,
+  '/sales/register': <NavIcon icon={List} />,
+  '/sales/reports': <NavIcon icon={BarChart3} />,
+  '/finance': <NavIcon icon={LayoutDashboard} />, '/finance/accounts': <NavIcon icon={BookOpen} />, '/finance/journals': <NavIcon icon={BookOpen} />,
+  '/finance/ledger': <NavIcon icon={List} />, '/finance/trial-balance': <NavIcon icon={Scale} />, '/finance/reports': <NavIcon icon={BarChart3} />, '/finance/ar-aging': <NavIcon icon={Users} />, '/finance/ap-aging': <NavIcon icon={Store} />, '/finance/costing': <NavIcon icon={LayoutGrid} />, '/projects': <NavIcon icon={FolderKanban} />, '/hr': <NavIcon icon={Users} />, '/hr/payroll-rules': <NavIcon icon={Percent} />, '/hr/recruitment': <NavIcon icon={User} />, '/hr/onboarding': <NavIcon icon={ClipboardCheck} />, '/hr/leave-benefits': <NavIcon icon={Calendar} />,
+  '/finance/reconciliation': <NavIcon icon={ArrowLeftRight} />, '/finance/cash-bank': <NavIcon icon={Landmark} />, '/finance/periods': <NavIcon icon={Calendar} />, '/finance/budgets': <NavIcon icon={Calculator} />, '/finance/budget-control': <NavIcon icon={ShieldCheck} />, '/finance/tax-rates': <NavIcon icon={Percent} />, '/finance/currency': <NavIcon icon={CircleDollarSign} />, '/finance/vat-report': <NavIcon icon={Receipt} />,
+  '/expenses/bills': <NavIcon icon={FileText} />, '/expenses/enter-bill': <NavIcon icon={FileCheck} />, '/expenses/pay-bill': <NavIcon icon={Banknote} />, '/expenses/write-check': <NavIcon icon={FileCheck} />, '/expenses/credit-card-charges': <NavIcon icon={CreditCard} />, '/expenses/vendor-credits': <NavIcon icon={ArrowLeftRight} />, '/expenses/check-printing': <NavIcon icon={Printer} />,
+  '/administration': <NavIcon icon={Settings} />, '/administration/workflows': <NavIcon icon={ClipboardCheck} />, '/administration/my-approvals': <NavIcon icon={Check} />, '/administration/security': <NavIcon icon={ShieldCheck} />, '/administration/integrations-config': <NavIcon icon={Plug} />, '/administration/email-templates': <NavIcon icon={Mail} />, '/administration/data-jobs': <NavIcon icon={Server} />,
 };
 
 function loadTheme(userId?: string): SidebarTheme {
   if (!userId) return DEFAULT_THEME;
   try {
     const raw = localStorage.getItem(`nex-sidebar-${userId}`);
-    if (raw) return { ...DEFAULT_THEME, ...JSON.parse(raw) };
+    if (raw) {
+      const parsed = { ...DEFAULT_THEME, ...JSON.parse(raw) } as SidebarTheme;
+      if (String(parsed.bg).toLowerCase() === LIGHT_SIDEBAR) return DEFAULT_THEME;
+      return parsed;
+    }
   } catch { /* ignore */ }
   return DEFAULT_THEME;
 }
@@ -253,7 +261,7 @@ function buildMenuItems(nav: any[], onOpen: (item: any) => void, onClose: () => 
               children: item.children.map((child: any) => ({
                 key: child.key,
                 label: child.label,
-                icon: PAGE_ICONS[child.key] || <RightOutlined />,
+                icon: PAGE_ICONS[child.key] || <NavIcon icon={ChevronRight} size={14} />,
               })),
             }
           : {
@@ -261,10 +269,10 @@ function buildMenuItems(nav: any[], onOpen: (item: any) => void, onClose: () => 
               label: (
                 <span onMouseEnter={() => onOpen(item)} onMouseLeave={onClose} className="flex items-center justify-between gap-2">
                   <span>{item.label}</span>
-                  <RightOutlined className="text-[10px] opacity-50" />
+                  <ChevronRight size={14} strokeWidth={1.75} className="opacity-40" aria-hidden />
                 </span>
               ),
-              icon: <span onMouseEnter={() => onOpen(item)} onMouseLeave={onClose}>{item.icon}</span>,
+              icon: <span onMouseEnter={() => onOpen(item)} onMouseLeave={onClose} className="nex-nav-icon-wrap">{item.icon}</span>,
             }
         : { key: item.key, label: <span>{item.label}</span>, icon: item.icon },
     ),
@@ -384,9 +392,14 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
     .sort((a, b) => b.length - a.length)
     .slice(0, 1);
 
+  const childMatchesPath = (key: string) => fullPath === key || fullPath.startsWith(`${key}/`) || fullPath.startsWith(`${key}?`);
   const activeFlyoutItem = nav
     .flatMap((g: any) => g.children)
-    .find((item: any) => item.children && fullPath.startsWith(item.key));
+    .filter((item: any) => item.children?.some((child: any) => childMatchesPath(child.key)))
+    .sort((a: any, b: any) => {
+      const best = (item: any) => Math.max(...item.children.map((child: any) => (childMatchesPath(child.key) ? child.key.length : 0)));
+      return best(b) - best(a);
+    })[0];
   const selectedKeys = [
     ...selected,
     ...(activeFlyoutItem ? [isMobile ? `sub-${activeFlyoutItem.key}` : `flyout-${activeFlyoutItem.key}`] : []),
@@ -396,12 +409,12 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
     items: [
       { key: 'name', label: <div><div className="font-semibold">{user?.name}</div><div className="text-xs text-gray-400">{user?.email}</div></div>, disabled: true },
       { type: 'divider' as const },
-      { key: 'logout', icon: <LogoutOutlined />, label: 'Sign out', onClick: async () => { try { await api('/auth/logout', { method: 'POST' }); } catch {} logout(); router.push('/login'); } },
+      { key: 'logout', icon: <LogOut size={15} strokeWidth={1.75} />, label: 'Sign out', onClick: async () => { try { await api('/auth/logout', { method: 'POST' }); } catch {} logout(); router.push('/login'); } },
     ],
   };
 
   const pageKey = Object.keys(PAGE_TITLES).filter((k) => path.startsWith(k)).sort((a, b) => b.length - a.length)[0] || '/dashboard';
-  const [title, subtitle] = PAGE_TITLES[pageKey] || PAGE_TITLES['/dashboard'];
+  const [title] = PAGE_TITLES[pageKey] || PAGE_TITLES['/dashboard'];
 
   const isLight = hexLuminance(sidebarTheme.bg) > 150;
   const sidebarVars = {
@@ -415,7 +428,7 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
     <div className="w-64">
       <div className="flex items-center justify-between mb-3">
         <span className="font-bold text-[14px]">Sidebar theme</span>
-        <Button size="small" type="text" icon={<UndoOutlined />} onClick={() => saveTheme(DEFAULT_THEME)}>Reset</Button>
+        <Button size="small" type="text" icon={<RotateCcw size={14} strokeWidth={1.75} />} onClick={() => saveTheme(DEFAULT_THEME)}>Reset</Button>
       </div>
       <div className="text-[11px] font-semibold uppercase tracking-wide text-[#8a90ad] mb-2">Presets</div>
       <div className="flex flex-wrap gap-2 mb-4">
@@ -427,7 +440,7 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
             className="w-8 h-8 rounded-lg border border-black/10 transition-transform hover:scale-110 cursor-pointer"
             style={{ background: s.bg }}
           >
-            {sidebarTheme.bg.toLowerCase() === s.bg.toLowerCase() && <span className="text-white text-sm" style={{ color: s.text }}><CheckOutlined /></span>}
+            {sidebarTheme.bg.toLowerCase() === s.bg.toLowerCase() && <span className="inline-flex" style={{ color: s.text }}><Check size={14} strokeWidth={2.25} /></span>}
           </button>
         ))}
       </div>
@@ -451,9 +464,9 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
           <button
             key={m.key}
             onClick={() => { setQuickOpen(false); if (typeof document !== 'undefined') document.dispatchEvent(new CustomEvent('nex:navigate')); router.push(m.key); }}
-            className="group flex flex-col items-start gap-3 sm:gap-4 rounded-2xl border border-[#edf0f6] bg-[#fbfcff] px-4 py-5 sm:px-7 sm:py-9 shadow-[0_2px_8px_rgba(23,26,46,0.04)] hover:bg-white hover:border-[#dde5f2] hover:shadow-[0_10px_24px_rgba(23,26,46,0.08)] hover:-translate-y-0.5 transition-all duration-200 cursor-pointer text-left"
+            className="group flex flex-col items-start gap-2 rounded-xl border border-[#e8ebf2] bg-white px-3 py-3 hover:bg-[#f7f8fb] hover:border-[#d5dbe8] transition-colors duration-150 cursor-pointer text-left"
           >
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-base transition-transform duration-200 group-hover:scale-110" style={{ background: m.color, boxShadow: `0 6px 14px ${m.color}66` }}>{m.icon}</div>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[#003366] bg-[#eef3f9]">{m.icon}</div>
             <span className="font-semibold text-[13px] text-[#171a2e] leading-snug">{m.label}</span>
           </button>
         ))}
@@ -462,9 +475,9 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
   );
 
   const sidebarBrand = (
-    <div className={`h-[72px] flex items-center gap-3 px-5 shrink-0 ${!isMobile && collapsed ? 'justify-center px-0' : ''}`}>
-      <div className="w-10 h-10 rounded-2xl brand-gradient flex items-center justify-center text-white text-lg shrink-0" style={{ boxShadow: '0 6px 16px rgba(0,51,102,0.26)' }}>
-        <ApartmentOutlined />
+    <div className={`h-14 flex items-center gap-2.5 px-4 shrink-0 ${!isMobile && collapsed ? 'justify-center px-0' : ''}`}>
+      <div className="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center text-white shrink-0">
+        <Building2 size={16} strokeWidth={1.75} aria-hidden />
       </div>
       {(isMobile || !collapsed) && (
         <div className="leading-tight">
@@ -502,7 +515,7 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
       <Popover content={customizePanel} trigger="click" placement={isMobile ? 'top' : 'rightTop'}>
         <Button
           block
-          icon={<BgColorsOutlined />}
+          icon={<Palette size={15} strokeWidth={1.75} />}
           className="!rounded-xl"
           style={{ background: 'transparent', color: 'var(--sidebar-text)', borderColor: isLight ? 'rgba(15,23,42,0.2)' : 'rgba(255,255,255,0.25)' }}
         >
@@ -523,7 +536,7 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
           onCollapse={setCollapsed}
           trigger={null}
           theme={isLight ? 'light' : 'dark'}
-          className="nex-sidebar !fixed left-0 top-0 bottom-0 z-20 overflow-hidden !border-r !border-[#eef0f6]"
+          className={`nex-sidebar ${isLight ? 'nex-sidebar-light !border-[#e6e9f0]' : '!border-white/10'} !fixed left-0 top-0 bottom-0 z-20 overflow-hidden !border-r`}
           style={{ background: sidebarTheme.bg, ...sidebarVars }}
         >
           {sidebarBrand}
@@ -544,15 +557,15 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
                 onMouseLeave={scheduleClose}
               >
                 <div className="absolute -left-[30px] top-0 bottom-0 w-[30px]" />
-                <span className="nex-flyout-pointer" style={{ top: flyoutPointerTop, borderRightColor: sidebarTheme.bg }} aria-hidden="true" />
+                <span className="nex-flyout-pointer" style={{ top: flyoutPointerTop, borderRightColor: '#ffffff' }} aria-hidden="true" />
                 <div
                   className={`absolute inset-0 bg-white rounded-[18px] shadow-[0_20px_50px_rgba(15,23,42,0.16)] border border-[rgba(15,23,42,0.07)] flex flex-col overflow-hidden transition-[opacity,transform] duration-200 ease-out ${
                     flyoutClosing ? 'opacity-0 translate-y-2 scale-[0.99]' : 'opacity-100 translate-y-0 scale-100'
                   }`}
                 >
-                  <div className="h-[52px] shrink-0 flex items-center gap-2.5 px-4 border-b border-[rgba(15,23,42,0.06)]" style={{ background: sidebarTheme.bg }}>
-                  <span className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-sm shrink-0" style={{ background: flyout.color }}>{flyout.icon}</span>
-                  <span className="font-semibold text-[13px] truncate" style={{ color: sidebarTheme.text }}>{flyout.label}</span>
+                  <div className="h-12 shrink-0 flex items-center gap-2.5 px-4 border-b border-[rgba(15,23,42,0.06)] bg-[#f8f9fc]">
+                  <span className="text-[#003366] shrink-0">{flyout.icon}</span>
+                  <span className="font-semibold text-[13px] truncate text-[#171a2e]">{flyout.label}</span>
                 </div>
                 <div className="flex-1 overflow-y-auto py-2 px-2">
                   {flyout.children.map((child: any) => {
@@ -561,12 +574,12 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
                       <button
                         key={child.key}
                         onClick={() => { closeFlyout(); go(child.key); }}
-                        className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 mb-0.5 text-left transition-all duration-200 cursor-pointer ${
-                          active ? 'bg-[#eef4fb]' : 'hover:bg-[#f5f7fb]'
+                        className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 mb-0.5 text-left transition-colors duration-150 cursor-pointer ${
+                          active ? 'bg-[#e7eef8]' : 'hover:bg-[#f5f7fb]'
                         }`}
                       >
-                        <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm shrink-0 ${active ? 'text-white brand-gradient' : 'text-[#003366] bg-[#eef4fb]'}`} style={active ? { boxShadow: '0 4px 10px rgba(0,51,102,0.3)' } : {}}>
-                          {PAGE_ICONS[child.key] || <RightOutlined />}
+                        <span className={`shrink-0 ${active ? 'text-[#003366]' : 'text-[#64748b]'}`}>
+                          {PAGE_ICONS[child.key] || <ChevronRight size={14} strokeWidth={1.75} />}
                         </span>
                         <span className={`flex-1 text-[13px] truncate ${active ? 'font-semibold text-[#003366]' : 'font-medium text-[#3c4263]'}`}>{child.label}</span>
                       </button>
@@ -574,7 +587,7 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
                   })}
                 </div>
                 <div className="shrink-0 border-t border-[rgba(15,23,42,0.06)] px-4 py-3 flex items-start gap-2 bg-[#fbfcff]">
-                  <BulbOutlined className="text-[12px] text-[#0ea5e9] mt-0.5" />
+                  <Lightbulb size={13} strokeWidth={1.75} className="text-[#64748b] mt-0.5 shrink-0" aria-hidden />
                   <span className="text-[11.5px] text-[#64748b]" style={{ lineHeight: 1.5 }}>Tip: hover to preview, click a page to open it.</span>
                 </div>
                 </div>
@@ -594,7 +607,7 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
           className="nex-mobile-nav-drawer"
           destroyOnClose={false}
         >
-          <div className="nex-sidebar flex flex-col h-full overflow-hidden" style={{ background: sidebarTheme.bg, ...sidebarVars }}>
+          <div className={`nex-sidebar ${isLight ? 'nex-sidebar-light' : ''} flex flex-col h-full overflow-hidden`} style={{ background: sidebarTheme.bg, ...sidebarVars }}>
             {sidebarBrand}
             <div className="flex-1 overflow-y-auto">{sidebarMenu}</div>
             {sidebarCustomize}
@@ -604,20 +617,19 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
 
       <Layout className={`transition-all duration-200 ${isMobile ? 'ml-0' : collapsed ? 'ml-[80px]' : 'ml-[252px]'}`}>
         <Header
-          className="nex-app-header !bg-white/85 backdrop-blur !px-3 sm:!px-6 flex items-center justify-between gap-2 sticky top-0 z-10"
-          style={{ height: 68, borderBottom: '1px solid rgba(15,23,42,0.06)', boxShadow: '0 1px 2px rgba(15,23,42,0.03)' }}
+          className="nex-app-header !bg-white !px-3 sm:!px-5 flex items-center justify-between gap-2 sticky top-0 z-10"
+          style={{ height: 56, lineHeight: 1.25, borderBottom: '1px solid #e6e9f0' }}
         >
           <Space size={isMobile ? 'small' : 'middle'} className="min-w-0">
             <Button
               type="text"
-              icon={isMobile ? <MenuOutlined /> : collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              icon={isMobile ? <MenuIcon size={18} strokeWidth={1.75} /> : collapsed ? <PanelLeftOpen size={18} strokeWidth={1.75} /> : <PanelLeftClose size={18} strokeWidth={1.75} />}
               onClick={() => (isMobile ? setMobileNavOpen(true) : setCollapsed(!collapsed))}
               className="!rounded-lg hover:!bg-[#eef2f9] shrink-0"
               aria-label={isMobile ? 'Open navigation' : 'Toggle sidebar'}
             />
-            <div className="leading-tight pl-0.5 min-w-0">
-              <Typography.Text strong className="!text-[15px] sm:!text-[16px] !text-[#171a2e] !block truncate max-w-[42vw] sm:max-w-none">{title}</Typography.Text>
-              <div className="mt-0.5 hidden sm:block"><Typography.Text type="secondary" style={{ fontSize: 12, color: '#64748b' }}>{subtitle}</Typography.Text></div>
+            <div className="min-w-0">
+              <Typography.Text strong className="!text-[15px] !leading-none !text-[#171a2e] !block truncate max-w-[42vw] sm:max-w-[280px]">{title}</Typography.Text>
             </div>
           </Space>
 
@@ -628,7 +640,7 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
             <ActionCenter />
 
             <Popover content={quickAccessPanel} trigger="click" placement="bottomRight" open={quickOpen} onOpenChange={setQuickOpen}>
-              <Button className="nex-quick-access-btn" icon={<AppstoreOutlined />}>
+              <Button className="nex-quick-access-btn" icon={<LayoutGrid size={16} strokeWidth={1.75} />}>
                 <span className="hidden md:inline">Quick Access</span>
               </Button>
             </Popover>
@@ -643,15 +655,15 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
 
             <Dropdown menu={userMenu} placement="bottomRight">
               <Space className="cursor-pointer hover:opacity-85 transition-opacity gap-2.5">
-                <Avatar size={isMobile ? 36 : 40} className="nex-header-avatar">{user?.name?.[0] || 'U'}</Avatar>
+                <Avatar size={32} className="nex-header-avatar">{user?.name?.[0] || 'U'}</Avatar>
                 <span className="hidden lg:inline font-medium text-[13px] text-[#3c4263]">{user?.name}</span>
               </Space>
             </Dropdown>
           </Space>
         </Header>
 
-        <Content className="min-h-[calc(100vh-68px)]">
-          <div className="p-3 sm:p-6 sm:px-8 w-full overflow-x-auto">{children}</div>
+        <Content>
+          <div className="erp-page">{children}</div>
         </Content>
       </Layout>
     </Layout>

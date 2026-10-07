@@ -11,7 +11,6 @@ import { StatusTag } from '@/components/crud-page';
 import { fmtDate, fmtMoney } from '@/lib/format';
 
 const quickLinks = [
-  { href: '/sales/customers', label: 'Customers', desc: 'Manage customer accounts & credit', icon: <TeamOutlined />, color: '#0b4a8f' },
   { href: '/sales/quotations', label: 'Quotations', desc: 'Draft & convert quotes to orders', icon: <RiseOutlined />, color: '#0ea5e9' },
   { href: '/sales/orders', label: 'Orders', desc: 'Confirmed sales orders pipeline', icon: <ShoppingCartOutlined />, color: '#8b5cf6' },
   { href: '/sales/invoices', label: 'Invoices', desc: 'Issue and post sales invoices', icon: <FileDoneOutlined />, color: '#10b981' },
@@ -76,7 +75,7 @@ export default function SalesDashboard() {
 
       <div>
         <Typography.Text strong className="!text-[15px]">Quick access</Typography.Text>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 mt-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mt-3">
           {quickLinks.map((m) => (
             <Link key={m.href} href={m.href}>
               <div className="nex-card nex-card-hover h-full">

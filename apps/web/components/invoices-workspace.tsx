@@ -14,6 +14,7 @@ import { invoiceDisplayStatus, isInvoiceDraft } from '@/lib/invoice-status';
 import { CurrencyValue, CustomerAvatar, EmptyState, FilterBar, StatusPill, SummaryCard } from '@/components/sales-ui';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
 import { letterheadHtml } from '@/components/documents/document-letterhead';
+import { PageHeader } from '@/components/ui/page-header';
 
 /** Authoritative fiscal display: an accepted receipt always means FISCALISED. */
 function fiscalDisplayStatus(r: any): string {
@@ -269,15 +270,18 @@ export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { cust
   return (
     <div className="nex-fade">
       {!embedded && (
-        <div className="flex items-center justify-between mb-6">
-          <div><h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">Invoices</h1><p className="text-[13px] text-[#64748b] mt-1">Create, send and track customer invoices</p></div>
-          <div className="flex items-center gap-2">
-            <Link href="/sales/invoices/template">
-              <Button icon={<SettingOutlined />} aria-label="Invoice template settings" title="Invoice template" />
-            </Link>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => router.push('/sales/invoices/new')}>New Invoice</Button>
-          </div>
-        </div>
+        <PageHeader
+          title="Invoices"
+          description="Create, send and track customer invoices"
+          actions={
+            <>
+              <Link href="/sales/invoices/template">
+                <Button icon={<SettingOutlined />} aria-label="Invoice template settings" title="Invoice template" />
+              </Link>
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => router.push('/sales/invoices/new')}>New Invoice</Button>
+            </>
+          }
+        />
       )}
       {!embedded && <div className="grid grid-cols-2 xl:grid-cols-4 gap-5 mb-6">{kpis.map((k) => <SummaryCard key={k.label} icon={k.icon} label={k.label} value={k.value} tone={k.tone} valueColor={k.valueColor} />)}</div>}
       <FilterBar extra={<span>{totals.count} invoices · {totals.drafts} draft · {totals.paidCount} paid</span>}>
@@ -300,7 +304,7 @@ export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { cust
             columns={columns}
             scroll={{ x: true }}
             rowSelection={{ selectedRowKeys: sel, onChange: (keys) => setSel(keys as string[]) }}
-            pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (t) => `${t} invoices` }}
+            pagination={{ pageSize: 20, showSizeChanger: false, showTotal: (t) => `${t} invoices` }}
             onRow={(r) => ({
               onClick: (e) => {
                 const el = e.target as HTMLElement;

@@ -1,6 +1,6 @@
 'use client';
 import type { ReactNode } from 'react';
-import { Button, Dropdown, Modal, Tooltip } from 'antd';
+import { App, Button, Dropdown, Tooltip } from 'antd';
 import type { MenuProps } from 'antd';
 import { MoreOutlined } from '@ant-design/icons';
 import { useAuthPermissions } from '@/components/Can';
@@ -41,6 +41,7 @@ function labelOf(it: RowActionItem) {
 }
 
 export function RowActionsMenu({ items }: { items: RowActionItem[] }) {
+  const { modal } = App.useApp();
   const { permissions, isLoading } = useAuthPermissions();
   const visible = items.filter((it) => !it.hidden && (!it.permission || (!isLoading && permitted(permissions, it.permission))));
   if (!visible.length) return null;
@@ -52,7 +53,7 @@ export function RowActionsMenu({ items }: { items: RowActionItem[] }) {
     if (it.disabled || !it.onClick) return;
     if (it.confirm) {
       const cfg = typeof it.confirm === 'string' ? { title: it.confirm } : it.confirm;
-      Modal.confirm({
+      modal.confirm({
         title: cfg.title,
         content: cfg.content,
         okText: cfg.okText || (it.danger ? 'Delete' : 'OK'),

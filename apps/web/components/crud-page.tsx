@@ -1,12 +1,13 @@
 'use client';
 import { useMemo, useState } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, App, Button, Card, DatePicker, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tooltip } from 'antd';
+import { Alert, App, Button, Card, DatePicker, Form, Input, InputNumber, Popconfirm, Select, Space, Table, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { DeleteOutlined, EditOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EditOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined } from '@ant-design/icons';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page';
+import { ERPDrawer, ERPEmptyState, ERPFilterBar, ERPModal, ERPPrimaryButton, ERPSearchInput } from '@/components/erp';
 import { useMeta } from '@/lib/meta';
 import { StatCard } from '@/components/stat-card';
 import dayjs from 'dayjs';
@@ -284,23 +285,15 @@ export function CrudPage(props: CrudPageProps) {
               <Button icon={<ReloadOutlined />} onClick={() => invalidate()} />
             </Tooltip>
             {!hideCreate && (
-              <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>{createLabel}</Button>
+              <ERPPrimaryButton icon={<PlusOutlined />} onClick={openCreate}>{createLabel}</ERPPrimaryButton>
             )}
             {extra}
           </Space>
         }
       />
       {list.error && <Alert type="error" className="mb-4" message={(list.error as Error).message} />}
-      {(q || props.statusFilter || props.dateField) && (
-        <div className="nex-card mb-4 px-4 py-3 flex flex-wrap items-center gap-3">
-          <Input
-            allowClear
-            prefix={<SearchOutlined />}
-            placeholder="Search…"
-            className="w-60 !rounded-xl"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
+      <ERPFilterBar extra={<span>{data.length} of {list.data?.length || 0} records</span>}>
+          <ERPSearchInput value={q} onChange={setQ} placeholder="Search" className="!w-60 shrink-0" />
           {props.statusFilter && (
             <Select
               allowClear
@@ -312,11 +305,9 @@ export function CrudPage(props: CrudPageProps) {
             />
           )}
           {props.dateField && (
-            <DatePicker.RangePicker className="!rounded-xl" value={dateRange} onChange={setDateRange} />
+            <DatePicker.RangePicker value={dateRange} onChange={setDateRange} />
           )}
-          <span className="ml-auto text-[12px] text-[#8a90ad]">{data.length} of {list.data?.length || 0} records</span>
-        </div>
-      )}
+      </ERPFilterBar>
       {props.selectable && selected.length > 0 && (
         <div className="nex-card mb-4 px-4 py-3 flex items-center gap-3 flex-wrap">
           <span className="text-[13px] font-medium text-[#344054]">{selected.length} selected</span>
@@ -340,6 +331,7 @@ export function CrudPage(props: CrudPageProps) {
       )}
       <Card className="nex-card" styles={{ body: { padding: 0 } }}>
         <Table
+          size="middle"
           loading={list.isLoading}
           rowKey={idKey}
           dataSource={data}
@@ -347,17 +339,24 @@ export function CrudPage(props: CrudPageProps) {
           scroll={{ x: true }}
           rowSelection={props.selectable ? { selectedRowKeys: selected, onChange: (keys) => setSelected(keys as string[]) } : undefined}
           footer={props.footer ? () => props.footer : undefined}
-          pagination={noPagination ? false : { pageSize: 10, showSizeChanger: false, showTotal: (t: number) => `${t} records` }}
+          locale={{
+            emptyText: typeof props.emptyText === 'string' || !props.emptyText
+              ? <ERPEmptyState title={typeof props.emptyText === 'string' ? props.emptyText : 'Nothing to show'} />
+              : props.emptyText,
+          }}
+          pagination={noPagination ? false : { pageSize: 20, showSizeChanger: false, showTotal: (t: number) => `${t} records` }}
         />
       </Card>
       {!props.useDrawer && fields.length > 0 && (
-        <Modal
+        <ERPModal
           title={editing ? `Edit ${title}` : `New ${createLabel}`}
           open={open}
           onCancel={() => setOpen(false)}
           onOk={submit}
           confirmLoading={saving}
+          okText={editing ? editSubmitLabel : createSubmitLabel}
           width={720}
+          destroyOnHidden={false}
           forceRender
           afterOpenChange={(visible) => { if (visible) seedForm(); }}
         >
@@ -366,7 +365,7 @@ export function CrudPage(props: CrudPageProps) {
               {fields.map((f) => (
                 <Form.Item
                   key={f.name}
-                  label={f.label}
+                  label={String(f.label).replace(/\s*\*$/, '')}
                   name={f.name}
                   className={f.span === 2 ? 'md:col-span-2' : ''}
                   rules={f.required ? [{ required: true, message: `${f.label} is required` }] : []}
@@ -376,24 +375,25 @@ export function CrudPage(props: CrudPageProps) {
               ))}
             </div>
           </Form>
-        </Modal>
+        </ERPModal>
       )}
       {props.useDrawer && fields.length > 0 && (
-        <Drawer
+        <ERPDrawer
           open={open}
           onClose={() => setOpen(false)}
           title={editing ? `Edit ${title}` : `New ${createLabel}`}
           width={700}
+          destroyOnHidden={false}
           forceRender
           afterOpenChange={(visible) => { if (visible) seedForm(); }}
-          footer={<div className="flex items-center justify-end gap-2"><Button onClick={() => setOpen(false)}>Cancel</Button><Button type="primary" onClick={submit} loading={saving}>{editing ? editSubmitLabel : createSubmitLabel}</Button></div>}
+          footer={<div className="flex items-center justify-end gap-2"><Button onClick={() => setOpen(false)}>Cancel</Button><ERPPrimaryButton onClick={submit} loading={saving}>{editing ? editSubmitLabel : createSubmitLabel}</ERPPrimaryButton></div>}
         >
           <Form form={form} layout="vertical">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4">
               {fields.map((f) => (
                 <Form.Item
                   key={f.name}
-                  label={f.label}
+                  label={String(f.label).replace(/\s*\*$/, '')}
                   name={f.name}
                   className={f.span === 2 ? 'md:col-span-2' : ''}
                   rules={f.required ? [{ required: true, message: `${f.label} is required` }] : []}
@@ -403,7 +403,7 @@ export function CrudPage(props: CrudPageProps) {
               ))}
             </div>
           </Form>
-        </Drawer>
+        </ERPDrawer>
       )}
     </>
   );

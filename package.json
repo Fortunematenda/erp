@@ -11,6 +11,8 @@
     "db:generate": "npm run db:generate -w @nexuserp/api",
     "db:push": "npm run db:push -w @nexuserp/api",
     "db:seed": "npm run db:seed -w @nexuserp/api",
+    "storybook": "npm run storybook -w @nexuserp/web",
+    "test:e2e": "npm run test:e2e -w @nexuserp/web",
     "setup": "npm install && npm run db:generate && npm run db:push && npm run db:seed"
   },
   "engines": {"node": ">=20.9"},

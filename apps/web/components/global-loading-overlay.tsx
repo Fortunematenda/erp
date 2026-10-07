@@ -49,10 +49,8 @@ export function GlobalLoadingOverlay() {
   if (!visible) return null;
   return (
     <div className="nex-loading-overlay" role="status" aria-live="polite" aria-busy="true">
-      <div className="nex-loading-card">
-        <span className="nex-spinner" aria-hidden />
-        <span className="nex-loading-text">{mutating > 0 ? 'Processing…' : 'Loading…'}</span>
-      </div>
+      <div className="nex-loading-bar" />
+      <span style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>{mutating > 0 ? 'Processing' : 'Loading'}</span>
     </div>
   );
 }
