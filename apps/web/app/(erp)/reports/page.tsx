@@ -11,6 +11,7 @@ import { api } from '@/lib/api';
 import { useMeta } from '@/lib/meta';
 import { fmtDate, fmtMoney, fmtNumber } from '@/lib/format';
 import { StatCard } from '@/components/stat-card';
+import { PageHeader } from '@/components/ui/page-header';
 import { Can } from '@/components/Can';
 import { SoftBadge } from '@/components/crud-page';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
@@ -120,16 +121,15 @@ export default function ReportsBi() {
 
   return (
     <div className="nex-fade">
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <div>
-          <h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">Reports & Business Intelligence</h1>
-          <p className="text-[13px] text-[#64748b] mt-0.5">Enterprise reporting across all NexusERP modules — drill from any number to its source document</p>
-        </div>
-        <div className="no-print flex gap-2">
+      <PageHeader
+        title="Reports & Business Intelligence"
+        description="Enterprise reporting across all NexusERP modules — drill from any number to its source document"
+        className="no-print"
+        actions={<>
           <Button icon={<PrinterOutlined />} onClick={printable}>Print</Button>
           <Button icon={<ReloadOutlined />} onClick={() => { overview.refetch(); qc.invalidateQueries({ queryKey: ['dataset'] }); }}>Refresh</Button>
-        </div>
-      </div>
+        </>}
+      />
 
       {/* KPI cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">

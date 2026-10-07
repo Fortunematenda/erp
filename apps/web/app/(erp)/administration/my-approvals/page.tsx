@@ -8,6 +8,7 @@ import dayjs from 'dayjs';
 import { api } from '@/lib/api';
 import { Can } from '@/components/Can';
 import { StatusPill } from '@/components/sales-ui';
+import { PageHeader } from '@/components/ui/page-header';
 
 const DTYPE_LABEL: Record<string, string> = {
   PURCHASE_REQUISITION: 'Purchase Requisition', PURCHASE_ORDER: 'Purchase Order', SUPPLIER_INVOICE: 'Supplier Invoice',
@@ -64,10 +65,7 @@ export default function MyApprovalsPage() {
 
   return (
     <div className="nex-fade">
-      <div className="flex items-center justify-between mb-6">
-        <div><h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">My Approvals</h1><p className="text-[13px] text-[#64748b] mt-1">Submit documents for approval and action pending approvals</p></div>
-        <Can permission="approvals.submit"><Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>Submit for Approval</Button></Can>
-      </div>
+      <PageHeader title="My Approvals" description="Submit documents for approval and action pending approvals" actions={<Can permission="approvals.submit"><Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>Submit for Approval</Button></Can>} />
 
       <Tabs defaultActiveKey="requests" items={[
         {

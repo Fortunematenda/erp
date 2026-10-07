@@ -15,6 +15,7 @@ import { fmtMoney } from '@/lib/format';
 import { useMeta } from '@/lib/meta';
 import { CurrencyValue, CustomerAvatar, EmptyState, FilterBar, StatusPill, SummaryCard, customerOptions } from '@/components/sales-ui';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
+import { PageHeader } from '@/components/ui/page-header';
 
 export function SalesOrdersWorkspace({ customerId, embedded }: { customerId?: string; embedded?: boolean }) {
   const qc = useQueryClient();
@@ -78,10 +79,7 @@ export function SalesOrdersWorkspace({ customerId, embedded }: { customerId?: st
   return (
     <div className="nex-fade">
       {!embedded && (
-        <div className="flex items-center justify-between mb-6">
-          <div><h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">Sales Orders</h1><p className="text-[13px] text-[#64748b] mt-1">Manage confirmed customer orders from acceptance through fulfilment and invoicing</p></div>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => router.push('/sales/orders/new')}>New Sales Order</Button>
-        </div>
+      <PageHeader title="Sales Orders" description="Manage confirmed customer orders from acceptance through fulfilment and invoicing" actions={<Button type="primary" icon={<PlusOutlined />} onClick={() => router.push('/sales/orders/new')}>New Sales Order</Button>} />
       )}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-5 mb-6">
         <SummaryCard icon={<ShoppingCartOutlined />} label="Open Orders" value={kpis.open} tone="#003366" />

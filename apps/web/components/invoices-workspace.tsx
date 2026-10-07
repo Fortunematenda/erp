@@ -13,6 +13,8 @@ import { fmtMoney } from '@/lib/format';
 import { invoiceDisplayStatus, isInvoiceDraft } from '@/lib/invoice-status';
 import { CurrencyValue, CustomerAvatar, EmptyState, FilterBar, StatusPill, SummaryCard } from '@/components/sales-ui';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
+import { PageHeader } from '@/components/ui/page-header';
+import { ErrorState } from '@/components/ui/error-state';
 import { letterheadHtml } from '@/components/documents/document-letterhead';
 
 export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { customerId?: string; embedded?: boolean; hideCustomer?: boolean }) {
@@ -245,15 +247,16 @@ export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { cust
   return (
     <div className="nex-fade">
       {!embedded && (
-        <div className="flex items-center justify-between mb-6">
-          <div><h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">Invoices</h1><p className="text-[13px] text-[#64748b] mt-1">Create, send and track customer invoices</p></div>
-          <div className="flex items-center gap-2">
+        <PageHeader
+          title="Invoices"
+          description="Create, send and track customer invoices"
+          actions={<>
             <Link href="/sales/invoices/template">
               <Button icon={<SettingOutlined />} aria-label="Invoice template settings" title="Invoice template" />
             </Link>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => router.push('/sales/invoices/new')}>New Invoice</Button>
-          </div>
-        </div>
+          </>}
+        />
       )}
       {!embedded && <div className="grid grid-cols-2 xl:grid-cols-4 gap-5 mb-6">{kpis.map((k) => <SummaryCard key={k.label} icon={k.icon} label={k.label} value={k.value} tone={k.tone} valueColor={k.valueColor} />)}</div>}
       <FilterBar extra={<span>{totals.count} invoices · {totals.drafts} draft · {totals.paidCount} paid</span>}>
@@ -267,7 +270,8 @@ export function InvoicesWorkspace({ customerId, embedded, hideCustomer }: { cust
         <Button icon={<ExportOutlined />} onClick={exportCsv}>Export</Button>
       </FilterBar>
       <div className="nex-card">
-        {rows.length === 0 ? <EmptyState title="No invoices yet" description="Create your first invoice to start billing customers." action={<Button type="primary" icon={<PlusOutlined />} onClick={() => router.push('/sales/invoices/new')}>New Invoice</Button>} /> : (<>
+        {list.isError ? <ErrorState title="Could not load invoices" message={(list.error as Error)?.message} onRetry={() => list.refetch()} />
+          : rows.length === 0 && !list.isLoading ? <EmptyState title="No invoices yet" description="Create your first invoice to start billing customers." action={<Button type="primary" icon={<PlusOutlined />} onClick={() => router.push('/sales/invoices/new')}>New Invoice</Button>} /> : (<>
           {sel.length > 0 && (<div className="px-4 py-3 flex items-center gap-3 flex-wrap bg-[#f8faff] border-b border-[#eef0f6]"><span className="text-[13px] font-medium text-[#344054]">{sel.length} selected</span><Button type="primary" icon={<FileDoneOutlined />} loading={busy} onClick={bulkPost}>Save & Post</Button><Button icon={<ExportOutlined />} onClick={exportCsv}>Export</Button><Popconfirm title={`Delete ${sel.length} selected invoices?`} onConfirm={bulkDel}><Button danger icon={<DeleteOutlined />} loading={busy}>Delete</Button></Popconfirm><div className="ml-auto"><Button size="small" onClick={() => setSel([])}>Clear</Button></div></div>)}
           <Table
             rowKey="id"

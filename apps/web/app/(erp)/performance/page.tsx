@@ -18,6 +18,7 @@ import { KpiTemplateDrawer, KpiTemplateDetailsDrawer } from '@/components/perfor
 import { ReviewDrawer } from '@/components/performance/review-drawer';
 import { CycleDrawer } from '@/components/performance/cycle-drawer';
 import { IncentivePlanDrawer } from '@/components/performance/incentive-plan-drawer';
+import { PageHeader } from '@/components/ui/page-header';
 
 const TEMPLATE_STATUS_TONE: Record<string, string> = { DRAFT: 'grey', ACTIVE: 'green', INACTIVE: 'amber', ARCHIVED: 'purple' };
 const SUB_TONE: Record<string, string> = { NOT_STARTED: 'grey', IN_PROGRESS: 'amber', SUBMITTED: 'green', OVERDUE: 'red' };
@@ -227,7 +228,7 @@ export default function PerformancePage() {
       <div className="flex items-center justify-between mb-5">
         <div><h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">Performance & Quality Assurance</h1><p className="text-[13px] text-[#64748b] mt-1">KPI templates, assessment cycles, QA reviews and incentives</p></div>
         <Space>
-          <Button icon={<ReloadOutlined />} onClick={refresh}>Refresh</Button>
+          <Button icon={<ReloadOutlined />} loading={fetching > 0} onClick={refresh}>Refresh</Button>
           <Can permission="performance.templates.manage"><Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingTpl(null); setTplDrawer(true); }}>KPI Template</Button></Can>
         </Space>
       </div>

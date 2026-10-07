@@ -6,7 +6,13 @@ import type { ColumnsType } from 'antd/es/table';
 import { PlusOutlined, ReloadOutlined, CheckOutlined } from '@ant-design/icons';
 import { api } from '@/lib/api';
 import { Can } from '@/components/Can';
-import { StatusPill } from '@/components/sales-ui';
+import { StatusPill, DetailItem, EmptyState } from '@/components/sales-ui';
+import { RowActionsMenu, ACTIONS_COL } from '@/components/row-actions-menu';
+
+const OWNERS = ['HR', 'MANAGER', 'PAYROLL', 'IT', 'EMPLOYEE'];
+const CATEGORIES = ['DOCUMENTS', 'EQUIPMENT', 'ACCESS', 'PAYROLL', 'GENERAL'];
+const OWNER_TONE: Record<string, string> = { HR: 'blue', MANAGER: 'purple', PAYROLL: 'green', IT: 'cyan', EMPLOYEE: 'orange' };
+const lbl = (s: string) => (s || '').replace(/_/g, ' ');
 
 export default function OnboardingPage() {
   const qc = useQueryClient();
@@ -63,7 +69,7 @@ export default function OnboardingPage() {
     <div className="nex-fade">
       <div className="flex items-center justify-between mb-6">
         <div><h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">Onboarding</h1><p className="text-[13px] text-[#64748b] mt-1">Templates and task checklists for new employees</p></div>
-        <Can permission="hr.employees.manage"><Button icon={<ReloadOutlined />} onClick={() => { templates.refetch(); onboardings.refetch(); }}>Refresh</Button></Can>
+        <Can permission="hr.employees.manage"><Button icon={<ReloadOutlined />} onClick={refresh}>Refresh</Button></Can>
       </div>
       <Tabs defaultActiveKey="templates" items={[
         { key: 'templates', label: 'Templates', children: <div className="nex-card"><div className="flex justify-end px-4 pt-3"><Button type="primary" icon={<PlusOutlined />} onClick={() => setTplOpen(true)}>New Template</Button></div><Table rowKey="id" loading={templates.isLoading} dataSource={templates.data || []} columns={tplCols} pagination={false} /></div> },

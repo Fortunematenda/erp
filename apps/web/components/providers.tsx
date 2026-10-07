@@ -15,6 +15,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           algorithm: theme.defaultAlgorithm,
           token: {
             borderRadius: 10,
+            borderRadiusSM: 8,
             borderRadiusLG: 14,
             colorPrimary: '#003366',
             colorInfo: '#003366',
@@ -22,6 +23,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
             colorSuccess: '#10b981',
             colorWarning: '#f59e0b',
             colorError: '#ef4444',
+            motionDurationFast: '0.12s',
+            motionDurationMid: '0.18s',
+            motionDurationSlow: '0.24s',
+            motionEaseOut: 'cubic-bezier(0.22, 1, 0.36, 1)',
             colorText: '#171a2e',
             colorTextSecondary: '#5a6080',
             colorBgLayout: '#f5f6fa',

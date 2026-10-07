@@ -14,6 +14,7 @@ import { CustomerAvatar, EmptyState, FilterBar, StatusPill, SummaryCard, custome
 import { SalesDocumentFlow } from '@/components/sales/related-transactions';
 import { DocumentTrail } from '@/components/documents/document-trail';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
+import { PageHeader } from '@/components/ui/page-header';
 
 const REASONS = ['Undercharge', 'Additional Service', 'Additional Quantity', 'Freight / Delivery', 'Surcharge', 'Pricing Correction', 'Tax Adjustment', 'Backorder', 'Other'];
 const DOC_STATUS = ['DRAFT', 'POSTED', 'VOID'];
@@ -76,10 +77,7 @@ export function DebitNotesWorkspace() {
 
   return (
     <div className="nex-fade">
-      <div className="flex items-center justify-between mb-6">
-        <div><h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">Debit Notes</h1><p className="text-[13px] text-[#64748b] mt-1">Additional customer charges and receivable adjustments</p></div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>New Debit Note</Button>
-      </div>
+      <PageHeader title="Debit Notes" description="Additional customer charges and receivable adjustments" actions={<Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>New Debit Note</Button>} />
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-5 mb-6">
         <SummaryCard icon={<FileDoneOutlined />} label="Debit Notes" value={kpis.count} tone="#003366" />
         <SummaryCard icon={<DollarOutlined />} label="Total Debited" value={fmtMoney(kpis.total)} tone="#f59e0b" />

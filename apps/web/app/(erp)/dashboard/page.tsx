@@ -13,6 +13,8 @@ import {
 import dayjs from 'dayjs';
 import { fmtMoney, fmtNumber } from '@/lib/format';
 import { DashboardKpiCard } from '@/components/dashboard-kpi-card';
+import { PageHeader } from '@/components/ui/page-header';
+import { NeedsAttention } from '@/components/ui/needs-attention';
 import { SoftBadge } from '@/components/crud-page';
 import { DashboardFeatureSlider } from '@/components/dashboard/dashboard-feature-slider';
 import { BusinessPerformanceSlide } from '@/components/dashboard/business-performance-slide';
@@ -101,6 +103,7 @@ export default function Dashboard() {
   const cashflow = useQuery({ queryKey: ['finance-cashflow'], queryFn: () => api('/finance/cashflow') });
   const creditNotes = useQuery({ queryKey: ['sales-credit-notes'], queryFn: () => api('/sales/credit-notes') });
   const risks = useQuery({ queryKey: ['compliance-risks'], queryFn: () => api('/compliance/risks') });
+  const actionCentre = useQuery({ queryKey: ['action-centre'], queryFn: () => api('/workspace/action-center') });
 
   const [period, setPeriod] = useState('month');
   const [customRange, setCustomRange] = useState<any>(null);
@@ -221,18 +224,16 @@ export default function Dashboard() {
   return (
     <div className="nex-fade">
       {/* Header row */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">Dashboard</h1>
-          <p className="text-[13px] text-[#64748b] mt-1">Business overview at a glance</p>
-        </div>
-        <div className="flex items-center gap-3">
+      <PageHeader
+        title="Dashboard"
+        description="Business overview at a glance"
+        actions={<>
           <Tooltip title="Refresh all data">
-            <Button icon={<ReloadOutlined />} onClick={() => { Object.values({ summary, invoices, supplierInvoices, supplierPayments, pos, aging, valuation, reorder, warehouses, devices, fiscalReceipts, cashflow, creditNotes, risks }).forEach((q) => q.refetch()); }} />
+            <Button icon={<ReloadOutlined />} onClick={() => { Object.values({ summary, invoices, supplierInvoices, supplierPayments, pos, aging, valuation, reorder, warehouses, devices, fiscalReceipts, cashflow, creditNotes, risks, actionCentre }).forEach((q) => q.refetch()); }} />
           </Tooltip>
           <span className="text-[12px] text-[#94a3b8] hidden md:inline">Updated {dayjs().format('D MMM YYYY')}</span>
-        </div>
-      </div>
+        </>}
+      />
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-5 mb-6">
@@ -251,6 +252,19 @@ export default function Dashboard() {
             </div>
           ))
         )}
+      </div>
+
+      {/* Needs Attention — exception-first */}
+      <div className="mb-6">
+        <NeedsAttention
+          items={(actionCentre.data?.items || []).slice(0, 8).map((it: any) => ({
+            key: it.id,
+            label: it.title,
+            severity: it.severity === 'success' ? 'info' : it.severity,
+            href: it.href,
+          }))}
+          emptyText="No exceptions — everything is on track."
+        />
       </div>
 
       {/* Business Performance + Fiscalisation (two-slide carousel) */}

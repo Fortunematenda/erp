@@ -14,6 +14,7 @@ import { CustomerAvatar, EmptyState, FilterBar, StatusPill, SummaryCard, custome
 import { SalesDocumentFlow } from '@/components/sales/related-transactions';
 import { DocumentTrail } from '@/components/documents/document-trail';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
+import { PageHeader } from '@/components/ui/page-header';
 
 const REASONS = ['Returned Goods', 'Pricing Error', 'Overcharge', 'Damaged Goods', 'Service Cancellation', 'Discount', 'Tax Adjustment', 'Other'];
 const DOC_STATUS = ['DRAFT', 'POSTED', 'VOID'];
@@ -76,10 +77,7 @@ export function CreditNotesWorkspace() {
 
   return (
     <div className="nex-fade">
-      <div className="flex items-center justify-between mb-6">
-        <div><h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">Credit Notes</h1><p className="text-[13px] text-[#64748b] mt-1">Customer credits, returns and invoice adjustments</p></div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>New Credit Note</Button>
-      </div>
+      <PageHeader title="Credit Notes" description="Customer credits, returns and invoice adjustments" actions={<Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>New Credit Note</Button>} />
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-5 mb-6">
         <SummaryCard icon={<FileDoneOutlined />} label="Credit Notes" value={kpis.count} tone="#003366" />
         <SummaryCard icon={<DollarOutlined />} label="Total Credited" value={fmtMoney(kpis.total)} tone="#f59e0b" />

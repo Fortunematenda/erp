@@ -16,6 +16,7 @@ import { EmployeeSelector } from '@/components/employee-selector';
 import { EmployeeDrawer } from '@/components/employee-drawer';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
+import { PageHeader } from '@/components/ui/page-header';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const monthName = (p: number) => (p >= 1 && p <= 12 ? MONTHS[p - 1] : `Period ${p}`);
@@ -244,7 +245,7 @@ export default function Hr() {
         <div><h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">HR & Payroll</h1><p className="text-[13px] text-[#64748b] mt-1">Employees, leave, attendance, performance and payroll</p></div>
         <Space>
           <Link href="/performance"><Button type="primary" ghost>Performance & QA Module</Button></Link>
-          <Button icon={<ReloadOutlined />} onClick={refresh}>Refresh</Button>
+          <Button icon={<ReloadOutlined />} loading={fetching > 0} onClick={refresh}>Refresh</Button>
         </Space>
       </div>
 
