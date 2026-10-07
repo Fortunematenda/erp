@@ -21,7 +21,6 @@ import { HrPerformance } from '@/components/hr-performance';
 import { PayrollManagement } from '@/components/payroll-management';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
-import { PageHeader } from '@/components/ui/page-header';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const monthName = (p: number) => (p >= 1 && p <= 12 ? MONTHS[p - 1] : `Period ${p}`);

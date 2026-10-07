@@ -198,15 +198,17 @@ export default function Fiscalisation() {
 
   return (
     <div className="nex-fade">
-      <PageHeader
-        title="ZIMRA Fiscalisation"
-        description="Virtual fiscal device, fiscal days and receipt management"
-        actions={<>
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h1 className="text-[26px] font-bold text-[#171a2e] leading-tight">ZIMRA Fiscalisation</h1>
+          <p className="text-[13px] text-[#64748b] mt-1">Virtual fiscal device, fiscal days and receipt management</p>
+        </div>
+        <div className="flex items-center gap-2">
           <StatusPill status={mode === 'mock' ? 'MOCK' : 'LIVE'} tone={mode === 'mock' ? 'amber' : 'green'} />
           <Button icon={<ReloadOutlined />} onClick={refresh}>Refresh</Button>
           <Button icon={<SettingOutlined />} onClick={() => (window.location.href = '/administration/integrations-config')}>Configuration</Button>
-        </>}
-      />
+        </div>
+      </div>
 
       {mode === 'mock' && (
         <div className="flex items-start gap-3 bg-[#fff7ed] border border-[#fed7aa] rounded-lg px-4 py-3 mb-5">
