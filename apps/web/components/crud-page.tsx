@@ -7,7 +7,7 @@ import { DeleteOutlined, EditOutlined, PlusOutlined, PrinterOutlined, ReloadOutl
 import { ACTIONS_COL, RowActionsMenu } from '@/components/row-actions-menu';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page';
-import { ERPDrawer, ERPEmptyState, ERPFilterBar, ERPModal, ERPPrimaryButton, ERPSearchInput } from '@/components/erp';
+import { ERPDrawer, ERPEmptyState, ERPFilterBar, ERPModal, ERPPrimaryButton, ERPSearchInput, ERPSkeleton } from '@/components/erp';
 import { useMeta } from '@/lib/meta';
 import { StatCard } from '@/components/stat-card';
 import dayjs from 'dayjs';
@@ -330,9 +330,12 @@ export function CrudPage(props: CrudPageProps) {
         </div>
       )}
       <Card className="nex-card" styles={{ body: { padding: 0 } }}>
+        {list.isLoading && data.length === 0 ? (
+          <div className="p-4"><ERPSkeleton rows={8} /></div>
+        ) : (
         <Table
           size="middle"
-          loading={list.isLoading}
+          loading={false}
           rowKey={idKey}
           dataSource={data}
           columns={columnsWithActions}
@@ -346,6 +349,7 @@ export function CrudPage(props: CrudPageProps) {
           }}
           pagination={noPagination ? false : { pageSize: 20, showSizeChanger: false, showTotal: (t: number) => `${t} records` }}
         />
+        )}
       </Card>
       {!props.useDrawer && fields.length > 0 && (
         <ERPModal

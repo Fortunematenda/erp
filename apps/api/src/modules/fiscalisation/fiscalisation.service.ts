@@ -200,16 +200,29 @@ export class FiscalisationService {
 
   // ---------- Payment derivation (reuse real receipts; never invent) ----------
   private async derivePayment(companyId: string, inv: any) {
-    const payments = await this.prisma.receipt.findMany({ where: { invoiceId: inv.id, status: 'POSTED' }, select: { method: true, amount: true, applied: true } });
-    if (payments.length) {
-      const byMethod = payments.reduce((acc, p) => { const m = p.method || 'CASH'; acc[m] = (acc[m] || 0) + Number(p.amount); return acc; }, {} as Record<string, number>);
-      const method = Object.keys(byMethod).length === 1 ? Object.keys(byMethod)[0] : 'CASH';
+    const allocations = await this.prisma.paymentAllocation.findMany({
+      where: { invoiceId: inv.id, receipt: { companyId, status: 'POSTED' } },
+      include: { receipt: { select: { method: true, amount: true } } },
+    });
+    const byMethod: Record<string, number> = {};
+    if (allocations.length) {
+      for (const a of allocations) {
+        const m = a.receipt.method || 'CASH';
+        byMethod[m] = (byMethod[m] || 0) + Number(a.amountApplied);
+      }
+    } else {
+      const direct = await this.prisma.receipt.findMany({ where: { invoiceId: inv.id, companyId, status: 'POSTED' }, select: { method: true, amount: true } });
+      for (const p of direct) {
+        const m = p.method || 'CASH';
+        byMethod[m] = (byMethod[m] || 0) + Number(p.amount);
+      }
+    }
+    if (Object.keys(byMethod).length) {
+      const method = Object.keys(byMethod).length === 1 ? Object.keys(byMethod)[0] : 'SPLIT';
       const total = Object.values(byMethod).reduce((s, v) => s + v, 0);
       return { method, payments: Object.entries(byMethod).map(([m, amt]) => ({ method: m, amount: round2(amt) })), paid: round2(total) };
     }
-    // unpaid / credit-sale treatment (do not falsely report Cash)
-    if (Number(inv.paymentStatus === 'PAID')) return { method: 'CASH', payments: [{ method: 'CASH', amount: Number(inv.total) }], paid: Number(inv.total) };
-    return { method: 'CREDIT', payments: [{ method: 'CREDIT', amount: Number(inv.balanceDue ?? 0) }], paid: 0 };
+    return { method: 'CREDIT', payments: [{ method: 'CREDIT', amount: Number(inv.balanceDue ?? inv.total ?? 0) }], paid: 0 };
   }
 
   // ---------- Tax mapping enforcement ----------

@@ -72,15 +72,14 @@ function Card({ title, subtitle, extra, children, className }: { title: string; 
   );
 }
 
-function MiniRow({ icon, title, value, tone, tint }: { icon: React.ReactNode; title: string; value: string; tone: string; tint: string }) {
+function MiniRow({ icon, title, value, tint }: { icon: React.ReactNode; title: string; value: string; tone: string; tint: string }) {
   return (
-    <div className="flex items-center gap-4 rounded-xl px-3 py-3 hover:bg-[#f8faff] transition-colors">
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-sm shrink-0" style={{ background: tone, boxShadow: `0 4px 12px ${tone}55` }}>{icon}</div>
+    <div className="flex items-center gap-3 rounded-lg px-2 py-2.5 hover:bg-[#f8f9fc] transition-colors">
+      <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[#003366] bg-[#eef3f9] shrink-0">{icon}</div>
       <div className="flex-1 min-w-0 overflow-hidden">
         <div className="text-[13px] text-[#64748b] truncate">{title}</div>
-        <div className="text-[15px] font-bold text-[#171a2e] leading-tight">{value}</div>
+        <div className="text-[15px] font-semibold text-[#171a2e] leading-tight">{value}</div>
       </div>
-      {/* subtle tint chip */}
       <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: tint }} />
     </div>
   );

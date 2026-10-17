@@ -7,7 +7,7 @@ import {
   CircleDollarSign, ClipboardCheck, Contact, CreditCard, FileCheck, FileText, FolderKanban, Landmark,
   LayoutDashboard, LayoutGrid, Lightbulb, List, LogOut, Mail, Menu as MenuIcon, Palette, PanelLeftClose,
   PanelLeftOpen, Percent, Plug, Printer, Receipt, RotateCcw, Scale, Server, Settings, ShieldCheck,
-  ShoppingCart, Store, Target, Truck, Undo2, User, Users, Wallet, Wrench,
+  Monitor, ShoppingCart, Store, Target, Truck, Undo2, User, Users, Wallet, Wrench,
 } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-store';
@@ -44,6 +44,21 @@ const nav = [
           { key: '/sales/debit-notes', label: 'Debit Notes' },
           { key: '/sales/register', label: 'Sales Register' },
           { key: '/sales/reports', label: 'Sales Reports' },
+        ],
+      },
+      {
+        key: '/pos', label: 'Point of Sale', icon: <NavIcon icon={Monitor} />, children: [
+          { key: '/pos', label: 'POS Overview' },
+          { key: '/pos/terminal', label: 'Launch POS' },
+          { key: '/pos/transactions', label: 'Transactions' },
+          { key: '/pos/registers', label: 'Registers' },
+          { key: '/pos/shifts', label: 'Cashier Shifts' },
+          { key: '/pos/returns', label: 'Returns & Refunds' },
+          { key: '/pos/restaurant', label: 'Restaurant Management' },
+          { key: '/pos/kitchen', label: 'Kitchen Display' },
+          { key: '/pos/services', label: 'Service Jobs' },
+          { key: '/pos/reports', label: 'Reports' },
+          { key: '/pos/settings', label: 'Settings' },
         ],
       },
       {
@@ -127,6 +142,17 @@ const PAGE_TITLES: Record<string, [string, string]> = {
   '/dashboard': ['Dashboard', 'Business overview at a glance'],
   '/reports': ['Reports & BI', 'Financial and operational reporting'],
   '/sales': ['Sales & Revenue', 'Quotations, orders, invoicing and receipts'],
+  '/pos': ['Point of Sale', 'Retail, services and restaurant checkout'],
+  '/pos/terminal': ['Launch POS', 'Full-screen cashier'],
+  '/pos/transactions': ['POS Transactions', 'Posted and held sales'],
+  '/pos/registers': ['Registers', 'Cash registers by branch'],
+  '/pos/shifts': ['Cashier Shifts', 'Floats and close-of-day'],
+  '/pos/returns': ['Returns & Refunds', 'Partial returns, approvals and credit notes'],
+  '/pos/restaurant': ['Restaurant Floor', 'Tables, open tabs and split bills'],
+  '/pos/kitchen': ['Kitchen Display', 'Preparation tickets'],
+  '/pos/services': ['Service Jobs', 'Open jobs, deposits and status'],
+  '/pos/reports': ['POS Reports', 'Sales posted through the register'],
+  '/pos/settings': ['POS Settings', 'Modes, warehouse and walk-in customer'],
   '/sales/customers': ['Customers', 'Manage customer accounts and credit limits'],
   '/sales/quotations': ['Quotations', 'Draft and convert quotes to orders'],
   '/sales/orders': ['Sales Orders', 'Confirmed orders ready for invoicing'],
@@ -247,7 +273,7 @@ function loadTheme(userId?: string): SidebarTheme {
   return DEFAULT_THEME;
 }
 
-function buildMenuItems(nav: any[], onOpen: (item: any) => void, onClose: () => void, mobile = false) {
+function buildMenuItems(nav: any[], onOpen: (item: any) => void, onClose: () => void, mobile = false, prefetch: (href: string) => void = () => {}) {
   return nav.map((group: any) => ({
     type: 'group' as const,
     label: <span className="nex-section-label !p-0">{group.label}</span>,
@@ -260,21 +286,21 @@ function buildMenuItems(nav: any[], onOpen: (item: any) => void, onClose: () => 
               icon: item.icon,
               children: item.children.map((child: any) => ({
                 key: child.key,
-                label: child.label,
+                label: <span onMouseEnter={() => prefetch(child.key)}>{child.label}</span>,
                 icon: PAGE_ICONS[child.key] || <NavIcon icon={ChevronRight} size={14} />,
               })),
             }
           : {
               key: 'flyout-' + item.key,
               label: (
-                <span onMouseEnter={() => onOpen(item)} onMouseLeave={onClose} className="flex items-center justify-between gap-2">
+                <span onMouseEnter={() => { onOpen(item); prefetch(item.key); }} onMouseLeave={onClose} className="flex items-center justify-between gap-2">
                   <span>{item.label}</span>
                   <ChevronRight size={14} strokeWidth={1.75} className="opacity-40" aria-hidden />
                 </span>
               ),
               icon: <span onMouseEnter={() => onOpen(item)} onMouseLeave={onClose} className="nex-nav-icon-wrap">{item.icon}</span>,
             }
-        : { key: item.key, label: <span>{item.label}</span>, icon: item.icon },
+        : { key: item.key, label: <span onMouseEnter={() => prefetch(item.key)}>{item.label}</span>, icon: item.icon },
     ),
   }));
 }
@@ -351,6 +377,10 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
     setFlyout(item);
     setFlyoutClosing(false);
     computeFlyoutPointer(item);
+    item.children?.forEach((child: { key?: string }) => {
+      const pathOnly = child.key?.split('?')[0];
+      if (pathOnly && pathOnly !== path) router.prefetch(pathOnly);
+    });
   }
   function cancelClose() {
     if (flyoutTimer.current) clearTimeout(flyoutTimer.current);
@@ -365,6 +395,11 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
     if (flyoutTimer.current) clearTimeout(flyoutTimer.current);
     setFlyout(null);
     setFlyoutClosing(false);
+  }
+
+  function prefetch(href: string) {
+    const pathOnly = href.split('?')[0];
+    if (pathOnly && pathOnly !== path) router.prefetch(pathOnly);
   }
 
   function go(key: string) {
@@ -463,6 +498,7 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
         {QUICK_MODULES.map((m) => (
           <button
             key={m.key}
+            onMouseEnter={() => prefetch(m.key)}
             onClick={() => { setQuickOpen(false); if (typeof document !== 'undefined') document.dispatchEvent(new CustomEvent('nex:navigate')); router.push(m.key); }}
             className="group flex flex-col items-start gap-2 rounded-xl border border-[#e8ebf2] bg-white px-3 py-3 hover:bg-[#f7f8fb] hover:border-[#d5dbe8] transition-colors duration-150 cursor-pointer text-left"
           >
@@ -497,7 +533,7 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
         const parent = nav.flatMap((g: any) => g.children).find((item: any) => item.children?.some((c: any) => k.startsWith(c.key) || k === c.key));
         return parent ? `sub-${parent.key}` : null;
       }).filter(Boolean) as string[] : undefined}
-      items={buildMenuItems(nav, openFlyout, scheduleClose, isMobile)}
+      items={buildMenuItems(nav, openFlyout, scheduleClose, isMobile, prefetch)}
       onClick={({ key }) => {
         if (key.startsWith('sub-') || key.startsWith('flyout-')) {
           if (key.startsWith('flyout-')) go(key.slice('flyout-'.length));
@@ -524,6 +560,16 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
       </Popover>
     </div>
   );
+
+  const cashier = ['/pos/terminal', '/pos/kitchen', '/pos/restaurant'].some((p) => path === p || path.startsWith(`${p}/`));
+  if (cashier) {
+    return (
+      <Layout className="min-h-screen bg-[#f4f6f9]">
+        <RouteProgress />
+        <Content className="min-h-screen">{children}</Content>
+      </Layout>
+    );
+  }
 
   return (
       <Layout className="min-h-screen">
@@ -568,11 +614,13 @@ export function ErpShell({ children }: { children: React.ReactNode }) {
                   <span className="font-semibold text-[13px] truncate text-[#171a2e]">{flyout.label}</span>
                 </div>
                 <div className="flex-1 overflow-y-auto py-2 px-2">
-                  {flyout.children.map((child: any) => {
-                    const active = fullPath.startsWith(child.key);
+                  {flyout.children.map((child: any, _i: number, siblings: any[]) => {
+                    const best = siblings.filter((s: any) => childMatchesPath(s.key)).sort((a: any, b: any) => b.key.length - a.key.length)[0];
+                    const active = best?.key === child.key;
                     return (
                       <button
                         key={child.key}
+                        onMouseEnter={() => prefetch(child.key)}
                         onClick={() => { closeFlyout(); go(child.key); }}
                         className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 mb-0.5 text-left transition-colors duration-150 cursor-pointer ${
                           active ? 'bg-[#e7eef8]' : 'hover:bg-[#f5f7fb]'

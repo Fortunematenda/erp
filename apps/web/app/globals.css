@@ -836,3 +836,16 @@ body {
   color: #475467 !important;
 }
 
+/* ---------- Dark POS screens (PosDark) ---------- */
+.pos-dark .ant-input, .pos-dark .ant-input-affix-wrapper, .pos-dark .ant-input-number, .pos-dark .ant-picker,
+.pos-dark .ant-select .ant-select-selector,
+.pos-dark-overlay .ant-input, .pos-dark-overlay .ant-input-affix-wrapper, .pos-dark-overlay .ant-input-number, .pos-dark-overlay .ant-picker,
+.pos-dark-overlay .ant-select .ant-select-selector { border-color: #2f3542 !important; }
+.pos-dark .ant-select:not(.ant-select-disabled):hover .ant-select-selector,
+.pos-dark-overlay .ant-select:not(.ant-select-disabled):hover .ant-select-selector { border-color: #4b5563 !important; }
+.pos-dark .ant-select-disabled .ant-select-selector, .pos-dark .ant-input-disabled,
+.pos-dark-overlay .ant-select-disabled .ant-select-selector, .pos-dark-overlay .ant-input-disabled { background-color: #161920 !important; color: #6b7280 !important; border-color: #262b35 !important; }
+.pos-dark-overlay .ant-modal-header, .pos-dark-overlay .ant-modal-footer,
+.pos-dark-overlay .ant-drawer-header, .pos-dark-overlay .ant-drawer-footer { border-color: #262b35 !important; }
+.pos-dark-overlay .ant-form-vertical .ant-form-item-label > label { color: #d1d5db; }
+

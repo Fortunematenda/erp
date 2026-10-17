@@ -234,6 +234,24 @@ export const PERMISSIONS: PermissionDef[] = [
   { code: 'integrations.messaging.test', name: 'Test messaging (email/SMS)', module: 'integrations' },
   { code: 'integrations.queue.retry', name: 'Retry / discard queue jobs', module: 'integrations' },
   { code: 'integrations.webhooks.view', name: 'View webhook events', module: 'integrations' },
+  { code: 'pos.access', name: 'Access point of sale', module: 'pos' },
+  { code: 'pos.sell', name: 'Process POS sales', module: 'pos' },
+  { code: 'pos.credit', name: 'Process POS credit sales', module: 'pos' },
+  { code: 'pos.discount', name: 'Apply POS discounts', module: 'pos' },
+  { code: 'pos.price.override', name: 'Override POS prices', module: 'pos' },
+  { code: 'pos.hold', name: 'Hold POS sales', module: 'pos' },
+  { code: 'pos.cancel', name: 'Cancel open POS orders', module: 'pos' },
+  { code: 'pos.void', name: 'Void unposted POS sales', module: 'pos' },
+  { code: 'pos.refund', name: 'Process POS refunds', module: 'pos' },
+  { code: 'pos.refund.approve', name: 'Approve POS refunds', module: 'pos' },
+  { code: 'pos.shifts.open', name: 'Open cashier shifts', module: 'pos' },
+  { code: 'pos.shifts.close', name: 'Close cashier shifts', module: 'pos' },
+  { code: 'pos.shifts.approve', name: 'Approve cash discrepancies', module: 'pos' },
+  { code: 'pos.registers.manage', name: 'Manage POS registers', module: 'pos' },
+  { code: 'pos.settings', name: 'Manage POS settings', module: 'pos' },
+  { code: 'pos.restaurant', name: 'Access restaurant management', module: 'pos' },
+  { code: 'pos.kitchen', name: 'Access kitchen display', module: 'pos' },
+  { code: 'pos.reports', name: 'View POS reports', module: 'pos' },
 ];
 
 const ALL = PERMISSIONS.map((p) => p.code);
@@ -262,7 +280,10 @@ export const ROLE_DEFS: RoleDef[] = [
     'procurement.requisitions.create', 'procurement.purchase_orders.create', 'procurement.suppliers.manage', 'procurement.bills.manage',
   ] },
   { name: 'Sales Manager', description: 'Sales & reports', permissions: [
-    'sales.*', 'crm.view', 'reports.view', 'fiscalisation.view', 'fiscalisation.operate',
+    'sales.*', 'pos.*', 'crm.view', 'reports.view', 'fiscalisation.view', 'fiscalisation.operate',
+  ] },
+  { name: 'Cashier', description: 'Point of sale checkout', permissions: [
+    'pos.access', 'pos.sell', 'pos.hold', 'pos.discount', 'pos.refund', 'pos.shifts.open', 'pos.shifts.close', 'pos.restaurant', 'pos.kitchen', 'sales.customers.view',
   ] },
   { name: 'Sales Clerk', description: 'Quotes, orders, invoices', permissions: [
     'sales.quotes.manage', 'sales.quotes.view', 'sales.quotes.create', 'sales.quotes.update', 'sales.quotes.cancel',

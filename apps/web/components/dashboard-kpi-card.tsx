@@ -1,50 +1,32 @@
 'use client';
-import { Area, AreaChart, ResponsiveContainer } from 'recharts';
 
-export function DashboardKpiCard({ title, value, trend, subtitle, icon, color, spark }: {
+export function DashboardKpiCard({ title, value, trend, subtitle, icon }: {
   title: string;
   value: React.ReactNode;
   trend: number | null;
   subtitle?: string;
   icon: React.ReactNode;
-  color: string;
-  spark: number[];
+  color?: string;
+  spark?: number[];
 }) {
-  const data = (spark.length ? spark : [0, 0, 0, 0, 0]).map((v, i) => ({ i, v }));
   const up = (trend ?? 0) > 0;
   const down = (trend ?? 0) < 0;
-  const trendTone = trend === null || trend === 0 ? '#98A2B3' : up ? '#16A34A' : '#EF4444';
-  const tr = trend === null ? '—' : `${up ? '+' : ''}${Math.abs(trend).toFixed(0)}%`;
-  const gid = `spark-${title.replace(/\s+/g, '')}`;
+  const trendTone = !trend ? '#94a3b8' : up ? '#16a34a' : '#dc2626';
+  const tr = trend == null ? null : `${up ? '+' : down ? '−' : ''}${Math.abs(trend).toFixed(0)}%`;
 
   return (
-    <div className="nex-card nex-card-hover flex flex-col p-5 min-h-[152px]">
-      <div className="flex items-start justify-between gap-2">
+    <div className="nex-stat nex-card-hover flex flex-col min-h-[132px]">
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-[13px] font-semibold leading-tight tracking-[-0.01em] text-[#1f2937] truncate tabular-nums">{value}</span>
-            <span className="text-[13px] font-semibold shrink-0" style={{ color: trendTone }}>{up ? '↑' : down ? '↓' : ''}{tr}</span>
+          <div className="text-[12px] font-medium text-[#64748b] truncate">{title}</div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <div className="text-[22px] font-semibold leading-none tracking-[-0.02em] text-[#171a2e] tabular-nums truncate">{value}</div>
+            {tr && <span className="text-[12px] font-medium shrink-0" style={{ color: trendTone }}>{tr}</span>}
           </div>
-          <div className="text-[14px] font-medium text-[#667085] mt-1 truncate">{title}</div>
-          {subtitle && <div className="text-[12px] text-[#98A2B3] mt-0.5 truncate">{subtitle}</div>}
+          {subtitle && <div className="text-[12px] text-[#94a3b8] mt-1.5 truncate">{subtitle}</div>}
         </div>
-        <div className="w-9 h-9 rounded-full flex items-center justify-center text-[15px] shrink-0" style={{ background: `${color}1f`, color }}>{icon}</div>
-      </div>
-      <div className="flex-1" />
-      <div className="h-[40px] mt-3">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
-            <defs>
-              <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={color} stopOpacity={0.22} />
-                <stop offset="100%" stopColor={color} stopOpacity={0.02} />
-              </linearGradient>
-            </defs>
-            <Area type="monotone" dataKey="v" stroke={color} strokeWidth={2} fill={`url(#${gid})`} dot={false} />
-          </AreaChart>
-        </ResponsiveContainer>
+        <div className="nex-stat-icon shrink-0">{icon}</div>
       </div>
     </div>
   );
 }
-

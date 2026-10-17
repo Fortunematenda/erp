@@ -16,6 +16,7 @@ import { CrmModule } from './modules/crm/crm.module';
 import { AssetsModule } from './modules/assets/assets.module';
 import { ComplianceModule } from './modules/compliance/compliance.module';
 import { FiscalisationModule } from './modules/fiscalisation/fiscalisation.module';
+import { PosModule } from './modules/pos/pos.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { AdminModule } from './modules/admin/admin.module';
@@ -30,5 +31,5 @@ import { DocumentTemplateModule } from './modules/document-templates/document-te
 import { DocumentTrailModule } from './modules/document-trail/document-trail.module';
 import { WorkspaceModule } from './modules/workspace/workspace.module';
 import { HealthController } from './health.controller';
-@Module({imports:[ConfigModule.forRoot({isGlobal:true}),PrismaModule,CommonModule,AuthModule,DashboardModule,CompanyModule,SalesModule,FinanceModule,InventoryModule,ProcurementModule,HrModule,PerformanceModule,CrmModule,AssetsModule,ComplianceModule,FiscalisationModule,IntegrationsModule,AdminModule,PlatformModule,ProjectsModule,ApprovalsModule,ReportsModule,SystemModule,DocumentsModule,DeliveryModule,SettingsModule,DocumentTemplateModule,DocumentTrailModule,BankingModule,WorkspaceModule],controllers:[HealthController]})
+@Module({imports:[ConfigModule.forRoot({isGlobal:true}),PrismaModule,CommonModule,AuthModule,DashboardModule,CompanyModule,SalesModule,FinanceModule,InventoryModule,ProcurementModule,HrModule,PerformanceModule,CrmModule,AssetsModule,ComplianceModule,FiscalisationModule,PosModule,IntegrationsModule,AdminModule,PlatformModule,ProjectsModule,ApprovalsModule,ReportsModule,SystemModule,DocumentsModule,DeliveryModule,SettingsModule,DocumentTemplateModule,DocumentTrailModule,BankingModule,WorkspaceModule],controllers:[HealthController]})
 export class AppModule {}

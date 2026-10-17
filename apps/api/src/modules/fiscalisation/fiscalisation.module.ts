@@ -6,5 +6,5 @@ import { FiscalisationReadinessService } from './fiscalisation-readiness.service
 import { FiscalCertificateService } from './fiscal-certificate.service';
 import { FiscalRateLimitGuard } from './fiscal-rate-limit.guard';
 import { FiscalProviderFactory } from './providers/provider.factory';
-@Module({ imports: [AuthModule], controllers: [FiscalisationController], providers: [FiscalisationService, FiscalisationReadinessService, FiscalCertificateService, FiscalRateLimitGuard, FiscalProviderFactory] })
+@Module({ imports: [AuthModule], controllers: [FiscalisationController], providers: [FiscalisationService, FiscalisationReadinessService, FiscalCertificateService, FiscalRateLimitGuard, FiscalProviderFactory], exports: [FiscalisationService] })
 export class FiscalisationModule {}

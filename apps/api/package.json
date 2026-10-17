@@ -24,7 +24,9 @@
     "test:inventory-sales": "tsx scripts/inventory-sales-tests.ts",
     "test:history": "tsx scripts/item-history-tests.ts",
     "test:gl": "tsx scripts/gl-counterparty-tests.ts",
-    "test:e2e": "tsx scripts/cross-flow-tests.ts"
+    "test:e2e": "tsx scripts/cross-flow-tests.ts",
+    "test:pos": "tsx scripts/pos-calc-tests.ts",
+    "test:pos-api": "tsx scripts/pos-smoke-tests.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

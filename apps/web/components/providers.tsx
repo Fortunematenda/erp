@@ -10,7 +10,19 @@ import { erpAntdTheme } from '@/lib/erp-theme';
 import { SonnerMessageBridge } from '@/components/sonner-message-bridge';
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  const [client] = useState(() => new QueryClient({ defaultOptions: { queries: { staleTime: 15_000, gcTime: 5 * 60_000, refetchOnWindowFocus: false, retry: 1, placeholderData: keepPreviousData } } }));
+  const [client] = useState(() => new QueryClient({
+    defaultOptions: {
+      queries: {
+        // Lists stay on screen while a newer response arrives. Focus refresh
+        // picks up changes made elsewhere without blanking the page.
+        staleTime: 15_000,
+        gcTime: 5 * 60_000,
+        refetchOnWindowFocus: true,
+        retry: 1,
+        placeholderData: keepPreviousData,
+      },
+    },
+  }));
   return (
     <QueryClientProvider client={client}>
       <ConfigProvider theme={erpAntdTheme}>

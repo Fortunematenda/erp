@@ -315,6 +315,16 @@ model Company {
   interactions              CustomerInteraction[]
   maintenanceOrders         MaintenanceOrder[]
   taxRates                  TaxRate[]
+  posTerminals              PosTerminal[]
+  posRegisters              PosRegister[]
+  posShifts                 PosShift[]
+  posSales                  PosSale[]
+  posReturns                PosReturn[]
+  posBranchSettings         PosBranchSettings[]
+  diningAreas               DiningArea[]
+  kitchenStations           KitchenStation[]
+  recipeLines               RecipeLine[]
+  modifierGroups            MenuModifierGroup[]
   budgets                   Budget[]
   configs                   SystemConfig[]
   createdAt                 DateTime                        @default(now())
@@ -362,6 +372,12 @@ model Branch {
   memberships             Membership[]             @relation("MembershipPrimaryBranch")
   membershipBranches      MembershipBranch[]
   auditLogs               AuditLog[]
+  posTerminals            PosTerminal[]
+  posRegisters            PosRegister[]
+  posSales                PosSale[]
+  posSettings             PosBranchSettings?
+  diningAreas             DiningArea[]
+  restaurantTables        RestaurantTable[]
 
   @@unique([companyId, code])
 }
@@ -405,6 +421,7 @@ model User {
   mfaMethods                 MfaMethod[]
   trailEvents                DocumentTrailEvent[]
   auditLogs                  AuditLog[]
+  posShifts                  PosShift[]
   createdAt                  DateTime                 @default(now())
   updatedAt                  DateTime                 @updatedAt
   recruitmentRequisitions    RecruitmentRequisition[]
@@ -480,6 +497,7 @@ model LedgerAccount {
   lines                  JournalLine[]
   budgets                Budget[]
   bankAccounts           BankAccount[]
+  posRegisters           PosRegister[]
   checkAllocations       CheckAllocation[]
   creditCardAccounts     CreditCardAccount[]
   creditCardTransactions CreditCardTransaction[]
@@ -677,6 +695,7 @@ model Customer {
   deliveryNotes   DeliveryNote[]
   serviceTickets  ServiceTicket[]
   debitNotes      DebitNote[]
+  posSales        PosSale[]
   convertedLeads  Lead[]                @relation("LeadConversions")
   crmEvents       CrmEvent[]
 
@@ -727,6 +746,7 @@ model SalesInvoice {
   creditNotes        CreditNote[]
   customerReturns    CustomerReturn[]
   debitNotes         DebitNote[]
+  posSale            PosSale?
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   paymentAllocations PaymentAllocation[]
@@ -746,6 +766,7 @@ model SalesInvoiceLine {
   itemId           String?
   quantity         Decimal         @db.Decimal(18, 4)
   unitPrice        Decimal         @db.Decimal(18, 2)
+  discount         Decimal         @default(0) @db.Decimal(18, 2)
   taxRate          Decimal         @default(0) @db.Decimal(8, 4)
   taxAmount        Decimal         @default(0) @db.Decimal(18, 2)
   lineTotal        Decimal         @db.Decimal(18, 2)
@@ -918,6 +939,9 @@ model InventoryItem {
   serials                 SerialNumber[]
   reservations            StockReservation[]
   priceListItems          PriceListItem[]
+  recipeAsParent          RecipeLine[]       @relation("RecipeParent")
+  recipeAsComponent       RecipeLine[]       @relation("RecipeComponent")
+  modifierGroups          MenuModifierGroup[]
 
   @@unique([companyId, sku])
   @@index([companyId])
@@ -964,6 +988,8 @@ model Warehouse {
   batches            InventoryBatch[]
   serials            SerialNumber[]
   customerReturns    CustomerReturn[]
+  posSettings        PosBranchSettings[]
+  posSales           PosSale[]
   supplierReturns    SupplierReturn[]
 
   @@unique([companyId, code])
@@ -1118,6 +1144,7 @@ model Employee {
   assetAssignments       AssetAssignment[]
   projectMemberships     ProjectMember[]
   employeeDocuments      EmployeeDocument[]
+  posSalesAssigned       PosSale[]
   user                   User?
 
   @@unique([companyId, employeeNo])
@@ -1824,6 +1851,7 @@ model FiscalDevice {
   fiscalDays           FiscalDay[]
   receipts             FiscalReceipt[]
   logs                 FiscalIntegrationLog[]
+  posSettings          PosBranchSettings[]
 
   @@unique([branchId, serialNumber])
 }
@@ -4595,4 +4623,411 @@ model EmployeeDocument {
 
   @@index([companyId, employeeId, category])
   @@index([companyId, employeeId, status])
+}
+
+// ---------------------------------------------------------------------------
+// Point of Sale — additive. Financial truth stays on SalesInvoice, Receipt,
+// JournalEntry, StockMovement and FiscalReceipt.
+// ---------------------------------------------------------------------------
+
+enum PosMode {
+  RETAIL
+  SERVICE
+  RESTAURANT
+}
+
+enum PosCartStatus {
+  ACTIVE
+  HELD
+  ABANDONED
+}
+
+enum PosOrderStatus {
+  OPEN
+  IN_PREPARATION
+  READY
+  COMPLETED
+  CANCELLED
+}
+
+enum PosTenderStatus {
+  PENDING
+  AUTHORISED
+  CAPTURED
+  FAILED
+  REFUNDED
+}
+
+enum PosSaleStatus {
+  DRAFT
+  PENDING_PAYMENT
+  POSTED
+  REVERSED
+}
+
+enum PosFiscalTrack {
+  NOT_REQUIRED
+  PENDING
+  SUBMITTED
+  FISCALISED
+  FAILED
+  RECONCILIATION_REQUIRED
+}
+
+enum PosShiftStatus {
+  OPEN
+  CLOSING
+  CLOSED
+}
+
+enum RestaurantTableStatus {
+  AVAILABLE
+  OCCUPIED
+  RESERVED
+  NEEDS_CLEANING
+}
+
+enum KitchenTicketStatus {
+  QUEUED
+  PREPARING
+  READY
+  COMPLETED
+  CANCELLED
+}
+
+model PosBranchSettings {
+  id                 String         @id @default(uuid())
+  companyId          String
+  company            Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branchId           String         @unique
+  branch             Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  defaultMode        PosMode        @default(RETAIL)
+  retailEnabled      Boolean        @default(true)
+  serviceEnabled     Boolean        @default(true)
+  restaurantEnabled  Boolean        @default(true)
+  taxInclusive       Boolean        @default(false)
+  allowCredit        Boolean        @default(false)
+  defaultWarehouseId String?
+  defaultWarehouse   Warehouse?     @relation(fields: [defaultWarehouseId], references: [id])
+  walkInCustomerId   String?
+  fiscalDeviceId     String?
+  fiscalDevice       FiscalDevice?  @relation(fields: [fiscalDeviceId], references: [id])
+  tipAccountCode     String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@index([companyId])
+}
+
+model PosTerminal {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id])
+  code      String
+  name      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  sales     PosSale[]
+
+  @@unique([companyId, code])
+  @@index([branchId])
+}
+
+model PosRegister {
+  id              String        @id @default(uuid())
+  companyId       String
+  company         Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branchId        String
+  branch          Branch        @relation(fields: [branchId], references: [id])
+  code            String
+  name            String
+  ledgerAccountId String?
+  ledgerAccount   LedgerAccount? @relation(fields: [ledgerAccountId], references: [id])
+  defaultMode     PosMode       @default(RETAIL)
+  active          Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  shifts          PosShift[]
+  sales           PosSale[]
+
+  @@unique([companyId, code])
+  @@index([branchId])
+}
+
+model PosShift {
+  id            String          @id @default(uuid())
+  companyId     String
+  company       Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  registerId    String
+  register      PosRegister     @relation(fields: [registerId], references: [id])
+  userId        String
+  user          User            @relation(fields: [userId], references: [id])
+  status        PosShiftStatus  @default(OPEN)
+  openingFloat  Decimal         @default(0) @db.Decimal(18, 2)
+  expectedCash  Decimal         @default(0) @db.Decimal(18, 2)
+  actualCash    Decimal?        @db.Decimal(18, 2)
+  variance      Decimal?        @db.Decimal(18, 2)
+  note          String?
+  openedAt      DateTime        @default(now())
+  closedAt      DateTime?
+  movements     PosCashMovement[]
+  sales         PosSale[]
+
+  @@index([companyId, status])
+  @@index([registerId, status])
+}
+
+model PosCashMovement {
+  id        String   @id @default(uuid())
+  shiftId   String
+  shift     PosShift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  kind      String
+  amount    Decimal  @db.Decimal(18, 2)
+  note      String?
+  createdById String?
+  createdAt DateTime @default(now())
+
+  @@index([shiftId])
+}
+
+model PosSale {
+  id                  String           @id @default(uuid())
+  companyId           String
+  company             Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branchId            String
+  branch              Branch           @relation(fields: [branchId], references: [id])
+  saleNo              String
+  idempotencyKey      String?
+  mode                PosMode
+  cartStatus          PosCartStatus    @default(ACTIVE)
+  orderStatus         PosOrderStatus   @default(OPEN)
+  saleStatus          PosSaleStatus    @default(DRAFT)
+  fiscalStatus        PosFiscalTrack   @default(NOT_REQUIRED)
+  customerId          String?
+  customer            Customer?        @relation(fields: [customerId], references: [id])
+  warehouseId         String?
+  warehouse           Warehouse?       @relation(fields: [warehouseId], references: [id])
+  registerId          String?
+  register            PosRegister?     @relation(fields: [registerId], references: [id])
+  shiftId             String?
+  shift               PosShift?        @relation(fields: [shiftId], references: [id])
+  terminalId          String?
+  terminal            PosTerminal?     @relation(fields: [terminalId], references: [id])
+  tableId             String?
+  table               RestaurantTable? @relation(fields: [tableId], references: [id])
+  orderType           String?
+  assignedEmployeeId  String?
+  assignedEmployee    Employee?        @relation(fields: [assignedEmployeeId], references: [id])
+  currency            String           @default("USD")
+  exchangeRate        Decimal          @default(1) @db.Decimal(18, 6)
+  subtotal            Decimal          @default(0) @db.Decimal(18, 2)
+  discountTotal       Decimal          @default(0) @db.Decimal(18, 2)
+  taxTotal            Decimal          @default(0) @db.Decimal(18, 2)
+  serviceCharge       Decimal          @default(0) @db.Decimal(18, 2)
+  tip                 Decimal          @default(0) @db.Decimal(18, 2)
+  total               Decimal          @default(0) @db.Decimal(18, 2)
+  invoiceId           String?          @unique
+  invoice             SalesInvoice?    @relation(fields: [invoiceId], references: [id])
+  completedAt         DateTime?
+  notes               String?
+  createdById         String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  lines               PosSaleLine[]
+  tenders             PosTender[]
+  tickets             KitchenTicket[]
+  returns             PosReturn[]
+
+  @@unique([companyId, saleNo])
+  @@unique([companyId, idempotencyKey])
+  @@index([companyId, branchId, saleStatus])
+  @@index([companyId, createdAt])
+}
+
+model PosSaleLine {
+  id          String   @id @default(uuid())
+  saleId      String
+  sale        PosSale  @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  itemId      String?
+  description String
+  sku         String?
+  quantity    Decimal  @db.Decimal(18, 4)
+  unitPrice   Decimal  @db.Decimal(18, 2)
+  discount    Decimal  @default(0) @db.Decimal(18, 2)
+  taxRate     Decimal  @default(0) @db.Decimal(8, 4)
+  taxAmount   Decimal  @default(0) @db.Decimal(18, 2)
+  lineTotal   Decimal  @db.Decimal(18, 2)
+  notes       String?
+  modifiers   Json?
+  voided      Boolean  @default(false)
+  sentAt      DateTime?
+  assignedEmployeeId String?
+  createdAt   DateTime @default(now())
+
+  @@index([saleId])
+  @@index([itemId])
+}
+
+model PosTender {
+  id           String          @id @default(uuid())
+  saleId       String
+  sale         PosSale         @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  method       String
+  kind         String          @default("PAYMENT")
+  amount       Decimal         @db.Decimal(18, 2)
+  changeAmount Decimal         @default(0) @db.Decimal(18, 2)
+  reference    String?
+  status       PosTenderStatus @default(PENDING)
+  receiptId    String?         @unique
+  createdAt    DateTime        @default(now())
+
+  @@index([saleId])
+}
+
+model PosReturn {
+  id           String          @id @default(uuid())
+  companyId    String
+  company      Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  saleId       String
+  sale         PosSale         @relation(fields: [saleId], references: [id])
+  returnNo     String
+  reason       String?
+  creditNoteId String?
+  status       String          @default("POSTED")
+  total        Decimal         @db.Decimal(18, 2)
+  taxTotal     Decimal         @default(0) @db.Decimal(18, 2)
+  refundMethod    String?
+  refundReference String?
+  refundAmount    Decimal       @default(0) @db.Decimal(18, 2)
+  fiscalStatus    String?
+  approvedById    String?
+  approvedAt      DateTime?
+  createdById  String?
+  createdAt    DateTime        @default(now())
+  lines        PosReturnLine[]
+
+  @@unique([companyId, returnNo])
+  @@index([saleId])
+}
+
+model PosReturnLine {
+  id          String    @id @default(uuid())
+  returnId    String
+  returnDoc   PosReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  saleLineId  String?
+  itemId      String?
+  description String
+  quantity    Decimal   @db.Decimal(18, 4)
+  amount      Decimal   @db.Decimal(18, 2)
+
+  @@index([returnId])
+}
+
+model DiningArea {
+  id        String            @id @default(uuid())
+  companyId String
+  company   Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branchId  String
+  branch    Branch            @relation(fields: [branchId], references: [id])
+  name      String
+  tables    RestaurantTable[]
+  createdAt DateTime          @default(now())
+
+  @@index([companyId, branchId])
+}
+
+model RestaurantTable {
+  id        String                @id @default(uuid())
+  companyId String
+  branchId  String
+  branch    Branch                @relation(fields: [branchId], references: [id])
+  areaId    String?
+  area      DiningArea?           @relation(fields: [areaId], references: [id])
+  code      String
+  name      String
+  capacity  Int                   @default(2)
+  status    RestaurantTableStatus @default(AVAILABLE)
+  sales     PosSale[]
+  createdAt DateTime              @default(now())
+
+  @@unique([branchId, code])
+  @@index([companyId])
+}
+
+model KitchenStation {
+  id        String          @id @default(uuid())
+  companyId String
+  company   Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branchId  String
+  name      String
+  tickets   KitchenTicket[]
+  createdAt DateTime        @default(now())
+
+  @@index([companyId, branchId])
+}
+
+model KitchenTicket {
+  id         String              @id @default(uuid())
+  saleId     String
+  sale       PosSale             @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  stationId  String?
+  station    KitchenStation?     @relation(fields: [stationId], references: [id])
+  status     KitchenTicketStatus @default(QUEUED)
+  note       String?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+  lines      KitchenTicketLine[]
+
+  @@index([saleId, status])
+}
+
+model KitchenTicketLine {
+  id          String        @id @default(uuid())
+  ticketId    String
+  ticket      KitchenTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Decimal       @db.Decimal(18, 4)
+  modifiers   Json?
+  notes       String?
+}
+
+model MenuModifierGroup {
+  id        String         @id @default(uuid())
+  companyId String
+  company   Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  itemId    String?
+  item      InventoryItem? @relation(fields: [itemId], references: [id])
+  name      String
+  required  Boolean        @default(false)
+  modifiers MenuModifier[]
+
+  @@index([companyId, itemId])
+}
+
+model MenuModifier {
+  id        String            @id @default(uuid())
+  groupId   String
+  group     MenuModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name      String
+  priceDelta Decimal          @default(0) @db.Decimal(18, 2)
+  itemId    String?
+
+  @@index([groupId])
+}
+
+model RecipeLine {
+  id              String        @id @default(uuid())
+  companyId       String
+  company         Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  parentItemId    String
+  parent          InventoryItem @relation("RecipeParent", fields: [parentItemId], references: [id])
+  componentItemId String
+  component       InventoryItem @relation("RecipeComponent", fields: [componentItemId], references: [id])
+  quantity        Decimal       @db.Decimal(18, 4)
+
+  @@unique([parentItemId, componentItemId])
+  @@index([companyId])
 }

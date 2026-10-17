@@ -11,10 +11,10 @@ import { StatusTag } from '@/components/crud-page';
 import { fmtDate, fmtMoney } from '@/lib/format';
 
 const quickLinks = [
-  { href: '/sales/quotations', label: 'Quotations', desc: 'Draft & convert quotes to orders', icon: <RiseOutlined />, color: '#0ea5e9' },
-  { href: '/sales/orders', label: 'Orders', desc: 'Confirmed sales orders pipeline', icon: <ShoppingCartOutlined />, color: '#8b5cf6' },
-  { href: '/sales/invoices', label: 'Invoices', desc: 'Issue and post sales invoices', icon: <FileDoneOutlined />, color: '#10b981' },
-  { href: '/sales/receipts', label: 'Receipts', desc: 'Record customer payments', icon: <DollarOutlined />, color: '#f59e0b' },
+  { href: '/sales/quotations', label: 'Quotations', desc: 'Draft & convert quotes to orders', icon: <RiseOutlined /> },
+  { href: '/sales/orders', label: 'Orders', desc: 'Confirmed sales orders pipeline', icon: <ShoppingCartOutlined /> },
+  { href: '/sales/invoices', label: 'Invoices', desc: 'Issue and post sales invoices', icon: <FileDoneOutlined /> },
+  { href: '/sales/receipts', label: 'Receipts', desc: 'Record customer payments', icon: <DollarOutlined /> },
 ];
 
 export default function SalesDashboard() {
@@ -42,10 +42,10 @@ export default function SalesDashboard() {
   return (
     <div className="nex-fade">
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-        <StatCard icon={<FileDoneOutlined />} label="Total invoiced" value={fmtMoney(totalInvoiced)} color="#003366" hint={`${invoices.data?.length || 0} invoices`} />
-        <StatCard icon={<DollarOutlined />} label="Collected" value={fmtMoney(totalReceived)} color="#10b981" hint={`${receipts.data?.length || 0} receipts`} />
-        <StatCard icon={<ShoppingCartOutlined />} label="Outstanding" value={fmtMoney(outstanding)} color="#f59e0b" hint="To be collected" />
-        <StatCard icon={<TeamOutlined />} label="Customers" value={customers.data?.length || 0} color="#0ea5e9" hint={`${openQuotes} draft quotes · ${confirmedOrders} confirmed orders`} />
+        <StatCard icon={<FileDoneOutlined />} label="Total invoiced" value={fmtMoney(totalInvoiced)} hint={`${invoices.data?.length || 0} invoices`} />
+        <StatCard icon={<DollarOutlined />} label="Collected" value={fmtMoney(totalReceived)} hint={`${receipts.data?.length || 0} receipts`} />
+        <StatCard icon={<ShoppingCartOutlined />} label="Outstanding" value={fmtMoney(outstanding)} hint="To be collected" />
+        <StatCard icon={<TeamOutlined />} label="Customers" value={customers.data?.length || 0} hint={`${openQuotes} draft quotes · ${confirmedOrders} confirmed orders`} />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-6">
@@ -80,7 +80,7 @@ export default function SalesDashboard() {
             <Link key={m.href} href={m.href}>
               <div className="nex-card nex-card-hover h-full">
                 <div className="flex items-center gap-4 px-5 py-3">
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-lg shrink-0" style={{ background: m.color, boxShadow: `0 6px 14px ${m.color}55` }}>{m.icon}</div>
+                  <div className="w-9 h-9 rounded-lg flex items-center justify-center text-[#003366] bg-[#eef3f9] text-[16px] shrink-0">{m.icon}</div>
                   <div className="min-w-0">
                     <div className="font-semibold text-[14px] text-[#171a2e] truncate">{m.label}</div>
                     <div className="text-[11px] text-[#a1a6c0] leading-tight mt-0.5">{m.desc}</div>

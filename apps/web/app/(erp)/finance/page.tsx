@@ -14,30 +14,30 @@ import { FinanceAccountSummaryDrawer } from '@/components/finance/finance-accoun
 import { fmtDate, fmtMoney } from '@/lib/format';
 
 const quickLinks = [
-  { href: '/finance', label: 'Dashboard', desc: 'Finance overview at a glance', icon: <DashboardOutlined />, color: '#003366' },
-  { href: '/finance/accounts', label: 'Chart of Accounts', desc: 'Account tree with live balances', icon: <SolutionOutlined />, color: '#0b4a8f' },
-  { href: '/finance/journals', label: 'Journal Entries', desc: 'Post and reverse manual journals', icon: <AccountBookOutlined />, color: '#0ea5e9' },
-  { href: '/finance/ledger', label: 'General Ledger', desc: 'Per-account history & running balance', icon: <FileTextOutlined />, color: '#10b981' },
-  { href: '/finance/trial-balance', label: 'Trial Balance', desc: 'Verify debits equal credits', icon: <AuditOutlined />, color: '#8b5cf6' },
-  { href: '/finance/reports?report=profit-loss', label: 'Profit & Loss', desc: 'Revenue and expenses by period', icon: <RiseOutlined />, color: '#16a34a' },
-  { href: '/finance/reports?report=balance-sheet', label: 'Balance Sheet', desc: 'Assets, liabilities and equity', icon: <BankOutlined />, color: '#0d9488' },
-  { href: '/finance/reports?report=cash-flow', label: 'Cash Flow', desc: 'Cash in and out over time', icon: <SwapOutlined />, color: '#7c3aed' },
-  { href: '/finance/ar-aging', label: 'A/R Aging', desc: 'Receivables outstanding by age', icon: <TeamOutlined />, color: '#f97316' },
-  { href: '/finance/ap-aging', label: 'A/P Aging', desc: 'Payables outstanding by age', icon: <ShopOutlined />, color: '#f59e0b' },
-  { href: '/finance/costing', label: 'Costing', desc: 'Inventory valuation and item costs', icon: <AppstoreOutlined />, color: '#0ea5e9' },
-  { href: '/finance/reconciliation', label: 'Bank Reconciliation', desc: 'Match ledger to bank statement', icon: <UndoOutlined />, color: '#f43f5e' },
-  { href: '/finance/budgets', label: 'Budgets', desc: 'Set account budgets by period', icon: <CalculatorOutlined />, color: '#0b4a8f' },
-  { href: '/finance/tax-rates', label: 'Tax Rates', desc: 'Sales tax / VAT rates used on documents', icon: <PercentageOutlined />, color: '#14b8a6' },
+  { href: '/finance', label: 'Dashboard', desc: 'Finance overview at a glance', icon: <DashboardOutlined /> },
+  { href: '/finance/accounts', label: 'Chart of Accounts', desc: 'Account tree with live balances', icon: <SolutionOutlined /> },
+  { href: '/finance/journals', label: 'Journal Entries', desc: 'Post and reverse manual journals', icon: <AccountBookOutlined /> },
+  { href: '/finance/ledger', label: 'General Ledger', desc: 'Per-account history & running balance', icon: <FileTextOutlined /> },
+  { href: '/finance/trial-balance', label: 'Trial Balance', desc: 'Verify debits equal credits', icon: <AuditOutlined /> },
+  { href: '/finance/reports?report=profit-loss', label: 'Profit & Loss', desc: 'Revenue and expenses by period', icon: <RiseOutlined /> },
+  { href: '/finance/reports?report=balance-sheet', label: 'Balance Sheet', desc: 'Assets, liabilities and equity', icon: <BankOutlined /> },
+  { href: '/finance/reports?report=cash-flow', label: 'Cash Flow', desc: 'Cash in and out over time', icon: <SwapOutlined /> },
+  { href: '/finance/ar-aging', label: 'A/R Aging', desc: 'Receivables outstanding by age', icon: <TeamOutlined /> },
+  { href: '/finance/ap-aging', label: 'A/P Aging', desc: 'Payables outstanding by age', icon: <ShopOutlined /> },
+  { href: '/finance/costing', label: 'Costing', desc: 'Inventory valuation and item costs', icon: <AppstoreOutlined /> },
+  { href: '/finance/reconciliation', label: 'Bank Reconciliation', desc: 'Match ledger to bank statement', icon: <UndoOutlined /> },
+  { href: '/finance/budgets', label: 'Budgets', desc: 'Set account budgets by period', icon: <CalculatorOutlined /> },
+  { href: '/finance/tax-rates', label: 'Tax Rates', desc: 'Sales tax / VAT rates used on documents', icon: <PercentageOutlined /> },
 ];
 
 const categoryCards = [
-  { key: 'bankAccounts', category: 'BANK', label: 'Bank accounts', sub: 'Cash & cash equivalents', icon: <BankOutlined />, color: '#2563eb' },
-  { key: 'accountsReceivable', category: 'AR', label: 'Accounts receivable', sub: 'Open customer balances', icon: <TeamOutlined />, color: '#0b4a8f' },
-  { key: 'accountsPayable', category: 'AP', label: 'Accounts payable', sub: 'Open supplier bills', icon: <ShopOutlined />, color: '#f97316' },
-  { key: 'creditCards', category: 'CREDIT_CARD', label: 'Credit cards', sub: 'Outstanding balances', icon: <CreditCardOutlined />, color: '#8b5cf6' },
-  { key: 'loans', category: 'LOAN', label: 'Loans', sub: 'Borrowings & debt', icon: <FileDoneOutlined />, color: '#0d9488' },
-  { key: 'revenue', category: 'REVENUE', label: 'Revenue', sub: 'Year-to-date income', icon: <RiseOutlined />, color: '#16a34a' },
-  { key: 'equity', category: 'EQUITY', label: 'Equity', sub: 'Equity & retained earnings', icon: <FundOutlined />, color: '#4f46e5' },
+  { key: 'bankAccounts', category: 'BANK', label: 'Bank accounts', sub: 'Cash & cash equivalents', icon: <BankOutlined /> },
+  { key: 'accountsReceivable', category: 'AR', label: 'Accounts receivable', sub: 'Open customer balances', icon: <TeamOutlined /> },
+  { key: 'accountsPayable', category: 'AP', label: 'Accounts payable', sub: 'Open supplier bills', icon: <ShopOutlined /> },
+  { key: 'creditCards', category: 'CREDIT_CARD', label: 'Credit cards', sub: 'Outstanding balances', icon: <CreditCardOutlined /> },
+  { key: 'loans', category: 'LOAN', label: 'Loans', sub: 'Borrowings & debt', icon: <FileDoneOutlined /> },
+  { key: 'revenue', category: 'REVENUE', label: 'Revenue', sub: 'Year-to-date income', icon: <RiseOutlined /> },
+  { key: 'equity', category: 'EQUITY', label: 'Equity', sub: 'Equity & retained earnings', icon: <FundOutlined /> },
 ];
 
 function plural(n: number, word: string) { return n === 1 ? `1 ${word}` : `${n} ${word}s`; }
@@ -62,7 +62,6 @@ function money(v: any) { return v == null ? '—' : fmtMoney(v); }
 function AccountCard({ item, data, loading, onOpen }: { item: (typeof categoryCards)[number]; data: any; loading: boolean; onOpen: () => void }) {
   const d = data?.[item.key];
   const value = Number(d?.value ?? 0);
-  const bgTone = `${item.color}1f`;
   return (
     <button
       type="button"
@@ -72,7 +71,7 @@ function AccountCard({ item, data, loading, onOpen }: { item: (typeof categoryCa
       style={{ width: '100%' }}
     >
       <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-[10px] flex items-center justify-center shrink-0" style={{ background: bgTone, color: item.color }}>{item.icon}</div>
+        <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 text-[#003366] bg-[#eef3f9]">{item.icon}</div>
         <div className="min-w-0">
           <div className="text-[13px] font-semibold text-[#667085] leading-tight truncate">{item.label}</div>
           <div className="text-[12px] text-[#98A2B3] leading-tight truncate mt-0.5">{item.sub}</div>
@@ -146,7 +145,7 @@ export default function FinanceDashboard() {
             <Link key={m.href} href={m.href}>
               <div className="nex-card nex-card-hover h-full p-5">
                 <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-lg shrink-0" style={{ background: m.color, boxShadow: `0 6px 14px ${m.color}55` }}>{m.icon}</div>
+                  <div className="w-9 h-9 rounded-lg flex items-center justify-center text-[#003366] bg-[#eef3f9] text-[16px] shrink-0">{m.icon}</div>
                   <div className="min-w-0">
                     <div className="font-semibold text-[14px] text-[#171a2e] truncate">{m.label}</div>
                     <div className="text-[11.5px] text-[#a1a6c0] leading-tight mt-0.5">{m.desc}</div>

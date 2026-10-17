@@ -6,10 +6,15 @@ import { ErpShell } from '@/components/erp-shell';
 
 function MinimalLoader() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#f5f6fa]">
-      <div className="flex flex-col items-center gap-3">
-        <span className="inline-block w-6 h-6 rounded-full border-[3px] border-[#003366] border-t-transparent animate-spin" />
-        <div className="text-[14px] font-semibold text-[#3c4263]">Loading workspace…</div>
+    <div className="min-h-screen flex bg-[#f5f6fa]" role="status" aria-live="polite">
+      <div className="hidden md:block w-[252px] shrink-0 bg-[#003366]" />
+      <div className="flex-1 p-6 md:p-8">
+        <div className="h-5 w-40 rounded bg-white mb-2" />
+        <div className="h-3 w-56 rounded bg-white/80 mb-6" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+          {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-[108px] rounded-xl bg-white" />)}
+        </div>
+        <span className="sr-only">Loading workspace</span>
       </div>
     </div>
   );
