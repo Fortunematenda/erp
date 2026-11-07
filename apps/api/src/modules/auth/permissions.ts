@@ -234,6 +234,7 @@ export const PERMISSIONS: PermissionDef[] = [
   { code: 'integrations.messaging.test', name: 'Test messaging (email/SMS)', module: 'integrations' },
   { code: 'integrations.queue.retry', name: 'Retry / discard queue jobs', module: 'integrations' },
   { code: 'integrations.webhooks.view', name: 'View webhook events', module: 'integrations' },
+  { code: 'integrations.api_keys.manage', name: 'Manage integration API keys', module: 'integrations' },
   { code: 'pos.access', name: 'Access point of sale', module: 'pos' },
   { code: 'pos.sell', name: 'Process POS sales', module: 'pos' },
   { code: 'pos.credit', name: 'Process POS credit sales', module: 'pos' },

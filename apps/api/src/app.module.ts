@@ -30,6 +30,7 @@ import { SettingsModule } from './modules/settings/settings.module';
 import { DocumentTemplateModule } from './modules/document-templates/document-template.module';
 import { DocumentTrailModule } from './modules/document-trail/document-trail.module';
 import { WorkspaceModule } from './modules/workspace/workspace.module';
+import { ExternalApiModule } from './modules/external-api/external-api.module';
 import { HealthController } from './health.controller';
-@Module({imports:[ConfigModule.forRoot({isGlobal:true}),PrismaModule,CommonModule,AuthModule,DashboardModule,CompanyModule,SalesModule,FinanceModule,InventoryModule,ProcurementModule,HrModule,PerformanceModule,CrmModule,AssetsModule,ComplianceModule,FiscalisationModule,PosModule,IntegrationsModule,AdminModule,PlatformModule,ProjectsModule,ApprovalsModule,ReportsModule,SystemModule,DocumentsModule,DeliveryModule,SettingsModule,DocumentTemplateModule,DocumentTrailModule,BankingModule,WorkspaceModule],controllers:[HealthController]})
+@Module({imports:[ConfigModule.forRoot({isGlobal:true}),PrismaModule,CommonModule,AuthModule,DashboardModule,CompanyModule,SalesModule,FinanceModule,InventoryModule,ProcurementModule,HrModule,PerformanceModule,CrmModule,AssetsModule,ComplianceModule,FiscalisationModule,PosModule,IntegrationsModule,AdminModule,PlatformModule,ProjectsModule,ApprovalsModule,ReportsModule,SystemModule,DocumentsModule,DeliveryModule,SettingsModule,DocumentTemplateModule,DocumentTrailModule,BankingModule,WorkspaceModule,ExternalApiModule],controllers:[HealthController]})
 export class AppModule {}

@@ -4501,6 +4501,40 @@ model WebhookEvent {
   @@index([companyId, status, receivedAt])
 }
 
+// Company-scoped keys for server-to-server integrations. Only the SHA-256 of the secret is stored.
+model ApiKey {
+  id          String    @id @default(uuid())
+  companyId   String
+  name        String
+  source      String // namespace for external IDs, e.g. "connis"
+  prefix      String    @unique
+  keyHash     String
+  scopes      String[]
+  createdById String
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([companyId, revokedAt])
+}
+
+// Maps an external system's record ID to a NexusERP record (customer, invoice, receipt).
+model ExternalLink {
+  id          String   @id @default(uuid())
+  companyId   String
+  source      String
+  entityType  String // CUSTOMER | INVOICE | RECEIPT
+  externalId  String
+  entityId    String?
+  requestHash String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([companyId, source, entityType, externalId])
+  @@index([companyId, entityType, entityId])
+}
+
 // Outbound messaging log (email / SMS) â€” DELIVERED only when the provider confirms.
 model MessageLog {
   id                String   @id @default(uuid())
